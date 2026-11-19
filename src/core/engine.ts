@@ -11,14 +11,14 @@ import { dedupeInheritedFindings } from './inherited-findings.js';
 import { dedupePermissionFindings } from './duplicate-findings.js';
 import { collectSkillInventory } from '../inventory/skills.js';
 import { MAX_SNIPPET, truncateSnippet } from './patterns.js';
-import { discoverMcpAssignment, type McpAssignment } from '../inventory/mcp.js';
+import { discoverMcpAssignment, withMcpInventory, type McpAssignment } from '../inventory/mcp.js';
 import { linkInventoryFindings } from '../inventory/findings.js';
 import { buildHostInventory, isEmptyHostInventory } from '../inventory/host.js';
 import { mapSourceEvidence } from '../mcp/source-locations.js';
 import { describeFetchFailure } from '../mcp/package-fetcher.js';
 import { extractToolDefinitions } from '../mcp/tool-baseline.js';
 import { credentialPathsFor } from '../adapters/adapter.js';
-import { captureConfigLoadErrors } from './config-loader.js';
+import { captureConfigLoadErrors, type ConfigLoadError } from './config-loader.js';
 import { parseErrorMessage } from './parse-error.js';
 import { fixBoundaryOf, markRefusedFix } from '../remediation/fix-refusal.js';
 
@@ -289,7 +289,7 @@ export class ScanEngine {
 
     // 2. Scan each agent
     const agentResults = await Promise.allSettled(
-      filtered.map(installation => this.scanAgent(installation, mcp.byInstallation.get(installation)))
+      filtered.map(installation => this.scanAgent(installation, mcp.byInstallation.get(installation), mcp.loadErrors?.get(installation)))
     );
 
     const agents: AgentScanResult[] = [];
@@ -323,11 +323,12 @@ export class ScanEngine {
     };
   }
 
-  private async scanAgent(installation: AgentInstallation, mcpServers?: McpServerItem[]): Promise<AgentScanResult> {
+  private async scanAgent(installation: AgentInstallation, mcpServers?: McpServerItem[], mcpLoadErrors: readonly ConfigLoadError[] = []): Promise<AgentScanResult> {
     // One walk per skills directory: the files the checks read, and the
     // inventory reports carry
     const { files: skillFiles, unlistableDirs: skillUnlistableDirs, inventory } = await collectSkillInventory(installation, this.fs);
-    installation.inventory = mcpServers ? { ...inventory, mcpServers } : inventory;
+    installation.inventory = inventory;
+    if (mcpServers) installation.inventory = withMcpInventory(installation, mcpServers, mcpLoadErrors);
 
     const adapter = this.adapters.getAdapter(installation.agent);
     const credentialPaths = credentialPathsFor(adapter, installation, this.fs);
@@ -355,7 +356,8 @@ export class ScanEngine {
     const uncapped = await markRefusedFixes(applicable, context, dedupePermissionFindings(settled.map((r, index) =>
       r.status === 'fulfilled' ? r.value : erroredResult(applicable[index], r.reason))));
     const displayName = adapter?.displayName ?? installation.agent;
-    for (const error of loadErrors) {
+    // …and so are MCP config files discovery found for it but couldn't read
+    for (const error of [...loadErrors, ...mcpLoadErrors]) {
       if (uncapped.some(r => r.id === 'CONFIG-LOAD' && r.evidence?.[0]?.file === error.filePath)) continue;
       uncapped.push(configLoadResult({ ...error, agent: installation.agent, displayName }));
     }

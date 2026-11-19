@@ -69,6 +69,8 @@ export class SnapshotFSProvider implements FSProvider {
     if (entry?.denied) throw deniedError(path);
     if (!entry || !entry.exists) {
       if (this.behindUnsearchable(path)) throw deniedError(path);
+      // A link (or a link above it) that leads back to itself: a local open fails with ELOOP
+      if (this.resolveSymlinksOrLoop(path) === undefined) throw loopError(path);
       throw new Error(`ENOENT: file not collected in snapshot: ${path}`);
     }
     if (entry.contentOmitted || typeof entry.content !== 'string') {
@@ -279,6 +281,11 @@ export class SnapshotFSProvider implements FSProvider {
    * met stay as they are (older snapshots have none).
    */
   private resolveSymlinks(path: string): string {
+    return this.resolveSymlinksOrLoop(path) ?? path; // a loop keeps the path
+  }
+
+  /** resolveSymlinks, or undefined when the links loop (more than 40 hops, like ELOOP). */
+  private resolveSymlinksOrLoop(path: string): string | undefined {
     const symlinks = this.snapshot.symlinks ?? {};
     let rest = posix.normalize(path).split('/').filter(Boolean);
     let current = '/';
@@ -291,7 +298,7 @@ export class SnapshotFSProvider implements FSProvider {
       const hit = Object.hasOwn(symlinks, next) ? { target: symlinks[next], key: next } : recordedUnder(symlinks, spelled, next);
       if (hit === undefined) { current = next; continue; }
       const { target, key } = hit;
-      if (++hops > 40) return path; // loop — give up like ELOOP, keep the path
+      if (++hops > 40) return undefined; // loop — give up like ELOOP
       const resolved = posix.normalize(posix.isAbsolute(target) ? target : posix.join(posix.dirname(next), target));
       // under the spelling the link was recorded by, so spellings compose
       spelled.push([resolved, key]);
@@ -682,6 +689,13 @@ function omittedError(path: string, reason: FileEntry['omitted']): Error & { omi
 }
 
 /** The error a local read of a path behind an unreadable directory raises. */
+function loopError(path: string): NodeJS.ErrnoException {
+  // Worded like Node's own error so local and remote reports match
+  const err: NodeJS.ErrnoException = new Error(`ELOOP: too many symbolic links encountered, open '${path}'`);
+  err.code = 'ELOOP';
+  return err;
+}
+
 function deniedError(path: string, syscall = 'open'): NodeJS.ErrnoException {
   // Worded like Node's own error so local and remote reports match
   const err: NodeJS.ErrnoException = new Error(`EACCES: permission denied, ${syscall} '${path}'`);

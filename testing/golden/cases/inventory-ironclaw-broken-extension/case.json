@@ -1,0 +1,23 @@
+{
+  "agent": "ironclaw",
+  "source": "IronClaw Reborn extension manifest that doesn't parse, beside a valid one and a stray file in extensions/: reported as CONFIG-LOAD and the MCP inventory marked incomplete, locally and from a snapshot; the stray file is no extension",
+  "modes": {
+    ".ironclaw/reborn/webui-token": "600",
+    ".ironclaw/reborn/providers.json": "600",
+    ".ironclaw/reborn/config.toml": "600",
+    ".ironclaw/reborn/local-dev/.reborn-local-dev-secrets-master-key": "600",
+    ".ironclaw/reborn/local-dev/reborn-local-dev.db": "600",
+    ".ironclaw": "700",
+    ".ironclaw/reborn": "700",
+    ".ironclaw/reborn/local-dev": "700"
+  },
+  "fail": {
+    "CONFIG-LOAD": "warning"
+  },
+  "inventory": {
+    "skills": [],
+    "mcpServers": [
+      "notion"
+    ]
+  }
+}

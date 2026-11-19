@@ -53,6 +53,8 @@ export interface MCPConfigLoadError {
   filePath: string;
   stage: 'read' | 'parse';
   message: string;
+  /** filePath is a directory that can't be listed (its configs go unread). */
+  directory?: boolean;
 }
 
 export interface MCPServerSource {

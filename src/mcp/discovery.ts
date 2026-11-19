@@ -1,7 +1,7 @@
 import { extname, join } from 'node:path';
 import { parseTomlSafe } from '../core/toml-safe.js';
 import type { MCPConfig, MCPConfigLoadError, MCPConfigScope, MCPServerEntry, MCPDiscoveryResult } from './types.js';
-import type { FSProvider } from '../core/fs-provider.js';
+import type { DirentInfo, FSProvider } from '../core/fs-provider.js';
 import { LocalFSProvider } from '../core/local-fs-provider.js';
 import { stripJsonc } from '../core/jsonc.js';
 import { claudeConfigPaths, claudeManagedMcpPath } from '../adapters/claude-code.js';
@@ -18,7 +18,7 @@ import { findNanoclawCheckouts } from '../adapters/nanoclaw.js';
 import { parseJsonLenient } from '../core/jsonc.js';
 import { parseYamlSafe } from '../core/yaml-safe.js';
 import { parseErrorMessage } from '../core/parse-error.js';
-import { captureConfigLoadErrors, recordConfigLoadFailure } from '../core/config-loader.js';
+import { captureConfigLoadErrors, recordConfigLoadFailure, recordListFailure, recordReadFailure } from '../core/config-loader.js';
 import { pathPresent } from '../adapters/load-if-present.js';
 import { applyOffLists } from './off-lists.js';
 import { hermesServerMap } from './disabled.js';
@@ -576,7 +576,7 @@ export class MCPDiscovery {
     // NanoClaw agent groups' container.json and IronClaw 1.x MCP extension
     // manifests: found by listing the installs, as their adapters find them
     const frameworks = await captureConfigLoadErrors(() => frameworkInstallConfigs(home, this.fs).catch(() => []));
-    for (const e of frameworks.loadErrors) loadErrors.push({ source: 'IronClaw', filePath: e.filePath, stage: e.stage, message: e.message });
+    for (const e of frameworks.loadErrors) loadErrors.push({ source: 'IronClaw', filePath: e.filePath, stage: e.stage, message: e.message, ...(e.directory ? { directory: true } : {}) });
     for (const config of frameworks.result) {
       const real = await Promise.resolve(this.fs.realpath?.(config.filePath)).catch(() => undefined) ?? config.filePath;
       if (seen.has(real)) continue;
@@ -771,11 +771,23 @@ export async function ironclawExtensionConfigs(rebornHome: string, fs: FSProvide
   const configs: MCPConfig[] = [];
   for (const sub of REBORN_STORAGE_SUBDIRS) {
     const extDir = join(rebornHome, sub, 'system', 'extensions');
-    let ids: string[];
+    let entries: DirentInfo[];
     try {
-      ids = await fs.readdir(extDir);
-    } catch {
+      entries = await fs.readdirEntries(extDir);
+    } catch (err) {
+      // Only a missing directory means "no extensions": one that can't be
+      // listed hides every manifest in it
+      await recordListFailure(extDir, fs, err);
       continue;
+    }
+    // Each extension is a directory (or a link to one); a stray file
+    // (.DS_Store) is not an extension. An entry a snapshot knows only by
+    // what was collected under it is looked into, like a directory.
+    const ids: string[] = [];
+    for (const e of entries) {
+      if (e.isFile) continue;
+      if (e.isSymbolicLink && !await Promise.resolve().then(() => fs.stat(join(extDir, e.name))).then(st => st.isDirectory(), () => false)) continue;
+      ids.push(e.name);
     }
     for (const id of ids.sort()) {
       const filePath = join(extDir, id, 'manifest.toml');
@@ -785,7 +797,8 @@ export async function ironclawExtensionConfigs(rebornHome: string, fs: FSProvide
       try {
         raw = await fs.readFile(filePath);
       } catch (err) {
-        recordConfigLoadFailure(filePath, 'read', err);
+        // ENOTDIR: the entry isn't a directory after all (a FIFO, a socket)
+        if ((err as NodeJS.ErrnoException | null)?.code !== 'ENOTDIR') await recordReadFailure(filePath, fs, err);
         continue;
       }
       let data: Record<string, unknown>;

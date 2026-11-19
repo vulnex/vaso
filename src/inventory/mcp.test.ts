@@ -6,7 +6,7 @@ import type { AgentInstallation, AgentType } from '../core/types.js';
 import type { MCPConfig } from '../mcp/types.js';
 import type { FSProvider } from '../core/fs-provider.js';
 import { LocalFSProvider } from '../core/local-fs-provider.js';
-import { assignMcpServers, attachMcpInventories, inventoriedAgents, mcpServerItem } from './mcp.js';
+import { assignMcpServers, attachMcpInventories, discoverMcpAssignment, inventoriedAgents, mcpServerItem } from './mcp.js';
 
 const HOME = '/home/u';
 const inventoried = new Set<AgentType>(['claude-code', 'copilot-cli', 'openclaw', 'devin', 'windsurf', 'cursor-cli']);
@@ -204,6 +204,26 @@ describe('attachMcpInventories', () => {
       url: 'https://mcp.notion.com/mcp',
       headerNames: ['authorization'],
     }]);
+  });
+
+  it('marks the list incomplete for an extension manifest it cannot read or parse', async () => {
+    const reborn = await mkdtemp(join(tmpdir(), 'vaso-mcpinv-icbad-'));
+    dirs.push(reborn);
+    const ext = join(reborn, 'local-dev', 'system', 'extensions');
+    await mkdir(join(ext, 'notion'), { recursive: true });
+    await mkdir(join(ext, 'broken'), { recursive: true });
+    await writeFile(join(ext, 'notion', 'manifest.toml'), 'id = "notion"\n\n[mcp]\nserver = "https://mcp.notion.com/mcp"\n');
+    await writeFile(join(ext, 'broken', 'manifest.toml'), '[mcp\nserver = "https://x"\n');
+    // installed outside the scanning user's home: listed from the install itself
+    const fs = Object.assign(Object.create(new LocalFSProvider()) as FSProvider, { homedir: () => '/nonexistent-home', getEnv: () => undefined });
+    const ic = inst('ironclaw', reborn);
+
+    const assignment = await discoverMcpAssignment([ic], fs);
+    expect(assignment.loadErrors?.get(ic)?.map(e => [e.filePath, e.stage])).toEqual([[join(ext, 'broken', 'manifest.toml'), 'parse']]);
+
+    await attachMcpInventories([ic], fs);
+    expect(ic.inventory?.mcpServers?.map(s => s.name)).toEqual(['notion']);
+    expect(ic.inventory?.incomplete).toEqual([`${join(ext, 'broken', 'manifest.toml')}: can't be parsed — its MCP server is not inventoried`]);
   });
 
   it('lists a NanoClaw checkout discovery also reads once', async () => {
