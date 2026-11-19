@@ -9,6 +9,7 @@ import { relEscapes } from './path-rel.js';
 import { CREDENTIAL_FILE_NAME, startsLikeProgram } from '../analyzers/credential-file-names.js';
 import { MAX_VENDOR_LOAD_DEPTH, MAX_VENDOR_LOADS, isLoadSource, isSkillAsset, loadCandidates, loadReferences, vendorReferencePaths } from './skill-tree-files.js';
 import { readCappedFile } from './file-limits.js';
+import { isAppleDouble } from '../analyzers/binary-text.js';
 
 export { relEscapes };
 import { LocalFSProvider } from './local-fs-provider.js';
@@ -216,6 +217,8 @@ export async function listSkillTree(dir: string, fs?: FSProvider, opts: { uncapp
       if (isExcludedPath(dir, entry.parentPath, { keepBuildOutput: true, skills })) continue;
       const fullPath = entry.parentPath ? join(entry.parentPath, entry.name) : join(dir, entry.name);
       const ext = extname(entry.name).toLowerCase();
+      // a macOS `._*` sidecar is Finder metadata, not a file of the skill
+      if (await isAppleDouble(provider, fullPath, entry.name)) continue;
       if (CODE_EXTENSIONS.has(ext) || BINARY_EXTENSIONS.has(ext)) {
         files.push(fullPath);
         codeFiles.push(fullPath);
