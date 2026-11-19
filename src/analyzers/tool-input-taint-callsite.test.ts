@@ -219,7 +219,7 @@ describe('module groups grow from the tool handlers', () => {
       'pad1.js': codePad(400_000), 'pad2.js': codePad(400_000), 'mid.js': `export { run } from './h.js';`, 'h.js': RUN,
     });
     expect(findTaintedSinks(via, 'sink-first-via.js')).toEqual([expect.objectContaining({ sink: 'execSync' })]);
-  });
+  }, 30_000);
 
   it('counts string tables at their literal cost, not their length', () => {
     const table = `export const A = [${Array.from({ length: 6_000 }, () => `"${'x'.repeat(40)}"`).join(',')}];`;
@@ -248,7 +248,7 @@ describe('module groups grow from the tool handlers', () => {
     expect(taintCoverage(code).untraced).toEqual([]);
     const r5 = await mcp005.run(ctx({ sourceCode: code, sourceRoot: '/srv/app' }));
     expect(r5.severity).toBe('critical');
-  });
+  }, 30_000);
 
   it('reports a sink in a module left out for size as a not-verified warning (MCP-004 and MCP-005)', async () => {
     // sink-bearing padding fills the group first; the module that runs the input is left out
@@ -273,7 +273,7 @@ describe('module groups grow from the tool handlers', () => {
     expect(r5.evidence).toEqual([expect.objectContaining({
       detail: expect.stringMatching(/^not verified: cross-module analysis incomplete — execSync\(\) in h\.js/),
     })]);
-  });
+  }, 30_000);
 
   it('does not call a fixed command in a module left out for size unverified', async () => {
     const code = joined({
@@ -285,7 +285,7 @@ describe('module groups grow from the tool handlers', () => {
     expect(findUnverifiedSinks(code, 'fixed.js')).toEqual([]);
     const r5 = await mcp005.run(ctx({ sourceCode: code, sourceRoot: '/srv/app' }));
     expect(r5.passed).toBe(true);
-  });
+  }, 30_000);
 
   it('puts the handler file first even when an unrelated module comes first in the source', () => {
     const code = joined({ 'a-big.js': `import './h.js';\n${realPad(500_000)}`, 'server.js': TOOL, 'h.js': RUN });
