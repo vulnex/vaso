@@ -177,6 +177,19 @@ describe('documentation links and key setup (regressions on a stock Hermes bundl
   });
 });
 
+describe('inventory hasCode', () => {
+  it('counts a script SKILL.md runs, or one starting with #!, whatever its name', async () => {
+    await put('h/SKILL.md', md('h', 'Run `python3 helper.txt`.'));
+    await put('h/helper.txt', 'import os\n');
+    await put('s/SKILL.md', md('s', 'x'));
+    await put('s/setup.conf', '#!/bin/sh\necho hi\n');
+    await put('d/SKILL.md', md('d', 'Read notes.txt.'));
+    await put('d/notes.txt', 'just notes\n');
+    const { inventory } = await collectSkillInventory(installation(dir), new LocalFSProvider());
+    expect(inventory.skills.map(s => [s.name, s.hasCode]).sort()).toEqual([['d', false], ['h', true], ['s', true]]);
+  });
+});
+
 describe('macOS AppleDouble sidecars', () => {
   it('a ._name file holding the AppleDouble magic is no skill file (it read as NUL-padded shellcode)', async () => {
     await put('s/SKILL.md', md('s', 'x'));

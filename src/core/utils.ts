@@ -7,7 +7,7 @@ import type { AgentInstallation } from './types.js';
 import { walkSkillTree } from './skill-walk.js';
 import { relEscapes } from './path-rel.js';
 import { CREDENTIAL_FILE_NAME, startsLikeProgram } from '../analyzers/credential-file-names.js';
-import { MAX_VENDOR_LOAD_DEPTH, MAX_VENDOR_LOADS, isLoadSource, isSkillAsset, loadCandidates, loadReferences, vendorReferencePaths } from './skill-tree-files.js';
+import { MAX_VENDOR_LOAD_DEPTH, MAX_VENDOR_LOADS, isLoadSource, isSkillAsset, loadCandidates, loadReferences, runReferences, vendorReferencePaths } from './skill-tree-files.js';
 import { readCappedFile } from './file-limits.js';
 import { isAppleDouble } from '../analyzers/binary-text.js';
 
@@ -167,8 +167,9 @@ export interface SkillTreeListing {
   /** The files skill/IOC checks read — see getSkillFiles. */
   files: string[];
   /** Those of `files` that are code: scripts and source by extension,
-   *  compiled helpers, extensionless executables and the vendor-folder files
-   *  a SKILL.md runs (inventory `hasCode`). */
+   *  compiled helpers, extensionless executables, files starting with `#!`,
+   *  files a SKILL.md runs through an interpreter and the vendor-folder files
+   *  a skill runs or loads (inventory `hasCode`). */
   codeFiles: string[];
   /** Folders inside vendor dirs a SKILL.md runs (`node node_modules/helper`):
    *  only the files it names are read, so SKL-002 reports them as not scanned. */
@@ -230,17 +231,29 @@ export async function listSkillTree(dir: string, fs?: FSProvider, opts: { uncapp
         continue;
       } else {
         files.push(fullPath);
-        if (ext === '' && await isExecutable(provider, fullPath)) codeFiles.push(fullPath);
+        // a script by its execute bit (extensionless: without one a `#!` line
+        // doesn't run it) or by its `#!` line under any other name
+        if (ext === '' ? await isExecutable(provider, fullPath) : !NO_SHEBANG_EXTENSIONS.has(ext) && await startsWithShebang(provider, fullPath)) {
+          codeFiles.push(fullPath);
+        }
       }
     }
     // Files a SKILL.md runs from a vendor folder the walk skips
     const listed = new Set(files);
+    const code = new Set(codeFiles);
     for (const skillMd of skillMds) {
       let text: string;
       try {
         text = await readCappedFile(provider, skillMd);
       } catch {
         continue;
+      }
+      // a file it runs through an interpreter is code, whatever its name (`python3 helper.txt`)
+      for (const [path] of runReferences(skillMd, text)) {
+        if (listed.has(path) && !code.has(path)) {
+          code.add(path);
+          codeFiles.push(path);
+        }
       }
       for (const path of vendorReferencePaths(dir, skillMd, text)) {
         if (listed.has(path) || !isExcludedPath(dir, dirname(path), { keepBuildOutput: true, skills })) continue;
@@ -401,6 +414,15 @@ async function unlistableSubdirs(fs: FSProvider, root: string, entries: DirentIn
     }
   }
   return [...out];
+}
+
+/** Documents and data a `#!` line isn't looked for in (inventory `hasCode`). */
+const NO_SHEBANG_EXTENSIONS = new Set(['.md', '.mdx', '.markdown', '.json', '.jsonl', '.yaml', '.yml', '.csv', '.tsv', '.lock', '.svg', '.html', '.htm', '.xml']);
+
+/** The file starts with `#!`: a script whatever its name. */
+async function startsWithShebang(fs: FSProvider, path: string): Promise<boolean> {
+  const head = await fs.readHead?.(path, 2).catch(() => undefined);
+  return head !== undefined && head[0] === 0x23 && head[1] === 0x21;
 }
 
 /** Any execute bit set — what makes an extensionless file a script or program. */

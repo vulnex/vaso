@@ -5,7 +5,7 @@ import { readCappedFile } from '../../core/file-limits.js';
 import { binaryFileFormat, sourceText } from '../../analyzers/binary-text.js';
 import { analyzeCode, type DataFlowResult } from '../../analyzers/ast-analyzer.js';
 import { analyzePythonDataFlow } from '../../analyzers/python-sinks.js';
-import { vendorReferencePaths } from '../../core/skill-tree-files.js';
+import { runReferences, shebangLang, vendorReferencePaths, type SkillLang } from '../../core/skill-tree-files.js';
 import { BinarySkillFile, skillFilesOf, skillsDirsOf } from './skill-files.js';
 
 /**
@@ -21,7 +21,8 @@ import { BinarySkillFile, skillFilesOf, skillsDirsOf } from './skill-files.js';
  *    only, as documentation.
  */
 
-export type SkillLang = 'js' | 'python' | 'shell' | 'ruby' | 'perl' | 'php' | 'powershell' | 'lua' | 'batch';
+export type { SkillLang };
+export { shebangLang };
 export type SkillFileKind = 'script' | 'markdown' | 'manifest' | 'data';
 
 /**
@@ -71,51 +72,6 @@ const MARKDOWN = /\.(?:md|mdx|markdown)$/i;
 
 export function isMarkdownFile(file: string): boolean {
   return MARKDOWN.test(file);
-}
-
-/** The interpreter a `#!` line names (`#!/usr/bin/env -S node --flag`, `#!/bin/bash`). */
-export function shebangLang(text: string): SkillLang | undefined {
-  const m = /^#!\s*(\S+)(?:[ \t]+(.*))?/.exec(text.slice(0, 512));
-  if (!m) return undefined;
-  let prog = basename(m[1]);
-  if (prog === 'env') {
-    const words = (m[2] ?? '').split(/\s+/).filter(w => w && !w.startsWith('-') && !/^\w+=/.test(w));
-    prog = words[0] ? basename(words[0]) : '';
-  }
-  return interpreterLang(prog);
-}
-
-function interpreterLang(prog: string): SkillLang | undefined {
-  if (/^(?:node(?:js)?|bun|deno|tsx|ts-node)$/.test(prog)) return 'js';
-  if (/^(?:python[\d.]*|pypy[\d.]*)$/.test(prog)) return 'python';
-  if (/^(?:ba|z|k|da|a|fi)?sh$|^source$|^\.$/.test(prog)) return 'shell';
-  if (prog === 'ruby') return 'ruby';
-  if (prog === 'perl') return 'perl';
-  if (/^php[\d.]*$/.test(prog)) return 'php';
-  if (/^lua[\d.]*$/.test(prog)) return 'lua';
-  if (/^(?:pwsh|powershell)$/i.test(prog)) return 'powershell';
-  return undefined;
-}
-
-/**
- * `<interpreter> [options] <relative path>` in a SKILL.md: what it runs and
- * with what (`node scripts/tool.data`, `python3 -u scripts/helper.txt`,
- * `uv run scripts/x.py`, `bun run x.ts`, `bash "${CLAUDE_SKILL_DIR}/scripts/run.bin"`
- * — Claude Code's variable for the skill's own folder).
- */
-const RUN_REFERENCE = /(?:^|[\s`'"(;&|$])((?:[\w./-]*\/)?(?:node(?:js)?|bun|deno|tsx|ts-node|python[\d.]*|pypy[\d.]*|bash|sh|zsh|ksh|dash|source|ruby|perl|php[\d.]*|lua[\d.]*|pwsh|powershell))(?:\s+(?:run|-[\w-]+(?:=\S*)?))*\s+["']?(?:\.\/|\$\{?CLAUDE_SKILL_DIR\}?\/)?((?:[\w.@+-]+\/)*[\w.@+-]+)/g;
-
-/** The skill files a SKILL.md runs through an interpreter, and the language it runs them as. */
-function runReferences(skillMd: string, text: string): Array<[string, SkillLang]> {
-  const out: Array<[string, SkillLang]> = [];
-  RUN_REFERENCE.lastIndex = 0;
-  for (let m = RUN_REFERENCE.exec(text); m; m = RUN_REFERENCE.exec(text)) {
-    const lang = interpreterLang(basename(m[1]));
-    const ref = m[2];
-    if (!lang || ref.split('/').some(s => s === '.' || s === '..')) continue;
-    out.push([normalize(join(dirname(skillMd), ...ref.split('/'))), lang]);
-  }
-  return out;
 }
 
 const isSkillMd = (file: string) => basename(file).toUpperCase() === 'SKILL.MD';
