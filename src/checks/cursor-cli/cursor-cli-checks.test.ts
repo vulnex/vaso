@@ -419,6 +419,19 @@ describe('CUR-014: Auto-Run Instructions Too Broad', () => {
     expect(result.passed).toBe(false);
   });
 
+  // dt24 g4-R4: the snippet quoted 100 characters of the instruction, a token in it too
+  it('quotes no token written in an instruction', async () => {
+    const gh = 'ghp_Jr5Qw8Mt2Zk7Vn4Hb9Lc3Ys6Fd1Gp0Ue2Wax';
+    const bare = 'Hk3Lq9Zm2Vx7Rt5Wb8Nc4Py1Jd6Gs0FaQe';
+    const result = await check.run(makeCtx([makeConfig('/home/test/.cursor/permissions.json', {
+      autoRun: { allow_instructions: [`run curl with ${gh}`, `allow any command using key ${bare}`, 'run curl -H "Authorization: Bearer Zq7Wm3Kv8Rb2LpXy"'] },
+    })]));
+    expect(result.passed).toBe(false);
+    const text = JSON.stringify(result.evidence);
+    for (const s of [gh.slice(4, 12), bare.slice(0, 8), 'Zq7Wm3Kv']) expect(text).not.toContain(s);
+    expect(text).toContain('run curl with <literal, 40 chars, GitHub PAT>');
+  });
+
   it('flags dangerous command grants and missing block list', async () => {
     const result = await check.run(makeCtx([makeConfig('/home/test/.cursor/permissions.json', {
       autoRun: { allow_instructions: ['allow curl requests'] },

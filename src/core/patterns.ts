@@ -342,6 +342,23 @@ export function redactSecretsInLine(line: string, maxLen = 80): string {
   return truncateSnippet(redactTokens(line).trim(), maxLen);
 }
 
+/** A bare run of 32+ token characters: a key with no prefix a pattern knows. */
+const BARE_TOKEN_RUN = /(?<![A-Za-z0-9+/=_-])[A-Za-z0-9+/=_-]{32,}(?![A-Za-z0-9+/=_-])/g;
+
+/**
+ * Prose a check quotes (an instruction, a description) with every token in
+ * it named by its shape: a recognised format, or a bare random run of 32+
+ * characters in all three classes (an AWS secret key) — words, paths and
+ * hex digests stay.
+ */
+export function redactProseSecrets(text: string, maxLen = 100): string {
+  const bare = redactTokens(text).replace(BARE_TOKEN_RUN, (t) => {
+    const classes = [/[a-z]/, /[A-Z]/, /[0-9]/].filter(re => re.test(t)).length;
+    return classes === 3 && shannonEntropy(t) >= 4 ? secretShape(t, 'high-entropy token') : t;
+  });
+  return truncateSnippet(bare.trim(), maxLen);
+}
+
 /**
  * redactSecretsInLine around the match at `index` (length `length`): in a
  * one-line (minified) file the line is the whole file, and a snippet from
