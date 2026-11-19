@@ -285,6 +285,7 @@ func (c *collector) statConfigPath(snapshot *ProbeSnapshot, raw string, src conf
 	} else if strings.HasPrefix(t, "~/") {
 		paths = append(paths, filepath.Join(src.home, t[2:]))
 	}
+	paths = append(paths, configPathsWithin(raw, src.home)...)
 	n := 0
 	for _, p := range paths {
 		if strings.ContainsRune(p, 0) {
@@ -297,6 +298,7 @@ func (c *collector) statConfigPath(snapshot *ProbeSnapshot, raw string, src conf
 			continue
 		}
 		c.collectPath(snapshot, p, p, true, false)
+		c.recordMissingTarget(snapshot, p)
 		n++
 	}
 	return n

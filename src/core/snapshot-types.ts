@@ -122,6 +122,9 @@ export interface ProbeSnapshot {
   symlinks?: Record<string, string>;
   /** Owner [uid, gid] of collected files and directories (probe ≥ 1.1.0). */
   owners?: Record<string, [number, number]>;
+  /** Owner [uid, gid] of the links in `symlinks` the probe recorded a chain
+   *  for, the link itself (lstat) — who can rename it (probe newer than 1.4.1). */
+  linkOwners?: Record<string, [number, number]>;
   /** User-private groups on the host, gid → uid (probe ≥ 1.1.0, Linux). */
   privateGroups?: Record<string, number>;
   /** Config-derived trees (probe newer than 1.4.1), by literal base path (a

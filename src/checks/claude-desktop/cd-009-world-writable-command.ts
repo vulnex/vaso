@@ -30,13 +30,14 @@ export const cd009 = defineCheck({
         // The command, or a script an interpreter command runs. A snapshot
         // without what it takes to judge a path: unknown, not safe
         for (const w of await writableLaunchPaths(ctx.fs, command, args, unverified, { config: config.filePath })) {
-          const { where, detail } = writableLaunchText(w);
+          const { where, detail, mitigated } = writableLaunchText(w);
           // Evidence on the file or directory itself, not the config (whose
           // own mode other checks report — a shared file would hide that finding)
           evidence.push({
             file: w.writable.kind === 'binary' ? w.path : w.writable.path,
             snippet: `mcpServers.${name}.${w.role === 'command' ? 'command' : 'args'} = ${w.path}${where}`,
             detail: `${detail} (set in ${config.filePath})`,
+            ...(mitigated ? { mitigated } : {}),
           });
         }
       }

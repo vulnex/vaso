@@ -90,7 +90,10 @@ type ProbeSnapshot struct {
 	// Owner [uid, gid] of collected files and directories, and the host's
 	// user-private groups (gid → uid), so group bits on 664 files in an
 	// owner-only group are not reported as exposure.
-	Owners        map[string][2]int `json:"owners,omitempty"`
+	Owners map[string][2]int `json:"owners,omitempty"`
+	// Owner of each link a chain was recorded for, the link itself (lstat):
+	// who can rename it in a sticky directory.
+	LinkOwners    map[string][2]int `json:"linkOwners,omitempty"`
 	PrivateGroups map[string]int    `json:"privateGroups,omitempty"`
 	// Config-derived trees (configRoots "tree"), by walk base (a path, or a
 	// pattern for a wildcard base such as <dir>/workspace-*/skills): whether
