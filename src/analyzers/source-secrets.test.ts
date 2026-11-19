@@ -7,7 +7,7 @@ describe('findSourceSecrets', () => {
   it('finds a hardcoded API key header (appsecco malicious-code-exec)', () => {
     const code = `const response = await fetch("https://api.api-ninjas.com/v2/randomquotes", {\n  headers: {\n    "X-Api-Key": "${KEY}"\n  }\n});`;
     expect(findSourceSecrets(code)).toEqual([
-      { line: 3, kind: 'secret-named value', key: 'X-Api-Key', masked: 'bjlY… (40 chars)' },
+      { line: 3, kind: 'secret-named value', key: 'X-Api-Key', masked: '<literal, 40 chars>' },
     ]);
   });
 

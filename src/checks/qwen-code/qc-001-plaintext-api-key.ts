@@ -1,6 +1,7 @@
 import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
 import { isKnownSecretValue, isSecretNamedValue } from '../../analyzers/secret-values.js';
+import { secretShape } from '../../core/patterns.js';
 
 // …or a name ending in KEY / PAT (MISTRAL_KEY, GITLAB_PAT)
 const SECRET_KEY_NAMES = /(?:api[_-]?key|token|secret|password|passwd|credential|auth|private[_-]?key|(?:^|[_-])(?:key|pat)$)/i;
@@ -24,7 +25,7 @@ function walkEnv(env: Record<string, unknown>, file: string, prefix: string, evi
     if (!isSecretValue(key, value)) continue;
     evidence.push({
       file,
-      snippet: `${prefix}${key}=${value.slice(0, 8)}…`,
+      snippet: `${prefix}${key}=${secretShape(value)}`,
       detail: 'Plaintext secret in Qwen settings — keys here are documented as lowest-priority fallback; prefer process env',
     });
   }
@@ -50,7 +51,7 @@ export const qc001 = defineCheck({
       if (auth && typeof auth === 'object' && typeof auth.apiKey === 'string' && isSecretValue('apiKey', auth.apiKey)) {
         evidence.push({
           file: config.filePath,
-          snippet: `security.auth.apiKey=${auth.apiKey.slice(0, 8)}…`,
+          snippet: `security.auth.apiKey=${secretShape(auth.apiKey)}`,
           detail: 'Inline API key in the deprecated security.auth.apiKey setting — use a modelProviders entry with envKey instead',
         });
       }
@@ -67,7 +68,7 @@ export const qc001 = defineCheck({
             if (typeof apiKey === 'string' && isSecretValue('apiKey', apiKey)) {
               evidence.push({
                 file: config.filePath,
-                snippet: `modelProviders.${provName}[${i}].apiKey=${apiKey.slice(0, 8)}…`,
+                snippet: `modelProviders.${provName}[${i}].apiKey=${secretShape(apiKey)}`,
                 detail: 'Inline apiKey in modelProviders entry — use envKey reference instead',
               });
             }

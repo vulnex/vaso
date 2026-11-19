@@ -1,6 +1,7 @@
 import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
 import { isKnownSecretValue, isSecretNamedValue } from '../../analyzers/secret-values.js';
+import { secretShape } from '../../core/patterns.js';
 
 // …or a name ending in KEY / PAT (MISTRAL_KEY, GITLAB_PAT)
 const SECRET_KEY_NAMES = /(?:api[_-]?key|token|secret|password|passwd|credential|auth|private[_-]?key|(?:^|[_-])(?:key|pat)$)/i;
@@ -24,7 +25,7 @@ function walkEnv(env: Record<string, unknown>, file: string, prefix: string, evi
     if (!isSecretValue(key, value)) continue;
     evidence.push({
       file,
-      snippet: `${prefix}${key}=${value.slice(0, 8)}…`,
+      snippet: `${prefix}${key}=${secretShape(value)}`,
       detail: 'Plaintext secret in Gemini settings — use $-references or external env',
     });
   }

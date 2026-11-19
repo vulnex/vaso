@@ -1,0 +1,52 @@
+package main
+
+import (
+	"bytes"
+	"strings"
+	"testing"
+)
+
+// dt24 g9: a quoted --header value kept its secret hidden but scrambled the
+// header's name; a dotenv value written 'a\'b' shipped what follows the \'.
+func TestScrubHeaderNamesAndDotenvEscapedQuote(t *testing.T) {
+	const tok = "Qw7rTy2uIo9pAs4dFg6hJk10"
+	for _, line := range []string{
+		`{"command":"curl --header 'X-Auth-Token: ` + tok + `' x"}`,
+		`{"command":"curl --header \"X-Api-Key: ` + tok + `\" x"}`,
+	} {
+		out := string((&collector{}).scrubSecrets("/h/.claude/settings.json", []byte(line)))
+		if strings.Contains(out, hiddenPart(tok)) {
+			t.Errorf("secret shipped: %s", out)
+		}
+		name := "X-Auth-Token: "
+		if strings.Contains(line, "X-Api-Key") {
+			name = "X-Api-Key: "
+		}
+		if !strings.Contains(out, name) {
+			t.Errorf("header name changed: %s", out)
+		}
+	}
+	doc := "SECRET_KEY='Ab3dEf9hIj\\'Kl8mNo7pQr'\nOTHER_KEY='Zx8cVb3nMq1w\\'Er5tYu7iOp2a' # note\n"
+	out := string((&collector{}).scrubSecrets("/h/.hermes/.env", []byte(doc)))
+	for _, s := range []string{"Kl8mNo7pQr", "Er5tYu7iOp2a"} {
+		if strings.Contains(out, s) {
+			t.Errorf("%s shipped:\n%s", s, out)
+		}
+	}
+	sameShape(t, doc, out)
+}
+
+func TestCommandOutputCapped(t *testing.T) {
+	b := newCappedBuffer(10)
+	for i := 0; i < 5; i++ {
+		if n, err := b.Write(bytes.Repeat([]byte("x"), 4)); n != 4 || err != nil {
+			t.Fatalf("write %d: %d, %v", i, n, err)
+		}
+	}
+	if got := b.String(); got != strings.Repeat("x", 10)+commandOutputTruncated {
+		t.Errorf("kept %q", got)
+	}
+	if got := newCappedBuffer(10); got.String() != "" {
+		t.Error("empty buffer")
+	}
+}

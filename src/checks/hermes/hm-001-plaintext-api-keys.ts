@@ -1,7 +1,7 @@
 import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
 import { shannonEntropy } from '../../analyzers/entropy.js';
-import { isEnvReference, isPlaceholderSecret } from '../../core/patterns.js';
+import { isEnvReference, isPlaceholderSecret, secretShape } from '../../core/patterns.js';
 import { hermesConfigAsWritten } from '../../adapters/hermes-config.js';
 
 const KEY_NAME_PATTERN = /(?:api[_-]?key|token|secret|password|credential|auth|bot[_-]?token)/i;
@@ -43,7 +43,7 @@ function walk(obj: unknown, file: string, path: string, evidence: Evidence[]): v
       if (looksSecret && isSecret(value)) {
         evidence.push({
           file,
-          snippet: `${here} = ${value.slice(0, 8)}…`,
+          snippet: `${here} = ${secretShape(value)}`,
           detail: 'Plaintext credential in Hermes config — move to .env or use ${ENV_VAR} reference',
         });
       }

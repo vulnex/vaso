@@ -1,6 +1,6 @@
 import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
-import { API_KEY_PATTERNS, isCredentialReference, isPlaceholderSecret } from '../../core/patterns.js';
+import { API_KEY_PATTERNS, isCredentialReference, isPlaceholderSecret, secretShape } from '../../core/patterns.js';
 import { shannonEntropy } from '../../analyzers/entropy.js';
 import { findSourceSecrets } from '../../analyzers/source-secrets.js';
 import { findArgSecrets, findUrlSecrets, findValueSecrets, headerSecret, type ConfigSecret } from '../../mcp/config-secrets.js';
@@ -44,7 +44,7 @@ export const mcp003 = defineCheck({
             if (pattern.test(value)) {
               evidence.push({
                 file: config.filePath,
-                snippet: `Server "${server.name}": ${key}=${value.slice(0, 8)}${'*'.repeat(Math.max(0, value.length - 8))}`,
+                snippet: `Server "${server.name}": ${key}=${secretShape(value)}`,
                 detail: `Plaintext ${name} in ${location}`,
               });
             }
@@ -64,7 +64,7 @@ export const mcp003 = defineCheck({
               if (!alreadyCaught) {
                 evidence.push({
                   file: config.filePath,
-                  snippet: `Server "${server.name}": ${key}=${value.slice(0, 8)}...`,
+                  snippet: `Server "${server.name}": ${key}=${secretShape(value)}`,
                   detail: `High-entropy value (${entropy.toFixed(1)} bits) in secret-named ${location === 'header' ? 'header' : 'env var'}`,
                 });
               }

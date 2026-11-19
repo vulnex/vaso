@@ -4,6 +4,7 @@ import { defineCheck } from '../../core/check-builder.js';
 import { accessibleByOthers, markUnreachable, queryPermissions } from '../../core/permissions.js';
 import { restrictFilesToOwner } from '../../remediation/config-writer.js';
 import { permissionFixTargets } from '../../remediation/fix-refusal.js';
+import { secretShape } from '../../core/patterns.js';
 
 const CREDENTIAL_FILE = 'credentials.json';
 
@@ -60,10 +61,9 @@ export const cfg020 = defineCheck({
 
           if (isApiKey || looksLikeKey) {
             hasPlaintextKey = true;
-            const redacted = value.slice(0, 8) + '...' + value.slice(-4);
-            evidence.push({
+                        evidence.push({
               file: credPath,
-              detail: `Plaintext key "${key}": ${redacted} (${value.length} chars) — legacy file; current NemoClaw keeps credentials in the OpenShell gateway and deletes it once onboarding migrates every key`,
+              detail: `Plaintext key "${key}": ${secretShape(value)} — legacy file; current NemoClaw keeps credentials in the OpenShell gateway and deletes it once onboarding migrates every key`,
             });
           }
         }

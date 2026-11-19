@@ -577,6 +577,19 @@ func TestNestedEscapedQuotedPairs(t *testing.T) {
 // is disguised as one without a leading zero: JSON and TOML reject 0100500,
 // and a config that stops parsing remotely hides every server in it.
 func TestDisguisedNumbersStayValidNumbers(t *testing.T) {
+	// Stand-ins are random: each value is drawn many times, so a shape one
+	// draw in a thousand breaks can't hide (dt24: when no arrangement kept
+	// every verdict, the last-resort draw took 31415.9e-3's "e" for a letter
+	// of a hex class and wrote 31415.9c-3)
+	values := []string{"300000", "48213579", "-730215", "7930721.714", "0.7342", "31415.9e-3", "98765.4321", "6.02e+23", "933336529534e11", "1E-7", "0.5e10"}
+	for _, v := range values {
+		for i := 0; i < 5000; i++ {
+			out := (&collector{}).disguiseKeyed("secret_value", v)
+			if !numberValue.MatchString(out) || !sameNumberLayout(v, out) {
+				t.Fatalf("draw %d: %s → %s, no longer the same number literal", i, v, out)
+			}
+		}
+	}
 	for i := 0; i < 200; i++ {
 		out := scrubFile(t, &collector{}, "/h/.claude.json",
 			`{"bridge": {"token_refresh_buffer_ms": 300000, "api_key_pin": 48213579, "secret_offset": -730215, "apiKey_float": 7930721.714, "token_ratio": 0.7342, "secret_exp": 31415.9e-3}, "mcpServers": {"s": {"command": "npx"}}}`)

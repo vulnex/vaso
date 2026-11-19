@@ -3859,7 +3859,7 @@ describe('MCP-003 hardcoded credentials in server source', () => {
       }],
     }));
     expect(result.passed).toBe(false);
-    expect(result.evidence?.[0]).toMatchObject({ file: '/srv/qotd/index.js', line: 1, snippet: 'X-Api-Key: bjlY… (40 chars)' });
+    expect(result.evidence?.[0]).toMatchObject({ file: '/srv/qotd/index.js', line: 1, snippet: 'X-Api-Key: <literal, 40 chars>' });
     expect(result.fixable).toBeFalsy();
   });
 });

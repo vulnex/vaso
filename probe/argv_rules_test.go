@@ -67,6 +67,15 @@ func TestArgvVerdictsInSnapshots(t *testing.T) {
 		}
 		in, _ := json.MarshalIndent(doc, "", "  ")
 		files := map[string]string{"/h/.claude/settings.json": string(in)}
+		if c.Argv == nil {
+			// as Claude Code writes it: an array of hook objects, compact
+			// (dt24: the object's strings were judged as one argv)
+			hooks := map[string]interface{}{"hooks": map[string]interface{}{"PostToolUse": []interface{}{
+				map[string]interface{}{"matcher": "Bash", "hooks": []interface{}{map[string]interface{}{"type": "command", "command": c.Command}}},
+			}}}
+			compact, _ := json.Marshal(hooks)
+			files["/h/p/.claude/settings.json"] = string(compact)
+		}
 		if c.Argv != nil {
 			// the same server in YAML (Hermes) and TOML (Codex)
 			q := func(v string) string { b, _ := json.Marshal(v); return string(b) }

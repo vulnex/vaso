@@ -234,6 +234,16 @@ export const OAUTH_TOKEN_VALUE_PATTERNS = [
   { pattern: /^ory_at_[a-zA-Z0-9_-]+/, name: 'Ory OAuth access token' },
 ];
 
+/**
+ * How evidence names a plaintext secret it found: its length, no character of
+ * it. A quoted prefix (`DB_PASSWORD=Tr0ub4do…`) gave away most of a short
+ * secret, and the report masker reads a trailing `…` as a placeholder
+ * (`sk-ant-…`), so it printed it in every format.
+ */
+export function secretShape(value: string): string {
+  return `<literal, ${value.length} chars>`;
+}
+
 export function redactSecret(token: string): string {
   if (token.length <= 12) return `[REDACTED:${token.length}c]`;
   return `${token.slice(0, 4)}...${token.slice(-4)}`;

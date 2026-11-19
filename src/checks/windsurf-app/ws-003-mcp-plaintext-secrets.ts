@@ -1,7 +1,7 @@
 import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
 import { shannonEntropy } from '../../analyzers/entropy.js';
-import { isEnvReference, isPlaceholderSecret } from '../../core/patterns.js';
+import { isEnvReference, isPlaceholderSecret, secretShape } from '../../core/patterns.js';
 import { findArgSecrets, findUrlSecrets } from '../../mcp/config-secrets.js';
 
 const SECRET_KEY_NAMES = /(?:key|token|secret|pass|api|auth|credential)/i;
@@ -61,7 +61,7 @@ function walkRecord(
     if (!isLiteralSecret(key, value)) continue;
     evidence.push({
       file,
-      snippet: `${prefix}${key}=${value.slice(0, 8)}…`,
+      snippet: `${prefix}${key}=${secretShape(value)}`,
       detail: 'Literal secret in Windsurf MCP config — use ${env:VAR} or ${file:/path} interpolation instead',
     });
   }

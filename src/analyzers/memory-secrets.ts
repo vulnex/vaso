@@ -1,5 +1,5 @@
 import type { Evidence, Severity } from '../core/types.js';
-import { API_KEY_PATTERNS, isPlaceholderSecret, isSecretReference } from '../core/patterns.js';
+import { API_KEY_PATTERNS, isPlaceholderSecret, isSecretReference, secretShape } from '../core/patterns.js';
 import { findHighEntropyBlocks } from './entropy.js';
 import { isCredentialValueName, isHashedValue, isKnownSecretValue, looksRandom } from './secret-values.js';
 
@@ -116,7 +116,7 @@ export function scanMemorySecrets(file: string, content: string, kind = 'memory 
       file,
       line: i + 1,
       // the value itself is never quoted
-      snippet: `${keyed.name}: ${v.slice(0, 4)}…${v.slice(-4)} (${v.length} chars)`,
+      snippet: `${keyed.name}: ${secretShape(v)}`,
       detail: `Plaintext value under "${keyed.name}" — looks like a credential (random, not a reference or placeholder)`,
     });
   }

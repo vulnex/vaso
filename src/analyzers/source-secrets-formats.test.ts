@@ -21,7 +21,7 @@ describe('findSourceSecrets — token formats beyond API_KEY_PATTERNS', () => {
     it(`finds a ${label}, masked`, () => {
       const found = findSourceSecrets(code);
       expect(found.map((f) => f.kind)).toContain(kind);
-      for (const f of found) expect(f.masked).toMatch(/^.{1,4}… \(\d+ chars\)$/);
+      for (const f of found) expect(f.masked).toMatch(/^<literal, \d+ chars>$/);
     });
   }
 

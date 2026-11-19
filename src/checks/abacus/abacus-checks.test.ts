@@ -358,7 +358,7 @@ describe('ABA-012 AGENTS.md secrets', () => {
     const fs = makeFs({ files: { '/work/app/AGENTS.md': '# Deploy\nDB_PASSWORD=Pq7Wz2Lk9Xv4Rt8Ns3Jm6Hb1\n' } });
     const r = await check('ABA-012').run(projectCtx([], fs));
     expect(r.passed).toBe(false);
-    expect(r.evidence?.[0].snippet).toBe('DB_PASSWORD: Pq7W…6Hb1 (24 chars)');
+    expect(r.evidence?.[0].snippet).toBe('DB_PASSWORD: <literal, 24 chars>');
   });
 });
 

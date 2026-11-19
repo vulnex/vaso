@@ -1,6 +1,6 @@
 import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
-import { API_KEY_PATTERNS, envReference, isPlaceholderSecret } from '../../core/patterns.js';
+import { API_KEY_PATTERNS, envReference, isPlaceholderSecret, secretShape } from '../../core/patterns.js';
 
 // Devin supports secret interpolation: ${env:VAR} and ${file:/path}, also
 // embedded in a larger value (`Bearer ${env:TOKEN}`). Whatever remains after
@@ -12,7 +12,7 @@ const SECRET_KEY_HINT = /(KEY|TOKEN|SECRET|PASS|API|AUTH)/i;
 const MIN_SECRET_LENGTH = 8;
 
 function mask(value: string): string {
-  return `${value.slice(0, 4)}…(${value.length} chars)`;
+  return secretShape(value);
 }
 
 /** The literal (non-interpolated) part of a value, or '' when fully interpolated. */

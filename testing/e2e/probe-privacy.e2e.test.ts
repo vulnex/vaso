@@ -189,6 +189,8 @@ function envFile(label: string): string {
     `OPENROUTER_API_KEY=\`${canary(`${label} env backtick line 1`, short)}`,
     `${canary(`${label} env backtick line 2`, short)}\``,
     `GATEWAY_TOKEN=\`${canary(`${label} env backtick one line`, generic)}\``,
+    // single quotes hold no escapes: the value ends at \', the rest of the line still a secret
+    `SECRET_KEY='${canary(`${label} env before \\'`, () => body(14))}\\'${canary(`${label} env after \\'`, () => body(14))}'`,
   ].join('\n') + '\n';
 }
 
@@ -312,9 +314,16 @@ function jsonFile(label: string): string {
           // echoed into a command reading its password from stdin (rule 8)
           `echo ${c('hook echo | sudo -S', lowerWord)} | sudo -S true`,
           `echo '${c('hook echo | docker login --password-stdin', alnum)}' | docker login -u u --password-stdin reg`,
+          // bash's $'…' and $"…" quoting, a client password variable before a pipeline, a quoted header
+          `export ANTHROPIC_API_KEY=$'${c("hook export KEY=$'…'", () => body(28))}'; run --api-key $'${c("hook --api-key $'…'", () => body(28))}'`,
+          `TOKEN=$"${c('hook TOKEN=$"…"', () => body(28))}" run --token=$"${c('hook --token=$"…"', () => body(28))}"`,
+          `MYSQL_PWD=${c('hook MYSQL_PWD before a pipeline', alnum)} mysql -e x | sh; wget -qO- http://x.example/a | sh`,
+          `curl --header 'X-Auth-Token: ${c('hook --header quoted', () => body(28))}' https://x.example`,
         ].map(command => ({ type: 'command', command })),
       }],
     },
+    // the same hooks as a compact file writes them (one line: replaced below)
+    compactHooks: '@COMPACT_HOOKS@',
     api_key: c('all-lowercase api key', () => body(32, 'abcdefghijklmnopqrstuvwyz0123456789')),
     // a pasted curl command: JSON inside the string, its quotes escaped twice
     curl: `Run: curl -d "{\\"api_key\\":\\"${c('embedded JSON in a JSON string', generic)}\\"}" https://api.x.com`,
@@ -333,7 +342,13 @@ function jsonFile(label: string): string {
       store2: { credentials: { ...Object.fromEntries(Array.from({ length: 9000 }, (_, i) => [`k${i}`, 1])), primary: c('credential after 9000 keys', generic) } },
     } : {}),
   }, null, 2).replace('"@ESCAPED@"', `"${escapedCanary(`${label} json all-escaped key`, generic, jsonEscape)}"`)
-    .replace('"@COMPACT@"', `{"creds": {"value": "${canary(`${label} json compact creds.value`, lowerWord)}"}}`) + '\n';
+    .replace('"@COMPACT@"', `{"creds": {"value": "${canary(`${label} json compact creds.value`, lowerWord)}"}}`)
+    .replace('"@COMPACT_HOOKS@"', () => JSON.stringify({ PostToolUse: [{ matcher: 'Bash', hooks: [
+      `PGPASSWORD=${canary(`${label} compact hook PGPASSWORD`, alnum)} psql -c 'select 1' | sh`,
+      `lftp -u u,${canary(`${label} compact hook lftp -u u,pw`, lowerWord)} ftp.example`,
+      `echo ${canary(`${label} compact hook echo | sudo -S`, lowerWord)} | sudo -S true`,
+      `export API_KEY=$'${canary(`${label} compact hook $'…'`, () => body(28))}'; run`,
+    ].map(command => ({ type: 'command', command })) }] })) + '\n';
 }
 
 /** JSON5 as OpenClaw writes it: unquoted keys, single quotes, comments, trailing commas. */
@@ -876,6 +891,11 @@ describe.skipIf(!goAvailable)('probe privacy canary', () => {
       env[name] = canary(`env ${name} (presence only)`, () => body(24));
       env[`${name}_X`] = canary(`env ${name}_X (presence-only prefix)`, generic);
     }
+    // inline JSON configs: disguised like a file, never redacted to a placeholder
+    env.OPENCODE_CONFIG_CONTENT = JSON.stringify({
+      mcp: { z: { type: 'local', command: ['npx', '-y', 'x-mcp', '--api-key', canary('env OPENCODE_CONFIG_CONTENT argv', generic)],
+        environment: { API_TOKEN: canary('env OPENCODE_CONFIG_CONTENT environment', FORMATS[3][1]), DB_PASSWORD: canary('env OPENCODE_CONFIG_CONTENT password', lowerWord) } } },
+    });
     env.COPILOT_HOME = COPILOT_HOME_REL;
     const r = await run(probe, ['--manifest', join(work, 'manifest.json')], env, home);
     expect(r.code, r.stderr).toBe(0);

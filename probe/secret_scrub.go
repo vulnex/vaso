@@ -1310,8 +1310,22 @@ func (c *collector) disguiseAs(v string, passphrase, keyed bool) string {
 	if pemArmor.MatchString(strings.Trim(core, "\"' \t")) {
 		return v
 	}
-	held := heldBytes(units, len(core))
 	pre, suf := keepBounds(len(core))
+	// a number, date or keyword scalar keeps the type it parses as
+	switch scalarKind(core) {
+	case scalarKept:
+		return v
+	case scalarNumber:
+		// its digits rearranged or drawn, nothing else moved; a plain JSON
+		// number no such stand-in judges alike (a weak run to move: 12345678)
+		// is arranged below, as a number still
+		if lead == "" && units == nil {
+			if out, ok := numberStandIn(core, pre, suf, verdictsOf(core)); ok || !numberValue.MatchString(core) {
+				return c.remember(v, out)
+			}
+		}
+	}
+	held := heldBytes(units, len(core))
 	if tokenFormats(core) != 0 {
 		if p := len(knownTokenPrefix.FindString(core)); p > pre && p < len(core)-suf {
 			pre = p
@@ -1333,7 +1347,7 @@ func (c *collector) disguiseAs(v string, passphrase, keyed bool) string {
 	// 0100500 and 06895.3274, so the whole config would stop parsing remotely
 	number := numberValue.MatchString(core)
 	fits := func(cand string) bool {
-		return verdictsOf(cand) == want && (!number || numberValue.MatchString(cand[len(lead):]))
+		return verdictsOf(cand) == want && (!number || numberValue.MatchString(cand[len(lead):]) && sameNumberLayout(core, cand[len(lead):]))
 	}
 	spans := [][2]int{{-1, -1}}
 	if want.weak {
@@ -1371,6 +1385,10 @@ func (c *collector) disguiseAs(v string, passphrase, keyed bool) string {
 		if cand := lead + head + randomLike(mid, midHeld) + tail; fits(cand) {
 			out = cand
 		}
+	}
+	if out == "" && number && lead == "" && units == nil {
+		// still a number, though some verdict differs
+		out, _ = numberStandIn(core, pre, suf, want)
 	}
 	if out == "" {
 		out = lead + head + randomLike(mid, midHeld) + tail
@@ -1649,10 +1667,10 @@ var (
 	// at whitespace, quotes and the punctuation that closes a structure. A
 	// quote may be escaped, at any depth: password=\"…\" inside a JSON
 	// string, \\\"api_key\\\":\\\"…\\\" in JSON embedded in one.
-	inlinePair = regexp.MustCompile(`(^|[^A-Za-z0-9_.$-])([A-Za-z_][A-Za-z0-9_.-]*)(\\*["'` + "`" + `]?[ \t]*[:=][ \t]*)(\\+["']|["'` + "`" + `]?)((?i:bearer|basic|token)[ \t]+)?((?:[^\s"'` + "`" + `<>{}\[\],;&\\]|\\/|\\u[0-9A-Fa-f]{4}|\\\\)+)`)
+	inlinePair = regexp.MustCompile(`(^|[^A-Za-z0-9_.$-])([A-Za-z_][A-Za-z0-9_.-]*)(\\*["'` + "`" + `]?[ \t]*[:=][ \t]*)(\$?\\+["']|\$["']|["'` + "`" + `]?)((?i:bearer|basic|token)[ \t]+)?((?:[^\s"'` + "`" + `<>{}\[\],;&\\]|\\/|\\u[0-9A-Fa-f]{4}|\\\\)+)`)
 	// the same in free text, where a name may be up to three words
 	// (Token del servidor: …, password for prod: …)
-	inlinePairProse = regexp.MustCompile(`(^|[^A-Za-z0-9_.$-])([A-Za-z_][A-Za-z0-9_.-]*(?:[ \t][A-Za-z][A-Za-z0-9_.-]*){0,2})(\\*["'` + "`" + `]?[ \t]*[:=][ \t]*)(\\+["']|["'` + "`" + `]?)((?i:bearer|basic|token)[ \t]+)?((?:[^\s"'` + "`" + `<>{}\[\],;&\\]|\\/|\\u[0-9A-Fa-f]{4}|\\\\)+)`)
+	inlinePairProse = regexp.MustCompile(`(^|[^A-Za-z0-9_.$-])([A-Za-z_][A-Za-z0-9_.-]*(?:[ \t][A-Za-z][A-Za-z0-9_.-]*){0,2})(\\*["'` + "`" + `]?[ \t]*[:=][ \t]*)(\$?\\+["']|\$["']|["'` + "`" + `]?)((?i:bearer|basic|token)[ \t]+)?((?:[^\s"'` + "`" + `<>{}\[\],;&\\]|\\/|\\u[0-9A-Fa-f]{4}|\\\\)+)`)
 	// | API_KEY | <value> | in a markdown table, **API key**: <value>
 	tableRow = regexp.MustCompile(`(?m)^([ \t]*\|[ \t]*(?:\*\*|` + "`" + `)?)([A-Za-z][A-Za-z0-9 _.-]{0,40}?)((?:\*\*|` + "`" + `)?[ \t]*\|[ \t]*` + "`" + `?)([^|` + "`" + `\s]+)(` + "`" + `?[ \t]*\|)`)
 	boldKey  = regexp.MustCompile(`\*\*([A-Za-z][A-Za-z0-9 _.-]{0,40}?)(:?\*\*[ \t]*:?[ \t]*` + "`" + `?)([^\s` + "`" + `]+)`)
@@ -1791,7 +1809,16 @@ func inlineSecrets(line string, prose bool, replace func(key, value string) (str
 		}
 		word := end
 		trigger := line[start:end]
+		// bash's $'…' and $"…" quote like '…' and "…" (in $'…' a backslash
+		// escapes the quote too)
+		ansiC := strings.HasPrefix(quote, "$")
+		quote = strings.TrimPrefix(quote, "$")
 		switch {
+		case ansiC && quote == "'":
+			if j := closingAnsiQuote(line, start); j >= 0 {
+				end = j
+				trigger = line[start:end]
+			}
 		case len(quote) >= 2:
 			// \"…\" inside a JSON string (\\\"…\\\" a level deeper): up to
 			// the same escaped quote, past deeper-escaped ones inside it
@@ -1864,6 +1891,21 @@ func closingEscapedQuote(line string, start int, quote string) int {
 		}
 		if j-k == n {
 			return k
+		}
+	}
+	return -1
+}
+
+// closingAnsiQuote returns the index of the ' closing a bash $'…' value that
+// starts at start (\' and \\ are escapes there), or -1 on this line.
+func closingAnsiQuote(line string, start int) int {
+	for i := start; i < len(line) && line[i] != '\n'; i++ {
+		if line[i] == '\\' {
+			i++
+			continue
+		}
+		if line[i] == '\'' {
+			return i
 		}
 	}
 	return -1
@@ -2167,7 +2209,7 @@ func (c *collector) scrubText(path, s string) string {
 				return m.text()
 			}
 			g := func(n int) string { v, _ := m.group(n); return v }
-			return g(1) + g(2) + g(3) + c.keyedValue(g(2), g(4)) + g(5)
+			return g(1) + g(2) + g(3) + c.dotenvEscapedTail(g(2), c.keyedValue(g(2), g(4))) + g(5)
 		})
 	}
 	if jsonish || yaml || toml || dotenv {
@@ -2303,6 +2345,8 @@ func (c *collector) scrubText(path, s string) string {
 	if jsonish || toml {
 		// an args array: the shared argv rules, its server's command in front
 		s = c.argvArrays(s, toml)
+		// a command line in a string value, on its own (compact JSON)
+		s = stringCommands(s, c.disguiseArgv)
 	}
 	if yaml {
 		s = c.yamlArgv(s)
@@ -2463,7 +2507,9 @@ func flagCredentials(s string, replace func(string) string) string {
 			if open != closing || !isSecretFlag(flag) || strings.HasPrefix(value, "-") || !credentialLike(value) && !passphraseLike(value) && !(strongCredentialFlag(flag) && plainCredential(value)) {
 				return m.text()
 			}
-			return m.with(4, 4, replace(value))
+			// --header 'X-Auth-Token: <value>': the header's name stays
+			out, _ := headerValue(value, replace)
+			return m.with(4, 4, out)
 		})
 	})
 	s = onSecretLines(s, append([]string{"-k"}, secretHints...), func(line string) string {

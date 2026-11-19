@@ -1,6 +1,7 @@
 import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
 import { isKnownSecretValue, isSecretNamedValue } from '../../analyzers/secret-values.js';
+import { secretShape } from '../../core/patterns.js';
 
 const SECRET_KEY_NAMES = /(?:api[_-]?key|token|secret|password|credential|auth)/i;
 
@@ -20,7 +21,7 @@ function walkEnv(env: Record<string, unknown>, file: string, prefix: string, evi
     if (!isSecretValue(key, value)) continue;
     evidence.push({
       file,
-      snippet: `${prefix}${key}=${value.slice(0, 6)}…`,
+      snippet: `${prefix}${key}=${secretShape(value)}`,
       detail: 'Plaintext secret stored in Claude Code config — use $-references or apiKeyHelper',
     });
   }
@@ -90,7 +91,7 @@ export const cc004 = defineCheck({
       if (inline) {
         evidence.push({
           file: config.filePath,
-          snippet: `apiKeyHelper=${inline[0].slice(0, 6)}…`,
+          snippet: `apiKeyHelper=${secretShape(inline[0])}`,
           detail: 'apiKeyHelper prints a key written into the command itself — it is plaintext in settings',
         });
       }

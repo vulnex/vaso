@@ -197,8 +197,10 @@ words:
 			break words
 		case clientPasswordVar.MatchString(t):
 			// MYSQL_PWD=<pw> mysql, PGPASSWORD=<pw> psql (rule 6)
+			// a value with whitespace in it is a script, not one password
+			// (`sh -c "PGPASSWORD=pw psql …"` is read word by word)
 			eq := strings.IndexByte(t, '=')
-			if passwordValue(t[eq+1:]) {
+			if v := t[eq+1:]; passwordValue(v) && !strings.ContainsAny(v, " \t\r\n") {
 				hits = append(hits, argvHit{i, eq + 1, len(t)})
 			}
 		case !strings.HasPrefix(t, "-"):
@@ -980,7 +982,14 @@ func argvArraySpans(s string, toml bool) [][2]int {
 	}
 	var spans [][2]int
 	for open, scope := range enclosingScopes(s, toml) {
-		items := containerStrings(s, open, toml)
+		// the array's own strings: those of an object inside it are values
+		// (hooks: [{command: "PGPASSWORD=… psql …"}]), not argv words
+		var items []containerString
+		for _, it := range containerStrings(s, open, toml) {
+			if it.key == "" && it.depth == 1 {
+				items = append(items, it)
+			}
+		}
 		if len(items) == 0 {
 			continue
 		}
@@ -1002,6 +1011,44 @@ func argvArraySpans(s string, toml bool) [][2]int {
 	}
 	sort.Slice(spans, func(i, j int) bool { return spans[i][0] < spans[j][0] })
 	return spans
+}
+
+// stringCommands applies replace (same length) to the credentials of the
+// command lines a JSON, JSON5 or TOML text holds as string values ("command":
+// "MYSQL_PWD=… mysql …"), each string judged as a line of its own. A
+// compact file is one line whose quotes run together, which the line rules
+// read as one word.
+func stringCommands(s string, replace func(string) string) string {
+	var b []byte
+	for _, q := range quotedStrings(s, 0) {
+		v := s[q.from:q.to]
+		if !strings.ContainsAny(v, " \t") || !hasArgvHint(v) {
+			continue
+		}
+		out := commandCredentials(v, replace)
+		if out == v || len(out) != len(v) {
+			continue
+		}
+		if b == nil {
+			b = []byte(s)
+		}
+		copy(b[q.from:q.to], out)
+	}
+	if b == nil {
+		return s
+	}
+	return string(b)
+}
+
+// hasArgvHint: v holds a word of argvHints (case-insensitive).
+func hasArgvHint(v string) bool {
+	lower := strings.ToLower(v)
+	for _, w := range argvHints {
+		if strings.Contains(lower, w) {
+			return true
+		}
+	}
+	return false
 }
 
 // argvArrays disguises the credentials argvArraySpans finds, in place.

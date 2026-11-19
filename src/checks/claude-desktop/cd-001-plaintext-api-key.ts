@@ -1,7 +1,7 @@
 import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
 import { shannonEntropy } from '../../analyzers/entropy.js';
-import { isEnvReference, isPlaceholderSecret } from '../../core/patterns.js';
+import { isEnvReference, isPlaceholderSecret, secretShape } from '../../core/patterns.js';
 
 const SECRET_KEY_NAMES = /(?:api[_-]?key|token|secret|password|credential|auth)/i;
 const KNOWN_KEY_PREFIXES = [
@@ -28,7 +28,7 @@ function walkEnv(env: Record<string, unknown>, file: string, prefix: string, evi
     if (!isSecretValue(value)) continue;
     evidence.push({
       file,
-      snippet: `${prefix}${key}=${value.slice(0, 6)}…`,
+      snippet: `${prefix}${key}=${secretShape(value)}`,
       detail: 'Plaintext secret stored in Claude Desktop config — every MCP server child process inherits this env',
     });
   }

@@ -60,7 +60,7 @@ describe('scanMemorySecrets', () => {
     const ev = scanMemorySecrets('/r/CLAUDE.md', `# notes\n${line}\n`);
     expect(ev).toHaveLength(1);
     expect(ev[0].line).toBe(2);
-    expect(ev[0].snippet).toBe(`${name}: ${value.slice(0, 4)}…${value.slice(-4)} (${value.length} chars)`);
+    expect(ev[0].snippet).toBe(`${name}: <literal, ${value.length} chars>`);
     expect(memorySecretSeverity(ev)).toBe('warning');
   });
 
@@ -91,7 +91,7 @@ describe('scanMemorySecrets', () => {
     for (const [line, len] of [['signing_secret: "L1mHoOsFaQfDPr;AJ71fTquWoGsbe"', 29], ['signing_secret: "KXgzg2sye9b2Ra nn76dEyTzAeKOm"', 29], ["token: 'Ab3De5Fg7Hj9Kl1Mn3Pq'", 20]] as const) {
       const ev = scanMemorySecrets('/r/CLAUDE.md', line);
       expect(ev).toHaveLength(1);
-      expect(ev[0].snippet).toMatch(new RegExp(`\\(${len} chars\\)$`));
+      expect(ev[0].snippet).toMatch(new RegExp(`<literal, ${len} chars>$`));
     }
   });
 
