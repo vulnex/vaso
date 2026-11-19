@@ -3056,8 +3056,14 @@ describe('Python MCP server source', () => {
         '',
       ].join('\n')),
     };
-    expect((await mcp005.run(makeContext({ mcpServerSources: [confined] }))).passed).toBe(true);
-    expect((await mcp009.run(makeContext({ mcpServerSources: [confined] }))).passed).toBe(true);
+    // a helper that is never called confines nothing
+    expect((await mcp005.run(makeContext({ mcpServerSources: [confined] }))).passed).toBe(false);
+    const used: MCPServerSource = {
+      ...confined,
+      sourceCode: confined.sourceCode!.replace(/Path\(path\)/g, 'safe(path)').replace('os.listdir(path)', 'os.listdir(safe(path))'),
+    };
+    expect((await mcp005.run(makeContext({ mcpServerSources: [used] }))).passed).toBe(true);
+    expect((await mcp009.run(makeContext({ mcpServerSources: [used] }))).passed).toBe(true);
   });
 });
 

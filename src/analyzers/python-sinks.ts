@@ -552,6 +552,14 @@ function aliasRewriter(code: string): (text: string, line?: number) => string {
     for (const [name, target] of last) if (target) addCall(name, target);
     for (const { name, target } of localImports) if (!last.has(name)) addCall(name, target);
   }
+  // Paths and file openers imported under another name: `from pathlib import Path as P`
+  // reads as `Path(`, `from aiofiles import open as aopen` as `aiofiles.open(`
+  for (const m of code.matchAll(/^[ \t]*from[ \t]+(pathlib|aiofiles|io|codecs)[ \t]+import[ \t]+\(?([^\n#)]+)/gm)) {
+    for (const part of m[2].split(',')) {
+      const im = /^\s*(\w+)\s+as\s+(\w+)\s*$/.exec(part);
+      if (im && im[1] !== im[2]) addCall(im[2], m[1] === 'pathlib' ? im[1] : `${m[1]}.${im[1]}`);
+    }
+  }
   // Names bound by assignment at any indent: a module (`sp = importlib.import_module("subprocess")`),
   // a sink function (`runner = subprocess.run`, `run = getattr(subprocess, "r" + "un")`,
   // `_ev = getattr(builtins, "eval")`, `b = a` with `a` one, `b = a = os.system`,
@@ -826,6 +834,8 @@ interface PyFunction {
   start: number; // index into statements
   end: number;
   tool: boolean;
+  /** Every parameter by position (`self`/`cls` dropped), for matching call arguments. */
+  positional: string[];
 }
 
 const TOOL_DECORATOR = /^\s*@\s*[\w.]*\b(?:tool|call_tool)\b/;
@@ -842,11 +852,13 @@ function functionsOf(stmts: Array<CodeLine & { last: number }>): PyFunction[] {
     let tool = false;
     for (let d = i - 1; d >= 0 && /^\s*@/.test(stmts[d].text); d--) if (TOOL_DECORATOR.test(stmts[d].text)) tool = true;
     // A bool/int/float parameter can't carry a command or code.
-    const params = topLevelParts(paramText)
+    const parts = topLevelParts(paramText);
+    const params = parts
       .filter((p) => !/:\s*(?:bool|int|float)\b/.test(p) && !/=\s*(?:True|False|-?\d+(?:\.\d+)?)\s*$/.test(p))
       .map((p) => /^\s*\**([A-Za-z_]\w*)/.exec(p)?.[1])
       .filter((p): p is string => !!p && p !== 'self' && p !== 'cls' && p !== 'ctx');
-    fns.push({ name: def[2], params, start: i, end, tool });
+    const positional = parts.map((p) => /^\s*([A-Za-z_]\w*)/.exec(p)?.[1] ?? '').filter((p) => p !== 'self' && p !== 'cls');
+    fns.push({ name: def[2], params, start: i, end, tool, positional });
   }
   return fns;
 }
@@ -912,7 +924,10 @@ function dataPart(expr: string): string {
     const dot = m[1].lastIndexOf('.');
     const method = dot === -1 ? m[1] : m[1].slice(dot + 1);
     const receiver = dot === -1 ? '' : m[1].slice(0, dot);
-    const keep = PASSTHROUGH_CALLS.test(m[1]) || PASSTHROUGH_CALLS.test(method);
+    // `"".join(c for c in name if c.isalnum())`: a filtered comprehension
+    // keeps only what passes the filter — not the argument's text
+    const filtered = method === 'join' && /\bfor\b[\s\S]*\bin\b[\s\S]*\bif\b/.test(args);
+    const keep = !filtered && (PASSTHROUGH_CALLS.test(m[1]) || PASSTHROUGH_CALLS.test(method));
     out = out.slice(0, m.index) + ` ${receiver} ${keep ? args : ''} ` + out.slice(open + args.length + 2);
   }
   return out;
@@ -965,21 +980,130 @@ function taintedNames(stmts: Array<CodeLine & { last: number }>, fns: PyFunction
 }
 
 /**
- * Evidence that the file confines caller paths to a base directory: a
- * resolved path (`resolve()`, `realpath`, `abspath`) checked against a base
- * (`is_relative_to`, `relative_to`, `commonpath`, `startswith(<base>)`), or
- * two resolved paths compared. A `startswith("http")` on a literal confines
- * nothing.
+ * A resolved path tested against a base (`is_relative_to`, `relative_to`,
+ * `commonpath`, `startswith(<base>)`), or two resolved paths compared. A
+ * `startswith("http")` on a literal confines nothing.
  */
 const PATH_CONFINES = /\.(?:is_relative_to|relative_to)\s*\(|\bcommon(?:path|prefix)\s*\(|\.startswith\s*\(\s*(?![rRbBuUfF]{0,2}["'])|\b(?:realpath|abspath)\s*\([^\n]*\)\s*(?:==|!=)|(?:==|!=)\s*(?:os\.path\.)?(?:realpath|abspath)\s*\(/;
-function confinesPythonPaths(code: string): boolean {
-  return RESOLVES.test(code) && PATH_CONFINES.test(code);
+const RESOLVED_COMPARE = /\b(?:realpath|abspath)\s*\([^\n]*\)\s*(?:==|!=)|(?:==|!=)\s*(?:os\.path\.)?(?:realpath|abspath)\s*\(/;
+/** A value that is a resolved path: `os.path.realpath(…)`, `os.path.abspath(…)`, `(BASE / name).resolve()`. */
+const RESOLVED_VALUE = /^\s*(?:(?:os\.path|posixpath)\.)?(?:realpath|abspath)\s*\([\s\S]*\)\s*$|\.resolve\s*\([^()]*\)\s*$/;
+const IDENTIFIERS = /(?<![\w.])[A-Za-z_]\w*/g;
+const identifiersOf = (text: string): string[] => [...text.matchAll(IDENTIFIERS)].map((m) => m[0]);
+
+/** Names a check resolves itself: the arguments of `realpath(…)`/`abspath(…)`, the receiver of `.resolve()`. */
+function resolvedInside(region: string): string[] {
+  const out: string[] = [];
+  for (const m of region.matchAll(/\b(?:realpath|abspath)\s*\(|\.resolve\s*\(/g)) {
+    if (m[0].startsWith('.')) {
+      const start = receiverStart(region, m.index);
+      if (start !== undefined) out.push(...identifiersOf(region.slice(start, m.index)));
+    } else {
+      out.push(...identifiersOf(callArgs(region, m.index + m[0].length - 1)));
+    }
+  }
+  return out;
+}
+
+/**
+ * The names a check statement confines: the resolved path a base test is
+ * made on (`p.is_relative_to(BASE)` with `p` resolved,
+ * `os.path.realpath(full).startswith(ROOT)`, `os.path.commonpath([full, BASE])`,
+ * `os.path.dirname(full) != os.path.realpath(ROOT)`). An unresolved path
+ * (`path.startswith(ROOT)`) is confined by none of them: `ROOT/../etc` passes.
+ */
+function confinedByCheck(text: string, resolved: ReadonlySet<string>): string[] {
+  const code = blankStrings(text);
+  if (!PATH_CONFINES.test(code)) return [];
+  const out: string[] = [];
+  const take = (region: string): void => {
+    for (const n of identifiersOf(region)) if (resolved.has(n)) out.push(n);
+    out.push(...resolvedInside(region));
+  };
+  for (const m of code.matchAll(/\.(startswith|is_relative_to|relative_to)\s*\(\s*/g)) {
+    if (m[1] === 'startswith' && /^[rRbBuUfF]{0,2}["']/.test(code.slice(m.index + m[0].length))) continue;
+    const start = receiverStart(code, m.index);
+    if (start !== undefined) take(code.slice(start, m.index));
+  }
+  for (const m of code.matchAll(/\bcommon(?:path|prefix)\s*\(/g)) take(callArgs(code, m.index + m[0].length - 1));
+  if (RESOLVED_COMPARE.test(code)) take(code);
+  return out;
+}
+
+/**
+ * Where, in each function, a name is first confined to a base directory (a
+ * statement index): resolved and then tested against a base, or passed to a
+ * same-file helper that does that with the parameter it lands in. Judged per
+ * function and per name — an `os.path.abspath(…)` in one place and a
+ * `startswith(prefix)` in another confine nothing.
+ */
+function confinedNamesByFunction(stmts: Array<CodeLine & { last: number }>, fns: PyFunction[],
+  rewrite: (t: string, line?: number) => string): Map<PyFunction, Map<string, number>> {
+  const direct = new Map<PyFunction, Map<string, number>>();
+  // the parameters each local name comes from: `full = realpath(join(BASE, p))` from `p`
+  const derived = new Map<PyFunction, Map<string, Set<string>>>();
+  const texts: Array<string | undefined> = new Array(stmts.length);
+  const textAt = (i: number): string => (texts[i] ??= rewrite(stmts[i].text, stmts[i].line));
+  for (const fn of fns) {
+    const confined = new Map<string, number>();
+    const resolved = new Set<string>();
+    const from = new Map<string, Set<string>>(fn.positional.filter(Boolean).map((p) => [p, new Set([p])]));
+    for (let i = fn.start + 1; i < fn.end; i++) {
+      const text = textAt(i);
+      for (const n of confinedByCheck(text, resolved)) if (!confined.has(n)) confined.set(n, i);
+      const assign = /^\s*([A-Za-z_]\w*)\s*(?::[^=]+)?=(?!=)\s*([\s\S]+)$/.exec(text);
+      if (!assign) continue;
+      const [, name, rhs] = assign;
+      if (RESOLVED_VALUE.test(blankStrings(rhs))) resolved.add(name);
+      else resolved.delete(name);
+      const data = dataPart(rhs);
+      const roots = new Set<string>();
+      for (const [n, r] of from) if (mentions(data, n)) for (const x of r) roots.add(x);
+      if (roots.size > 0) from.set(name, roots);
+      else from.delete(name);
+    }
+    direct.set(fn, confined);
+    derived.set(fn, from);
+  }
+  // helpers that confine a parameter: the argument positions they confine, by name
+  const helpers = new Map<string, Set<number>>();
+  for (const fn of fns) {
+    const from = derived.get(fn)!;
+    const positions = new Set<number>();
+    fn.positional.forEach((p, idx) => {
+      if (!p) return;
+      for (const c of direct.get(fn)!.keys()) if (c === p || from.get(c)?.has(p)) positions.add(idx);
+    });
+    if (positions.size > 0) helpers.set(fn.name, positions);
+  }
+  if (helpers.size === 0) return direct;
+  for (const fn of fns) {
+    const confined = direct.get(fn)!;
+    for (let i = fn.start + 1; i < fn.end; i++) {
+      const text = textAt(i);
+      for (const call of text.matchAll(/(?<![\w.])(?:self\.)?(\w+)\s*\(/g)) {
+        const positions = helpers.get(call[1]);
+        if (!positions || call[1] === fn.name) continue;
+        const args = topLevelParts(callArgs(text, call.index + call[0].length - 1));
+        for (const idx of positions) {
+          for (const n of identifiersOf(args[idx] ?? '')) if ((confined.get(n) ?? Infinity) > i) confined.set(n, i);
+        }
+      }
+    }
+  }
+  return direct;
+}
+
+/** Whether a name (derived as `chain`, e.g. `full ← path`) was confined before statement `at`. */
+function confinedBefore(confined: Map<string, number> | undefined, name: string, chain: string | undefined, at: number): boolean {
+  if (!confined || confined.size === 0) return false;
+  return (chain ? chain.split(' ← ') : [name]).some((n) => (confined.get(n) ?? Infinity) < at);
 }
 
 type FileOp = 'read' | 'write' | 'meta';
 /** Module-level file calls by what they do with their path argument(s). `open` reads or writes by its mode. */
 const PY_FS_FUNCS = new Map<string, { op: FileOp | 'open'; paths: number }>([
-  ...['open', 'io.open', 'codecs.open', 'aiofiles.open'].map((n) => [n, { op: 'open' as const, paths: 1 }] as const),
+  ...['open', 'io.open', 'codecs.open', 'aiofiles.open', 'os.open'].map((n) => [n, { op: 'open' as const, paths: 1 }] as const),
   ...['os.remove', 'os.unlink', 'os.rmdir', 'os.removedirs', 'os.makedirs', 'os.mkdir', 'os.chmod', 'os.truncate', 'shutil.rmtree']
     .map((n) => [n, { op: 'write' as const, paths: 1 }] as const),
   ...['os.rename', 'os.replace', 'os.symlink', 'os.link', 'shutil.copy', 'shutil.copy2', 'shutil.copyfile', 'shutil.copytree', 'shutil.move']
@@ -1007,16 +1131,22 @@ const writesMode = (mode: string | undefined): boolean => mode !== undefined && 
 /** Where the receiver expression ending right before `code[dot]` starts (`Path(p)`, `(ROOT / name)`, `self.p`). */
 function receiverStart(code: string, dot: number): number | undefined {
   let i = dot;
-  if (code[i - 1] === ')' || code[i - 1] === ']') {
-    let depth = 0;
-    for (i = dot - 1; i >= 0; i--) {
-      const c = code[i];
-      if (c === ')' || c === ']') depth++;
-      else if ((c === '(' || c === '[') && --depth === 0) break;
+  // a method chain (`Path(p).expanduser().read_text`): back over each call in turn
+  for (let hop = 0; hop < 8; hop++) {
+    if (code[i - 1] === ')' || code[i - 1] === ']') {
+      let depth = 0;
+      const end = i;
+      for (i = end - 1; i >= 0; i--) {
+        const c = code[i];
+        if (c === ')' || c === ']') depth++;
+        else if ((c === '(' || c === '[') && --depth === 0) break;
+      }
+      if (i < 0) return undefined;
     }
-    if (i < 0) return undefined;
+    const at = i;
+    while (i > 0 && /[\w.]/.test(code[i - 1])) i--;
+    if (!(code[i] === '.' && i < at && (code[i - 1] === ')' || code[i - 1] === ']'))) break;
   }
-  while (i > 0 && /[\w.]/.test(code[i - 1])) i--;
   return i < dot ? i : undefined;
 }
 
@@ -1029,7 +1159,10 @@ function pythonFileCalls(text: string, pathNames: Set<string>): Array<{ sink: st
     const spec = PY_FS_FUNCS.get(sink);
     if (!spec) continue;
     const { positional, keywords } = splitArgs(callArgs(text, m.index + m[0].length - 1));
-    const op = spec.op === 'open' ? (writesMode(positional[1] ?? keywords.get('mode')) ? 'write' : 'read') : spec.op;
+    // `os.open(path, flags)` writes by its flags, the others by their mode
+    const writes = sink === 'os.open' ? /\bO_(?:WRONLY|RDWR|CREAT|TRUNC|APPEND)\b/.test(positional[1] ?? keywords.get('flags') ?? '')
+      : writesMode(positional[1] ?? keywords.get('mode'));
+    const op = spec.op === 'open' ? (writes ? 'write' : 'read') : spec.op;
     const paths = positional.slice(0, spec.paths);
     for (const kw of PATH_KEYWORDS) if (keywords.has(kw)) paths.push(keywords.get(kw)!);
     out.push({ sink, op, paths });
@@ -1066,7 +1199,11 @@ export function analyzePythonSinks(code: string): PythonSinkFinding[] {
   const lineText = new Map(lines.map((l) => [l.line, l.text]));
   const stmtOfLine = new Map<number, number>();
   stmts.forEach((s, i) => { for (let l = s.line; l <= s.last; l++) if (!stmtOfLine.has(l)) stmtOfLine.set(l, i); });
+  // Module-level code: any containment in the file counts; in a function,
+  // only a check on the same name, before the use (`confinedNamesByFunction`)
   const confined = RESOLVES.test(code) && CONFINES.test(code);
+  const confinedIn = RESOLVES.test(code) && PATH_CONFINES.test(blankStrings(code))
+    ? confinedNamesByFunction(stmts, fns, rewrite) : new Map<PyFunction, Map<string, number>>();
   const touchesFiles = FILE_OPS.test(code);
   const pathNames = new Set<string>();
   if (touchesFiles) for (const m of code.matchAll(PATH_BINDING)) pathNames.add(m[1]);
@@ -1103,7 +1240,7 @@ export function analyzePythonSinks(code: string): PythonSinkFinding[] {
       }
     }
 
-    if (!confined && touchesFiles) {
+    if (touchesFiles) {
       const expr = PATH_JOIN_INPUT.exec(text)?.[1] ?? pathlibJoin(text, pathNames);
       const joined = expr?.split('.').pop() ?? '';
       // The name suggests input; whether it is: a parameter (a helper's
@@ -1113,9 +1250,14 @@ export function analyzePythonSinks(code: string): PythonSinkFinding[] {
       const fnHere = si >= 0 ? fnAt(si) : undefined;
       const root = expr?.split('.')[0] ?? '';
       const fromInput = expr && (!fnHere || fnHere.params.includes(root) || root === 'self' || tainted.get(fnHere)?.has(root) === true);
-      if (expr && INPUT_PATH_NAME.test(joined) && fromInput) {
+      const target = expr && si >= 0 ? /^\s*([A-Za-z_]\w*)\s*(?::[^=]+)?=(?!=)/.exec(stmts[si].text)?.[1] : undefined;
+      // Confined when the joined path is checked afterwards (`full = realpath(join(BASE, name))`
+      // then `full.startswith(BASE)`), or the name joined was checked before
+      const joinConfined = !fnHere ? confined
+        : (target !== undefined && confinedIn.get(fnHere)?.has(target) === true)
+          || confinedBefore(confinedIn.get(fnHere), root, tainted.get(fnHere)?.get(root), si);
+      if (expr && INPUT_PATH_NAME.test(joined) && fromInput && !joinConfined) {
         joinLines.add(line);
-        const target = si >= 0 ? /^\s*([A-Za-z_]\w*)\s*(?::[^=]+)?=(?!=)/.exec(stmts[si].text)?.[1] : undefined;
         if (target) joinedNames.add(`${fnHere?.start ?? -1}:${target}`);
         findings.push({
           kind: 'injection',
@@ -1199,8 +1341,8 @@ export function analyzePythonSinks(code: string): PythonSinkFinding[] {
   });
 
   // Statement-level: a file read, written or listed at a path tool input
-  // names, with nothing in the file confining paths to a base directory
-  if (!confinesPythonPaths(code)) {
+  // names, unless that path was confined to a base directory before the call
+  {
     const pathBound = new Set(pathNames);
     if (!touchesFiles) for (const m of code.matchAll(PATH_BINDING)) pathBound.add(m[1]);
     stmts.forEach((stmt, i) => {
@@ -1210,7 +1352,9 @@ export function analyzePythonSinks(code: string): PythonSinkFinding[] {
       for (let l = stmt.line; l <= stmt.last; l++) if (joinLines.has(l)) return;
       const text = rewrite(stmt.text, stmt.line);
       for (const call of pythonFileCalls(text, pathBound)) {
-        const from = call.paths.map((p) => dataPart(p)).flatMap((p) => [...names.keys()].filter((n) => mentions(p, n)))[0];
+        const confinedHere = confinedIn.get(fn);
+        const from = call.paths.map((p) => dataPart(p)).flatMap((p) => [...names.keys()].filter((n) => mentions(p, n)))
+          .find((n) => !confinedBefore(confinedHere, n, names.get(n), i));
         if (from === undefined) continue;
         // Derived from a path already reported at its join
         const chain = names.get(from)!.split(' ← ');
