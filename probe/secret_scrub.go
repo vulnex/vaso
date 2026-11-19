@@ -1310,8 +1310,21 @@ func (c *collector) disguiseAs(v string, passphrase, keyed bool) string {
 	if pemArmor.MatchString(strings.Trim(core, "\"' \t")) {
 		return v
 	}
-	held := heldBytes(units, len(core))
 	pre, suf := keepBounds(len(core))
+	// a number, date or keyword scalar keeps the type it parses as
+	switch scalarKind(core) {
+	case scalarKept:
+		return v
+	case scalarNumber:
+		// a plain JSON number is arranged below (its entropy exact, a weak
+		// run moved), as a number still; a hex, octal, binary or underscored
+		// one, or one with a sign or a bare dot, has its digits drawn here
+		if lead == "" && units == nil && !numberValue.MatchString(core) {
+			out, _ := numberStandIn(core, pre, suf, verdictsOf(core))
+			return c.remember(v, out)
+		}
+	}
+	held := heldBytes(units, len(core))
 	if tokenFormats(core) != 0 {
 		if p := len(knownTokenPrefix.FindString(core)); p > pre && p < len(core)-suf {
 			pre = p
@@ -1333,7 +1346,7 @@ func (c *collector) disguiseAs(v string, passphrase, keyed bool) string {
 	// 0100500 and 06895.3274, so the whole config would stop parsing remotely
 	number := numberValue.MatchString(core)
 	fits := func(cand string) bool {
-		return verdictsOf(cand) == want && (!number || numberValue.MatchString(cand[len(lead):]))
+		return verdictsOf(cand) == want && (!number || numberValue.MatchString(cand[len(lead):]) && sameNumberLayout(core, cand[len(lead):]))
 	}
 	spans := [][2]int{{-1, -1}}
 	if want.weak {
@@ -1371,6 +1384,10 @@ func (c *collector) disguiseAs(v string, passphrase, keyed bool) string {
 		if cand := lead + head + randomLike(mid, midHeld) + tail; fits(cand) {
 			out = cand
 		}
+	}
+	if out == "" && number && lead == "" && units == nil {
+		// still a number, though some verdict differs
+		out, _ = numberStandIn(core, pre, suf, want)
 	}
 	if out == "" {
 		out = lead + head + randomLike(mid, midHeld) + tail
