@@ -406,6 +406,9 @@ func Collect(manifest ProbeManifest, escalate bool) ProbeSnapshot {
 	var expandedGlobs []glob
 	for _, raw := range manifest.GlobPatterns {
 		for _, p := range expandPaths([]string{raw}, homes) {
+			if envGlobRefused(raw, p) {
+				continue
+			}
 			expandedGlobs = append(expandedGlobs, glob{p, isSkillPattern(raw)})
 		}
 	}
@@ -416,7 +419,15 @@ func Collect(manifest ProbeManifest, escalate bool) ProbeSnapshot {
 	c.inSkillTree = false
 
 	// Metadata-only globs: existence + mode, never content
-	for _, pattern := range expandPaths(manifest.MetadataGlobPatterns, homes) {
+	var metadataGlobs []string
+	for _, raw := range manifest.MetadataGlobPatterns {
+		for _, p := range expandPaths([]string{raw}, homes) {
+			if !envGlobRefused(raw, p) {
+				metadataGlobs = append(metadataGlobs, p)
+			}
+		}
+	}
+	for _, pattern := range metadataGlobs {
 		// The links that take a store folder where it leads, every hop
 		// (session-state → ~/hop → elsewhere): the CLI resolves it as locally
 		if base := globBase(pattern); filepath.IsAbs(base) {
