@@ -667,7 +667,7 @@ function maskText(input: string): string {
   // a JWT (`eyJ…`) needs none of [:=@-] around it
   if (!/[:=@-]/.test(input) && !input.includes('eyJ') && !BARE_TOKEN_HINT.test(input)) return input;
   // the argv rules on the commands in the text, words assembled as the shell does
-  const text = maskCodeFallbacks(maskCommandCredentials(input));
+  const text = maskCodeFallbacks(maskCommandCredentials(maskEscapedAuthHeaders(input)));
   const pem = text.includes('-----BEGIN') ? text.replace(PEM_BODY, MASK) : text;
   const jwt = pem.includes('eyJ') ? pem.replace(JWT, MASK) : pem;
   const bare = BARE_TOKEN_HINT.test(jwt)
@@ -734,7 +734,15 @@ export function maskCredentialsInLine(raw: string): string {
   return withoutLabel(raw, maskLine);
 }
 
-function maskLine(raw: string): string {
+/** `Authorization:\\ Bearer\\ <token>`: a header in a shell word, its spaces escaped (probe/argv_rules.go escapedAuthHeader). */
+const ESCAPED_AUTH_HEADER = /(authorization:(?:\\+[ \t])+(?:bearer|basic|token)(?:\\+[ \t])+)([^\s"'\\]+)/gi;
+
+function maskEscapedAuthHeaders(text: string): string {
+  return text.includes('\\') ? text.replace(ESCAPED_AUTH_HEADER, (m, head: string, value: string) => (keepValue(value) ? m : `${head}${MASK}`)) : text;
+}
+
+function maskLine(input: string): string {
+  const raw = maskEscapedAuthHeaders(input);
   // JSON escaped inside a string or a shell argument (`{\"apiKey\":\"…\"}`)
   const unescaped = raw.includes('\\') ? raw.replace(ESCAPED_JSON_PAIR, (m, q1: string, name: string, q2: string, value: string, q3: string) =>
     (isSecretName(name) && !keepValue(value) ? `${q1}${name}${q2}${MASK}${q3}` : m)) : raw;

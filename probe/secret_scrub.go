@@ -2360,6 +2360,7 @@ func (c *collector) scrubText(path, s string) string {
 		s = c.yamlFlowArgv(s)
 	}
 	s = flagCredentials(s, c.disguiseArgv)
+	s = c.disguiseEscapedAuthHeaders(s)
 	s = urlPassword.ReplaceAllStringFunc(s, func(m string) string {
 		g := urlPassword.FindStringSubmatch(m)
 		return g[1] + c.disguiseURLPassword(g[2]) + "@"
