@@ -78,3 +78,30 @@ func TestEnvJSONCConfigDisguised(t *testing.T) {
 		t.Errorf("broken JSON shipped: %s", got)
 	}
 }
+
+// dt24 g9-S2: a value opening with a comment ("// …\n{…}", "/* … */ {…}")
+// is JSONC to the CLI too; it was redacted whole (CFG-002 passed remotely)
+// and a random string inside the block comment shipped as written.
+func TestEnvJSONCLeadingComment(t *testing.T) {
+	const token, inComment = "Zq7Wm3Kv8Rb2LpXyT4nQ", "Qp8Lm2Xv7Rt4Kw9Zb3Nc6Hd5"
+	doc := `{"mcp":{"z":{"environment":{"API_TOKEN":"` + token + `"}}},"share":"auto"}`
+	for _, val := range []string{
+		"// the token\n" + doc,
+		"  /* " + inComment + " */ " + doc,
+		"/* a */ // b\n" + doc,
+	} {
+		got := redactEnvValue("OPENCODE_CONFIG_CONTENT", val)
+		if strings.Contains(got, redactedEnvValue) || strings.Contains(got, hiddenPart(token)) || strings.Contains(got, inComment[4:]) {
+			t.Errorf("%q → %s", val, got)
+			continue
+		}
+		var m map[string]interface{}
+		if err := json.Unmarshal([]byte(got), &m); err != nil || m["share"] != "auto" {
+			t.Errorf("not the config as JSON: %s", got)
+		}
+	}
+	// a path is no comment
+	if got := redactEnvValue("SOME_DIR", "/srv/app"); got != "/srv/app" {
+		t.Errorf("path changed: %s", got)
+	}
+}

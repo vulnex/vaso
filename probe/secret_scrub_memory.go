@@ -52,18 +52,38 @@ func memoryEntropyStrings(line string) []string {
 	return out
 }
 
+// memoryAddressHead is what stays of a URL or a path the memory rule flags:
+// its scheme and host, or its leading / or ~/.
+var memoryAddressHead = regexp.MustCompile(`^(?:[A-Za-z][A-Za-z0-9+.-]*://[^/?#\s]*|~?/)`)
+
+// disguiseMemoryAddress is the stand-in of a flagged string the stand-in
+// rules keep whole (a URL, a path — dt24 g9-S3: the CLI flags those too):
+// after its head, its letters and digits laid out anew with the counts they
+// had (arrangeLike), so the entropy the check computes is the same number;
+// punctuation stays where it is.
+func disguiseMemoryAddress(v string) string {
+	head := memoryAddressHead.FindString(v)
+	for try := 0; try < 16; try++ {
+		if out := head + arrangeLike("", head, v[len(head):], nil, false); out != v {
+			return out
+		}
+	}
+	return v
+}
+
 // disguiseMemoryEntropy replaces each string memoryEntropyStrings finds with
 // its stand-in (same length, classes and entropy band: the check reports it
-// alike). A URL or a path is left (the stand-in rules keep those whole).
+// alike) — a URL or a path too, whose head stays (disguiseMemoryAddress).
 func (c *collector) disguiseMemoryEntropy(s string) string {
 	lines := strings.Split(s, "\n")
 	changed := false
 	for i, line := range lines {
 		for _, v := range memoryEntropyStrings(line) {
-			if strings.Contains(v, "://") || strings.HasPrefix(v, "/") || strings.HasPrefix(v, "~/") {
-				continue
+			d := c.disguise(v)
+			if d == v {
+				d = disguiseMemoryAddress(v)
 			}
-			if d := c.disguise(v); d != v {
+			if d != v {
 				lines[i] = strings.ReplaceAll(lines[i], v, d)
 				changed = true
 			}

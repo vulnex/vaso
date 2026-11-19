@@ -522,3 +522,83 @@ export function commandPipelines(line: string): CommandToken[][] {
   if (cur.length > 0) out.push(cur);
   return out;
 }
+
+/** A request-header option (curl/wget `-H`, `--header`, `--proxy-header`) and the separator before its value word (probe headerFlag). */
+const HEADER_FLAG = /(?:^|[\s"'[,(\\])(?:-H|--header|--proxy-header)(?:[ \t]+|=)/g;
+/** A header whose value is a credential (probe secretHeader). */
+const SECRET_HEADER_WORD = /^(?:(?:proxy-)?authorization|x-[A-Za-z0-9_-]*(?:key|token|secret|auth)[A-Za-z0-9_-]*|api[_-]?key|[A-Za-z0-9_-]*-(?:key|token|secret))$/i;
+const HEADER_LINE_NAME = /^[A-Za-z][A-Za-z0-9-]*:/;
+const HEADER_AUTH_SCHEME = /^\s*(?:bearer|basic|token)\s+/i;
+
+/**
+ * The shell word starting at `line[from]` as the shell assembles it: a
+ * backslash-escaped space (`Authorization:\ Bearer\ <v>`, the backslash
+ * doubled in a JSON string) stays in it, adjacent quoted pieces join
+ * (`'Authorization: Bearer '<v>`), `$'…'` is decoded. A quote escaped as
+ * deeply as `outer` (the open quote of the string the command is written
+ * in; -1: none) ends the word. probe/argv_rules.go headerWordAt.
+ */
+function headerWordAt(line: string, from: number, outer: number): CommandToken {
+  let word = '';
+  const pos: number[] = [];
+  const ends: number[] = [];
+  const add = (ch: string, p: number, e: number): void => { word += ch; pos.push(p); ends.push(e); };
+  let open = -1;
+  let ansi = false;
+  let j = from;
+  while (j < line.length && line[j] !== '\n' && line[j] !== '\r') {
+    let k = j;
+    while (k < line.length && line[k] === '\\') k++;
+    if (open >= 0) {
+      if (k < line.length && sameQuote(line, k, open)) { open = -1; ansi = false; j = k + 1; }
+      else if (ansi && k > j && k < line.length) {
+        const [text, n] = ansiEscape(line.slice(k));
+        for (const c of text) add(c, j, k + n);
+        j = k + n;
+      } else { add(line[j], j, j + 1); j++; }
+      continue;
+    }
+    const ch = line[j];
+    if (k > j && k < line.length && (line[k] === ' ' || line[k] === '\t')) { add(line[k], k, k + 1); j = k + 1; continue; }
+    if (k < line.length && isQuote(line[k]) && outer >= 0 && sameQuote(line, k, outer)) break;
+    if (k < line.length && isQuote(line[k])) { open = k; j = k + 1; continue; }
+    const q = dollarQuote(line, j, line.length);
+    if (q > 0) {
+      if (outer >= 0 && sameQuote(line, q, outer)) break;
+      open = q; ansi = line[q] === "'"; j = q + 1;
+      continue;
+    }
+    if (ch === ' ' || ch === '\t' || ';|&<>'.includes(ch)) break;
+    add(ch, j, j + 1);
+    j++;
+  }
+  return { word, pos, ends };
+}
+
+/**
+ * The credential-looking value of each request-header option in `line`
+ * (`curl -H 'X-Api-Key: <v>'`, `-H Authorization:\ Bearer\ '<v>'`): the
+ * word assembled first, then split at the header's colon and scheme.
+ * `from`/`to` are where the value is written. `judge` decides which values
+ * count. probe/argv_rules.go headerWordCredentials.
+ */
+export function headerWordValues(line: string, judge: (value: string) => boolean): Array<{ value: string; from: number; to: number }> {
+  if (!/-H|--header|--proxy-header/.test(line)) return [];
+  const out: Array<{ value: string; from: number; to: number }> = [];
+  let scanned = 0;
+  let outer = -1;
+  for (const m of line.matchAll(HEADER_FLAG)) {
+    const at = m.index + m[0].length;
+    outer = pairQuotes(line, scanned, at, outer);
+    scanned = at;
+    const t = headerWordAt(line, at, outer);
+    const h = HEADER_LINE_NAME.exec(t.word)?.[0];
+    if (!h || !SECRET_HEADER_WORD.test(h.slice(0, -1))) continue;
+    let from = h.length;
+    while (from < t.word.length && (t.word[from] === ' ' || t.word[from] === '\t')) from++;
+    from += HEADER_AUTH_SCHEME.exec(t.word.slice(from))?.[0].length ?? 0;
+    const value = t.word.slice(from);
+    if (value !== '' && judge(value)) out.push({ value, from: t.pos[from], to: t.ends[t.word.length - 1] });
+  }
+  return out;
+}

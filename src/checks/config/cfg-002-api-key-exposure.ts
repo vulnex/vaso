@@ -1,12 +1,26 @@
 import { basename } from 'node:path';
 import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
-import { API_KEY_PATTERNS, redactSecretsAround, redactSecretsInLine, isPlaceholderSecret } from '../../core/patterns.js';
+import { API_KEY_PATTERNS, redactSecretsAround, redactSecretsInLine, isPlaceholderSecret, isSecretReference, secretShape } from '../../core/patterns.js';
 import { hookCommandSecrets, hookItems } from '../../analyzers/hook-commands.js';
+import { looksRandom } from '../../analyzers/secret-values.js';
 
 /** Framework-designated secret files (PicoClaw keeps model/channel keys in
  *  `.security.yml`, written 0600, instead of config.json). */
 const SECRET_STORES = new Set(['.security.yml']);
+
+/** A run of value characters (no `/`: a path's segments are judged one by one). */
+const VALUE_RUN = /(?<![A-Za-z0-9+=_.~-])[A-Za-z0-9+=_.~-]{16,}(?![A-Za-z0-9+=_.~-])/g;
+
+/**
+ * A snippet with every opaque value in it named by its shape: in a one-line
+ * (minified, compact) config the text around the match holds other values
+ * — `{"k":"sk-proj-…","a":"<random>"}` — whose keys name no credential, so
+ * the report masker left them.
+ */
+function shapeOpaqueValues(snippet: string): string {
+  return snippet.replace(VALUE_RUN, (v) => (looksRandom(v) && !isPlaceholderSecret(v) && !isSecretReference(v) ? secretShape(v, 'high-entropy value') : v));
+}
 
 export const cfg002 = defineCheck({
   id: 'CFG-002',
@@ -31,7 +45,7 @@ export const cfg002 = defineCheck({
             evidence.push({
               file: config.filePath,
               line: i + 1,
-              snippet: redactSecretsAround(lines[i], m.index, m[0].length),
+              snippet: shapeOpaqueValues(redactSecretsAround(lines[i], m.index, m[0].length)),
               detail: `Found ${name}`,
             });
           }
@@ -59,7 +73,7 @@ export const cfg002 = defineCheck({
           file: config.filePath,
           ...(at >= 0 ? { line: at + 1 } : {}),
           snippet: at >= 0
-            ? redactSecretsAround(lines[at].split(secret.value).join('***'), pos, 3)
+            ? shapeOpaqueValues(redactSecretsAround(lines[at].split(secret.value).join('***'), pos, 3))
             : redactSecretsInLine(secret.masked),
           detail: hooks.length > 1
             ? `Found ${secret.kind} in hook commands (${hooks.join(', ')} — same value)`

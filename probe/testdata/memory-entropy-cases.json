@@ -11,5 +11,9 @@
   { "line": "Hex digest \"0123456789abcdef0123456789abcdef01234567\" is a commit", "flagged": false, "disguised": false },
   { "line": "Plain \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\" filler", "flagged": false, "disguised": false },
   { "line": "Docs at \"https://example.com/Q9w8E7r6T5y4U3i2O1p0AaSsDdFfGgHhJjKkLlZzXxCcVvBbNnMm\" here", "flagged": true, "disguised": true },
-  { "line": "Use the quoted words \"the quick brown fox jumps over the lazy dog again\" here", "flagged": false, "disguised": false }
+  { "line": "Use the quoted words \"the quick brown fox jumps over the lazy dog again\" here", "flagged": false, "disguised": false },
+  {"line": "value: \"/{:~s$z0*psu+~ndmjv+-7(3h}b?%PsETJveI[m%iSy5)XcgCY%f4g)EFCfu^wOa6M1\" end", "flagged": true, "disguised": true},
+  {"line": "See \"/srv/*G_iF>X>%C0NZ-cFlwvTWxaLY!UoQ:XQZ}ip2S,FXy7KSE3eJ<dRtEqlzI;q!47EuV\" for it.", "flagged": true, "disguised": true},
+  {"line": "See \"~/7?)eM|i|R3+ksYmgeK<r=njOu:*0vEwX2RUpF6,olHX8Cx*K7Yzqy-n~RFdG~8t(PO\" for it.", "flagged": true, "disguised": true},
+  {"line": "Docs at \"https://x.example.com/s*>05sS3]+j5<-b@Q+*(+-EQECucm<#RvXi#btvL6_8=2n3F|}+LV[Hk&t*${!40iQesNw\" here", "flagged": true, "disguised": true}
 ]

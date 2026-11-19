@@ -1444,8 +1444,7 @@ func redactEnvValue(key, val string) string {
 	if isSecretEnvName(key) {
 		return redactedEnvValue
 	}
-	trimmed := strings.TrimSpace(val)
-	if strings.HasPrefix(trimmed, "{") || strings.HasPrefix(trimmed, "[") {
+	if trimmed, ok := envJSONText(strings.TrimSpace(val)); ok {
 		var parsed interface{}
 		// JSONC (comments, trailing commas) as the CLI reads it (stripJSONC);
 		// broken JSON can't be disguised inside, so it is redacted whole
