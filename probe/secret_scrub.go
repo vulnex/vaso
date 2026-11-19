@@ -2406,6 +2406,8 @@ func (c *collector) scrubText(path, s string) string {
 				return m.with(3, 3, c.disguise(value))
 			})
 		})
+		// a quoted high-entropy string with no key name (memory checks)
+		s = c.disguiseMemoryEntropy(s)
 	}
 	s = tokenShaped.ReplaceAllStringFunc(s, c.disguise)
 	// an account's email address (oauthAccount.emailAddress, userEmail):
