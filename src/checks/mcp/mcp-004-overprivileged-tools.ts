@@ -2,7 +2,7 @@ import type { Evidence, Severity } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
 import { analyzeCode, type DataFlowResult } from '../../analyzers/ast-analyzer.js';
 import { analyzePythonSinks, type PythonSinkFinding } from '../../analyzers/python-sinks.js';
-import { findTaintedSinks, taintCoverage, type UntracedModule } from '../../analyzers/tool-input-taint.js';
+import { findTaintedSinks, findUnverifiedSinks, taintCoverage, type UntracedModule } from '../../analyzers/tool-input-taint.js';
 import { findingSnippet, sourceSnippet } from '../../mcp/source-snippet.js';
 
 /**
@@ -33,14 +33,15 @@ function execLevel(finding: DataFlowResult, taintedLines: Set<number>, quote: (t
   if (finding.decoded) return { severity: 'critical', why: 'it runs code decoded at runtime' };
   if (finding.command && DANGEROUS_COMMAND.test(finding.command)) return { severity: 'critical', why: `the command is an attack on its own (${quote(finding.command)})` };
   const what = /eval|Function/.test(finding.description) ? 'code' : 'command';
-  // A module the tool handlers import that cross-module tracing left out (size limit): not known clean
-  const built = untraced
-    ? `the ${what} is built at runtime; tool input was not traced into ${untraced.path} (cross-module analysis incomplete: size limit)`
-    : `the ${what} is built at runtime; no tool input was traced into it`;
-  return {
-    severity: 'info',
-    why: finding.dynamic ? built : `the ${what} is fixed`,
-  };
+  if (!finding.dynamic) return { severity: 'info', why: `the ${what} is fixed` };
+  // Left out of the traced group (size cap): unknown, not clean
+  if (untraced) {
+    return {
+      severity: 'warning',
+      why: `not verified: cross-module analysis incomplete — the ${what} is built at runtime and tool input was not traced into ${untraced.path} (size limit)`,
+    };
+  }
+  return { severity: 'info', why: `the ${what} is built at runtime; no tool input was traced into it` };
 }
 
 function pythonExecLevel(finding: PythonSinkFinding, injectedLines: Set<number>, quote: (text: string) => string): { severity: Severity; why: string } {
@@ -110,10 +111,16 @@ export const mcp004 = defineCheck({
       );
 
       const { untraced } = taintCoverage(source.sourceCode);
+      const unverifiedLines = new Set(
+        findUnverifiedSinks(source.sourceCode, file).filter((t) => t.kind === 'code' || t.kind === 'process').map((t) => t.line),
+      );
       for (const finding of results.filter(r => r.type === 'eval-exec')) {
         const module = untraced.find((m) => m.startLine <= finding.line && finding.line <= m.endLine);
-        const { severity: level, why } = execLevel(finding, taintedLines, quote, module);
+        // An exported function's parameter the tracer didn't follow reaches it: dynamic whatever the AST pass saw
+        const unverified = module && unverifiedLines.has(finding.line) ? { ...finding, dynamic: true } : finding;
+        const { severity: level, why } = execLevel(unverified, taintedLines, quote, module);
         if (level === 'critical') severity = 'critical';
+        else if (level === 'warning' && severity === 'info') severity = 'warning';
         evidence.push({
           file,
           line: finding.line,
@@ -140,7 +147,9 @@ export const mcp004 = defineCheck({
         ? 'No overprivileged operations found in MCP server source'
         : severity === 'critical'
           ? `Found ${evidence.length} overprivileged operation(s) in MCP server source`
-          : `Found ${evidence.length} command execution capability(ies) in MCP server source — fixed or server-built commands, none reached by tool input`,
+          : severity === 'warning'
+            ? `Found ${evidence.length} command execution capability(ies) in MCP server source — not verified for some: cross-module analysis incomplete (size limit), tool input may reach them`
+            : `Found ${evidence.length} command execution capability(ies) in MCP server source — fixed or server-built commands, none reached by tool input`,
       evidence,
     });
   },

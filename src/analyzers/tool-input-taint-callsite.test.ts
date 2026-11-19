@@ -1,10 +1,11 @@
 import { describe, it, expect } from 'vitest';
-import { MAX_GROUP_SOURCE, findTaintedSinks, taintCoverage } from './tool-input-taint.js';
+import { MAX_GROUP_SOURCE, findTaintedSinks, findUnverifiedSinks, moduleWeight, taintCoverage } from './tool-input-taint.js';
 import { escapeFileMarkers, significantLength, sourceChunks } from './js-parse.js';
 import type { MCPServerSource, ScanContext } from '../core/types.js';
 import { LocalFSProvider } from '../core/local-fs-provider.js';
 import { mcp001 } from '../checks/mcp/mcp-001-config-discovery.js';
 import { mcp004 } from '../checks/mcp/mcp-004-overprivileged-tools.js';
+import { mcp005 } from '../checks/mcp/mcp-005-tool-injection.js';
 
 /** Files joined the way the source resolver joins a server's modules. */
 const joined = (files: Record<string, string>): string =>
@@ -184,6 +185,10 @@ server.tool("run", "runs", { cmd: zod_1.z.string() }, async ({ cmd }) => {
 describe('module groups grow from the tool handlers', () => {
   const pad = (bytes: number): string => `/* ${'y'.repeat(bytes)} */`;
   const realPad = (bytes: number): string => Array.from({ length: Math.ceil(bytes / 70) }, (_, i) => `export const k${i} = "${'x'.repeat(48)}";`).join('\n');
+  /** Code, no sink: functions the AST holds in full. */
+  const codePad = (bytes: number): string => Array.from({ length: Math.ceil(bytes / 50) }, (_, i) => `export function k${i}(a) { return a + ${i}; }`).join('\n');
+  /** Code with sinks of its own, fixed commands. */
+  const sinkPad = (bytes: number): string => `import { execSync as x } from 'node:child_process';\n${Array.from({ length: Math.ceil(bytes / 50) }, (_, i) => `export function k${i}() { return x('ls'); }`).join('\n')}`;
 
   it('does not count comments against the size cap', () => {
     expect(significantLength(`${pad(600_000)}\nconst a = 1;`)).toBeLessThan(MAX_GROUP_SOURCE);
@@ -195,10 +200,92 @@ describe('module groups grow from the tool handlers', () => {
   it('traces a helper padded with a large comment, and one imported after a large sibling', () => {
     const helper = joined({ 'server.js': TOOL, 'h.js': `${pad(530_000)}\n${RUN}` });
     expect(findTaintedSinks(helper, 'pad-helper.js')).toEqual([expect.objectContaining({ sink: 'execSync' })]);
-    const sibling = joined({ 'server.js': `import './pad.js';\n${TOOL}`, 'pad.js': realPad(600_000), 'h.js': RUN });
+    const sibling = joined({ 'server.js': `import './pad.js';\n${TOOL}`, 'pad.js': codePad(800_000), 'h.js': RUN });
     expect(findTaintedSinks(sibling, 'pad-sibling.js')).toEqual([expect.objectContaining({ sink: 'execSync' })]);
     expect(taintCoverage(sibling).untraced).toEqual([expect.objectContaining({ path: 'pad.js', from: 'server.js' })]);
   });
+
+  it('admits the modules that lead to a sink before sink-free ones imported first', () => {
+    // two big code modules imported before the one that runs the input
+    const code = joined({
+      'server.js': `import './pad1.js';\nimport './pad2.js';\n${TOOL}`,
+      'pad1.js': codePad(400_000), 'pad2.js': codePad(400_000), 'h.js': RUN,
+    });
+    expect(findTaintedSinks(code, 'sink-first.js')).toEqual([expect.objectContaining({ sink: 'execSync', origin: 'c ← caller' })]);
+    expect(taintCoverage(code).untraced).toEqual([expect.objectContaining({ path: 'pad2.js' })]);
+    // also through a sink-free module in between
+    const via = joined({
+      'server.js': `import './pad1.js';\nimport './pad2.js';\nimport { run } from './mid.js';\nserver.tool('run', 'd', { cmd: z.string() }, async ({ cmd }) => { run(cmd); });`,
+      'pad1.js': codePad(400_000), 'pad2.js': codePad(400_000), 'mid.js': `export { run } from './h.js';`, 'h.js': RUN,
+    });
+    expect(findTaintedSinks(via, 'sink-first-via.js')).toEqual([expect.objectContaining({ sink: 'execSync' })]);
+  }, 30_000);
+
+  it('counts string tables at their literal cost, not their length', () => {
+    const table = `export const A = [${Array.from({ length: 6_000 }, () => `"${'x'.repeat(40)}"`).join(',')}];`;
+    expect(table.length).toBeGreaterThan(250_000);
+    expect(moduleWeight(table)).toBeLessThan(60_000);
+    // numbers sit outside strings: counted in full
+    const numbers = `export const N = [${Array.from({ length: 60_000 }, (_, i) => i).join(',')}];`;
+    expect(moduleWeight(numbers)).toBe(significantLength(numbers));
+    // anything that runs code is not a data module
+    for (const code of [
+      `export const A = ["x", f("y")];`, `export const A = () => "x";`, `export const A = run\`x\`;`,
+      'export const A = `${x}`;', `export const A = new/**/Foo;`, `export const A = /x/;`, `export const A = { get x() { return 1; } };`,
+      `export class A {}`, `export const A = import("./x.js");`,
+    ]) expect(moduleWeight(code), code).toBe(significantLength(code));
+    expect(moduleWeight(`import { B } from './b.js';\nexport const A = ["${'x'.repeat(1000)}", B];`)).toBeLessThan(100);
+  });
+
+  it('traces exec behind two ~256 KB string tables imported first (padding)', async () => {
+    const table = (name: string): string => `export const ${name} = [${Array.from({ length: 6_200 }, () => `"${'q'.repeat(40)}"`).join(',')}];`;
+    const code = joined({
+      'index.js': `import { A } from "./pad1.js";\nimport { B } from "./pad2.js";\nimport { run } from "./lib.js";\nserver.tool("run", { cmd: z.string() }, async (args) => { run(args.cmd); return { content: [{ type: "text", text: String(A.length + B.length) }] }; });`,
+      'pad1.js': table('A'), 'pad2.js': table('B'),
+      'lib.js': `import { exec } from "node:child_process";\nexport function run(c) { exec(c); }`,
+    });
+    expect(findTaintedSinks(code, 'j17.js')).toEqual([expect.objectContaining({ sink: 'exec', kind: 'process' })]);
+    expect(taintCoverage(code).untraced).toEqual([]);
+    const r5 = await mcp005.run(ctx({ sourceCode: code, sourceRoot: '/srv/app' }));
+    expect(r5.severity).toBe('critical');
+  }, 30_000);
+
+  it('reports a sink in a module left out for size as a not-verified warning (MCP-004 and MCP-005)', async () => {
+    // sink-bearing padding fills the group first; the module that runs the input is left out
+    const code = joined({
+      'server.js': `import './pad1.js';\n${TOOL}`,
+      'pad1.js': sinkPad(600_000), 'h.js': `${RUN}\n${codePad(150_000)}`,
+    });
+    expect(taintCoverage(code).untraced).toEqual([expect.objectContaining({ path: 'h.js' })]);
+    expect(findTaintedSinks(code, 'unverified.js')).toEqual([]);
+    expect(findUnverifiedSinks(code, 'unverified.js')).toEqual([expect.objectContaining({ sink: 'execSync', unverified: true })]);
+
+    const r4 = await mcp004.run(ctx({ sourceCode: code, sourceRoot: '/srv/app' }));
+    expect(r4.severity).toBe('warning');
+    expect(r4.message).toMatch(/not verified for some: cross-module analysis incomplete/);
+    expect(r4.message).not.toMatch(/none reached by tool input/);
+    const exec = r4.evidence?.find((e) => /execSync\(\) call/.test(e.detail ?? '') && /h\.js/.test(e.detail ?? ''));
+    expect(exec?.detail).toMatch(/not verified: cross-module analysis incomplete/);
+
+    const r5 = await mcp005.run(ctx({ sourceCode: code, sourceRoot: '/srv/app' }));
+    expect(r5.passed).toBe(false);
+    expect(r5.severity).toBe('warning');
+    expect(r5.evidence).toEqual([expect.objectContaining({
+      detail: expect.stringMatching(/^not verified: cross-module analysis incomplete — execSync\(\) in h\.js/),
+    })]);
+  }, 30_000);
+
+  it('does not call a fixed command in a module left out for size unverified', async () => {
+    const code = joined({
+      'server.js': `import './pad1.js';\nimport { ls } from './h.js';\nserver.tool('ls', 'd', {}, async () => ls());`,
+      'pad1.js': sinkPad(600_000),
+      'h.js': `import { execSync } from 'node:child_process';\nexport function ls() { return execSync('ls'); }\n${codePad(150_000)}`,
+    });
+    expect(taintCoverage(code).untraced).toEqual([expect.objectContaining({ path: 'h.js' })]);
+    expect(findUnverifiedSinks(code, 'fixed.js')).toEqual([]);
+    const r5 = await mcp005.run(ctx({ sourceCode: code, sourceRoot: '/srv/app' }));
+    expect(r5.passed).toBe(true);
+  }, 30_000);
 
   it('puts the handler file first even when an unrelated module comes first in the source', () => {
     const code = joined({ 'a-big.js': `import './h.js';\n${realPad(500_000)}`, 'server.js': TOOL, 'h.js': RUN });
@@ -224,8 +311,12 @@ describe('module groups grow from the tool handlers', () => {
     })]));
     const r4 = await mcp004.run(ctx({ sourceCode: code, sourceRoot: '/srv/app' }));
     const exec = r4.evidence?.find((e) => /execSync/.test(e.detail ?? ''));
-    expect(exec?.detail).toMatch(/tool input was not traced into h\.js \(cross-module analysis incomplete: size limit\)/);
+    expect(exec?.detail).toMatch(/not verified: cross-module analysis incomplete — the command is built at runtime and tool input was not traced into h\.js \(size limit\)/);
     expect(exec?.detail).not.toMatch(/no tool input was traced/);
+    expect(r4.severity).toBe('warning');
+    const r5 = await mcp005.run(ctx({ sourceCode: code, sourceRoot: '/srv/app' }));
+    expect(r5.severity).toBe('warning');
+    expect(r5.evidence?.[0]?.detail).toMatch(/not verified/);
   });
 
   it('leaves MCP-001 passing when every module was followed', async () => {
