@@ -2,6 +2,9 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { runMCPScan, runMCPList } from './mcp.js';
 import type { MCPDiscoveryResult, MCPConfig } from '../mcp/types.js';
 import type { ScanResult } from '../core/types.js';
+import { mkdtempSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 
 // Mock MCPDiscovery
 const mockDiscover = vi.fn();
@@ -349,6 +352,24 @@ describe('runMCPScan --source', () => {
     expect(logs).toContain('No MCP servers found in /home/user/blank.json (the config declares no enabled servers)');
     expect(logs).toContain('No MCP servers found in /home/user/other.json (no known config dialect matched)');
     expect(logs).not.toContain('blank.json (no known config dialect matched)');
+    expect(process.exitCode ?? 0).toBe(0);
+  });
+
+  it('says a -p file that is empty (or only whitespace) is empty, and keeps the exit code', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'vaso-mcp-empty-'));
+    const zero = join(dir, 'zero.json');
+    const spaces = join(dir, 'spaces.json');
+    writeFileSync(zero, '');
+    writeFileSync(spaces, '  \n\n');
+    mockDiscoverFromPaths.mockResolvedValue({ ...sampleDiscoveryResult, empty: [zero, spaces] });
+    mockResolveServerSources.mockResolvedValue([]);
+    mockScanMCP.mockResolvedValue(sampleScanResult);
+
+    await runMCPScan({ format: 'json', path: [zero, spaces] });
+
+    const logs = consoleErrorLogs.join('\n');
+    expect(logs).toContain(`No MCP servers found in ${zero} (the file is empty)`);
+    expect(logs).toContain(`No MCP servers found in ${spaces} (the file is empty)`);
     expect(process.exitCode ?? 0).toBe(0);
   });
 });
