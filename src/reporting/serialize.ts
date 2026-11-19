@@ -32,7 +32,8 @@ const MASK = '***';
  */
 function keepValue(value: string): boolean {
   // quotes may be backslash-escaped (`KEY=\"value\"` inside a JSON string)
-  const v = value.trim().replace(/^\\*['"]|\\*['"]$/g, '');
+  // (bash's $'…' and $"…" quote like '…' and "…")
+  const v = value.trim().replace(/^\$(?=\\*['"])/, '').replace(/^\\*['"]|\\*['"]$/g, '');
   if (v === '' || v === MASK) return true;
   // a switch (`websocketRequiresToken: true`), not a credential
   if (/^(?:true|false|null)$/.test(v)) return true;
@@ -267,10 +268,11 @@ const SECRET_DASHED_HEADER = /(^|[\s"'=])((?:[A-Z][A-Za-z0-9]*-)+(?:Key|Token|Se
  * `env K=V cmd`, inline `sh -c`), also as a flag's value or a dotted path
  * (`--env=K=V`, `--from-literal=password=X`, `--set auth.password=X`).
  */
-// (a value may be quoted with escaped quotes: `DB_PASSWORD=\"x\"` inside a JSON string;
+// (a value may be quoted with escaped quotes: `DB_PASSWORD=\"x\"` inside a JSON string,
+// or as bash's $'…' / $"…";
 // an object or list (`credentials = {"primary":…}`, `tokens = ["***"]`) is not one value —
 // its bracket is kept, the values inside are masked where they stand)
-const SECRET_ASSIGN = /(^|[\s"'`(;&|:$=.])([A-Za-z_][A-Za-z0-9_]*)(\s*=(?!=)\s*)(\\+"[^"\\\n]*\\+"|"[^"]*"|'[^']*'|(?![{[](?:["'{[\]}\s]|$))[^\s"'`;&|)\\]+)/g;
+const SECRET_ASSIGN = /(^|[\s"'`(;&|:$=.])([A-Za-z_][A-Za-z0-9_]*)(\s*=(?!=)\s*)(\$?\\+"[^"\\\n]*\\+"|\$?"[^"]*"|\$'(?:[^'\\\n]|\\.)*'|'[^']*'|(?![{[](?:["'{[\]}\s]|$))[^\s"'`;&|)\\]+)/g;
 
 /**
  * An assignment's unquoted value that is code, not a secret, in source
@@ -539,7 +541,8 @@ const FLAG_SEP = String.raw`(\s*=\s*|\s+|["']\s*,\s*["'])`;
 // Escaped quotes may wrap the value (`--password=\"x\"`).
 /** A one-word quoted value (`-p "pw"`, `--password="pw"`, `-p'pw'`): the quotes are the shell's, not the value's. */
 const QUOTED_WORD = String.raw`\\*"[^"\\\s,]+\\*"|'[^'\s,]+'`;
-const FLAG_VALUE = String.raw`(\\+"[^"\\\n]*\\+"|${QUOTED_WORD}|[^\s"'<>,\\][^\s"'<>,]*)`;
+// (bash's $'…' and $"…" too: `--api-key $'x'`)
+const FLAG_VALUE = String.raw`(\$?\\+"[^"\\\n]*\\+"|\$'(?:[^'\\\s,]|\\.)+'|\$?(?:${QUOTED_WORD})|[^\s"'<>,\\][^\s"'<>,]*)`;
 const SECRET_FLAG = new RegExp(String.raw`(^|[\s"'[,])(--?(?:[a-z][\w-]*?[-_])?${FLAG_WORD})${FLAG_SEP}${FLAG_VALUE}`, 'gi');
 const CAMEL_SECRET_FLAG = new RegExp(String.raw`(^|[\s"'[,])(--?${CAMEL_FLAG_WORD})${FLAG_SEP}${FLAG_VALUE}`, 'g');
 /** `-p <pw>`, `-k <key>`, `redis-cli -a <pw>`: judged by the shared argv rules 2–4. */

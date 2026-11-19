@@ -1649,10 +1649,10 @@ var (
 	// at whitespace, quotes and the punctuation that closes a structure. A
 	// quote may be escaped, at any depth: password=\"…\" inside a JSON
 	// string, \\\"api_key\\\":\\\"…\\\" in JSON embedded in one.
-	inlinePair = regexp.MustCompile(`(^|[^A-Za-z0-9_.$-])([A-Za-z_][A-Za-z0-9_.-]*)(\\*["'` + "`" + `]?[ \t]*[:=][ \t]*)(\\+["']|["'` + "`" + `]?)((?i:bearer|basic|token)[ \t]+)?((?:[^\s"'` + "`" + `<>{}\[\],;&\\]|\\/|\\u[0-9A-Fa-f]{4}|\\\\)+)`)
+	inlinePair = regexp.MustCompile(`(^|[^A-Za-z0-9_.$-])([A-Za-z_][A-Za-z0-9_.-]*)(\\*["'` + "`" + `]?[ \t]*[:=][ \t]*)(\$?\\+["']|\$["']|["'` + "`" + `]?)((?i:bearer|basic|token)[ \t]+)?((?:[^\s"'` + "`" + `<>{}\[\],;&\\]|\\/|\\u[0-9A-Fa-f]{4}|\\\\)+)`)
 	// the same in free text, where a name may be up to three words
 	// (Token del servidor: …, password for prod: …)
-	inlinePairProse = regexp.MustCompile(`(^|[^A-Za-z0-9_.$-])([A-Za-z_][A-Za-z0-9_.-]*(?:[ \t][A-Za-z][A-Za-z0-9_.-]*){0,2})(\\*["'` + "`" + `]?[ \t]*[:=][ \t]*)(\\+["']|["'` + "`" + `]?)((?i:bearer|basic|token)[ \t]+)?((?:[^\s"'` + "`" + `<>{}\[\],;&\\]|\\/|\\u[0-9A-Fa-f]{4}|\\\\)+)`)
+	inlinePairProse = regexp.MustCompile(`(^|[^A-Za-z0-9_.$-])([A-Za-z_][A-Za-z0-9_.-]*(?:[ \t][A-Za-z][A-Za-z0-9_.-]*){0,2})(\\*["'` + "`" + `]?[ \t]*[:=][ \t]*)(\$?\\+["']|\$["']|["'` + "`" + `]?)((?i:bearer|basic|token)[ \t]+)?((?:[^\s"'` + "`" + `<>{}\[\],;&\\]|\\/|\\u[0-9A-Fa-f]{4}|\\\\)+)`)
 	// | API_KEY | <value> | in a markdown table, **API key**: <value>
 	tableRow = regexp.MustCompile(`(?m)^([ \t]*\|[ \t]*(?:\*\*|` + "`" + `)?)([A-Za-z][A-Za-z0-9 _.-]{0,40}?)((?:\*\*|` + "`" + `)?[ \t]*\|[ \t]*` + "`" + `?)([^|` + "`" + `\s]+)(` + "`" + `?[ \t]*\|)`)
 	boldKey  = regexp.MustCompile(`\*\*([A-Za-z][A-Za-z0-9 _.-]{0,40}?)(:?\*\*[ \t]*:?[ \t]*` + "`" + `?)([^\s` + "`" + `]+)`)
@@ -1791,7 +1791,16 @@ func inlineSecrets(line string, prose bool, replace func(key, value string) (str
 		}
 		word := end
 		trigger := line[start:end]
+		// bash's $'…' and $"…" quote like '…' and "…" (in $'…' a backslash
+		// escapes the quote too)
+		ansiC := strings.HasPrefix(quote, "$")
+		quote = strings.TrimPrefix(quote, "$")
 		switch {
+		case ansiC && quote == "'":
+			if j := closingAnsiQuote(line, start); j >= 0 {
+				end = j
+				trigger = line[start:end]
+			}
 		case len(quote) >= 2:
 			// \"…\" inside a JSON string (\\\"…\\\" a level deeper): up to
 			// the same escaped quote, past deeper-escaped ones inside it
@@ -1864,6 +1873,21 @@ func closingEscapedQuote(line string, start int, quote string) int {
 		}
 		if j-k == n {
 			return k
+		}
+	}
+	return -1
+}
+
+// closingAnsiQuote returns the index of the ' closing a bash $'…' value that
+// starts at start (\' and \\ are escapes there), or -1 on this line.
+func closingAnsiQuote(line string, start int) int {
+	for i := start; i < len(line) && line[i] != '\n'; i++ {
+		if line[i] == '\\' {
+			i++
+			continue
+		}
+		if line[i] == '\'' {
+			return i
 		}
 	}
 	return -1
