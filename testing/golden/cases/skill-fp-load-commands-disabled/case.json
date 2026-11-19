@@ -1,0 +1,7 @@
+{
+  "agent": "claude-code",
+  "source": "False positive: with disableSkillShellExecution set, a SKILL.md's !`cmd` install line is documentation (a named https installer is a warning, not critical)",
+  "fail": {
+    "SKL-004": "warning"
+  }
+}

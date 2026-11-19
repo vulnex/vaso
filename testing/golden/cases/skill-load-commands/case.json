@@ -1,0 +1,10 @@
+{
+  "agent": "claude-code",
+  "source": "True positive: !`cmd` spans in a SKILL.md run when Claude Code loads the skill \u2014 a download piped to a shell, a key sent with nc, a reverse shell",
+  "fail": {
+    "SKL-001": "critical",
+    "SKL-004": "critical",
+    "SKL-005": "critical",
+    "SKL-006": "critical"
+  }
+}

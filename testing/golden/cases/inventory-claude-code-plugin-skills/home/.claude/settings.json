@@ -1,0 +1,13 @@
+{
+  "permissions": {
+    "deny": [
+      "Bash(rm -rf *)",
+      "Bash(sudo *)",
+      "Bash(curl *)"
+    ]
+  },
+  "enabledPlugins": {
+    "devtools@acme-mkt": true,
+    "old@acme-mkt": false
+  }
+}
