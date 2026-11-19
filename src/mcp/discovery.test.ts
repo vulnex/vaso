@@ -603,4 +603,22 @@ describe('MCPDiscovery — NanoClaw and IronClaw installs', () => {
       [['ironclaw'], '/.ironclaw/reborn/local-dev/system/extensions/notion/manifest.toml', ['notion']],
     ]);
   });
+
+  it('reports an IronClaw extension manifest it cannot read or parse instead of dropping it', async () => {
+    const exts = join(home, '.ironclaw', 'reborn', 'local-dev', 'system', 'extensions');
+    await mkdir(join(exts, 'broken'), { recursive: true });
+    await writeFile(join(exts, 'broken', 'manifest.toml'), '[mcp\nserver = "https://x"\n');
+    await mkdir(join(exts, 'locked'), { recursive: true });
+    await writeFile(join(exts, 'locked', 'manifest.toml'), 'id = "locked"\n');
+    await chmod(join(exts, 'locked', 'manifest.toml'), 0o000);
+    // a directory without a manifest is no error
+    await mkdir(join(exts, 'empty'), { recursive: true });
+
+    const fs = Object.assign(Object.create(new LocalFSProvider()) as FSProvider, { homedir: () => home, getEnv: () => undefined });
+    const result = await new MCPDiscovery(fs).discover('linux');
+    const errors = result.loadErrors?.map(e => [e.source, e.filePath.slice(exts.length), e.stage]);
+    expect(errors).toContainEqual(['IronClaw', '/broken/manifest.toml', 'parse']);
+    if (process.getuid?.() !== 0) expect(errors).toContainEqual(['IronClaw', '/locked/manifest.toml', 'read']);
+    expect(errors).toHaveLength(process.getuid?.() !== 0 ? 2 : 1);
+  });
 });

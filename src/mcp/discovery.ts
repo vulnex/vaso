@@ -18,7 +18,7 @@ import { findNanoclawCheckouts } from '../adapters/nanoclaw.js';
 import { parseJsonLenient } from '../core/jsonc.js';
 import { parseYamlSafe } from '../core/yaml-safe.js';
 import { parseErrorMessage } from '../core/parse-error.js';
-import { captureConfigLoadErrors } from '../core/config-loader.js';
+import { captureConfigLoadErrors, recordConfigLoadFailure } from '../core/config-loader.js';
 import { pathPresent } from '../adapters/load-if-present.js';
 import { applyOffLists } from './off-lists.js';
 import { hermesServerMap } from './disabled.js';
@@ -575,7 +575,9 @@ export class MCPDiscovery {
 
     // NanoClaw agent groups' container.json and IronClaw 1.x MCP extension
     // manifests: found by listing the installs, as their adapters find them
-    for (const config of await frameworkInstallConfigs(home, this.fs).catch(() => [])) {
+    const frameworks = await captureConfigLoadErrors(() => frameworkInstallConfigs(home, this.fs).catch(() => []));
+    for (const e of frameworks.loadErrors) loadErrors.push({ source: 'IronClaw', filePath: e.filePath, stage: e.stage, message: e.message });
+    for (const config of frameworks.result) {
       const real = await Promise.resolve(this.fs.realpath?.(config.filePath)).catch(() => undefined) ?? config.filePath;
       if (seen.has(real)) continue;
       seen.add(real);
@@ -777,10 +779,20 @@ export async function ironclawExtensionConfigs(rebornHome: string, fs: FSProvide
     }
     for (const id of ids.sort()) {
       const filePath = join(extDir, id, 'manifest.toml');
+      // A manifest that exists but can't be read or parsed: its server goes
+      // unscanned, so it is reported (CONFIG-LOAD), like an unreadable mcp.json
+      let raw: string;
+      try {
+        raw = await fs.readFile(filePath);
+      } catch (err) {
+        recordConfigLoadFailure(filePath, 'read', err);
+        continue;
+      }
       let data: Record<string, unknown>;
       try {
-        data = parseTomlSafe(await fs.readFile(filePath)) as Record<string, unknown>;
-      } catch {
+        data = parseTomlSafe(raw) as Record<string, unknown>;
+      } catch (err) {
+        recordConfigLoadFailure(filePath, 'parse', err);
         continue;
       }
       const server = ironclawMcpServer(id, data);
