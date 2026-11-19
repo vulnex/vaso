@@ -44,9 +44,10 @@ export interface SkillSource {
   /** Markdown 'prose' view: lines that are plain prose — no code block, no inline code. */
   proseLines?: ReadonlySet<number>;
   /**
-   * SKILL.md: lines holding `` !`cmd` `` spans and their commands — Claude
-   * Code runs them when it loads the skill, before the model reads a word
-   * (unless `disableSkillShellExecution` is set). Absent when nothing runs them.
+   * SKILL.md: lines holding `` !`cmd` `` spans or ```` ```! ```` blocks
+   * (loadTimeCommands; a block on each of its lines) and their commands —
+   * Claude Code runs them when it loads the skill, before the model reads a
+   * word (unless `disableSkillShellExecution` is set). Absent when nothing runs them.
    */
   loadCommands?: ReadonlyMap<number, string[]>;
 }
@@ -241,8 +242,13 @@ export async function readSkillSource(
     }
     if (view === 'blocks') return { file, text: parts.blocks.join('\n'), kind: 'markdown' };
     const inlineLines = new Set<number>();
+    const raw = load ? text.split('\n') : [];
     const lines = parts.blocks.map((block, i) => {
-      if (block || !parts.inline[i]) return block;
+      if (block) return block;
+      // a load-time command's line is code wherever its form stands
+      // (a ```! fence opened mid-line, a !`…` span across lines)
+      if (load?.has(i + 1)) return raw[i];
+      if (!parts.inline[i]) return block;
       inlineLines.add(i + 1);
       return parts.inline[i];
     });
@@ -344,8 +350,24 @@ export function commandsRunOnTheirOwn(src: SkillSource): Array<{ command: string
     return packageScripts(src).filter(s => s.lifecycle)
       .map(s => ({ command: s.command, line: s.line, label: `npm "${s.name}" script (runs on its own on \`npm install\`)` }));
   }
+  // a command spanning lines (a ```! block) is listed on each: reported at its first
   return [...src.loadCommands ?? []].flatMap(([line, commands]) =>
-    commands.map(command => ({ command, line, label: '!`…` command (Claude Code runs it when it loads the skill)' })));
+    commands.filter(command => !src.loadCommands?.get(line - 1)?.includes(command))
+      .map(command => ({ command, line, label: `${loadForm(command, src.text, line)} command (Claude Code runs it when it loads the skill)` })));
+}
+
+/**
+ * How the load-time command on `line` that `matches` is written (`!`…`` or
+ * ```! block), or undefined when none there does.
+ */
+export function loadFormAt(src: SkillSource, line: number, matches: (command: string) => boolean): string | undefined {
+  const command = src.loadCommands?.get(line)?.find(matches);
+  return command === undefined ? undefined : loadForm(command, src.text, line);
+}
+
+/** How a load-time command is written, for a finding's wording: `!`…`` or a ```! block. */
+export function loadForm(command: string, text: string, line: number): string {
+  return command.includes('\n') || !(text.split('\n')[line - 1] ?? '').includes('!`') ? '```! block' : '!`…`';
 }
 
 /** Every list marker at the start of a line blanked (scanWithPatterns skips lines starting with `*`). */
@@ -358,7 +380,7 @@ export interface MarkdownParts {
   blocks: string[];
   /** Inline code spans of each line outside blocks, joined; other lines ''. */
   inline: string[];
-  /** 1-based lines holding `` !`cmd` `` spans, with their commands. */
+  /** 1-based lines holding load-time commands (loadTimeCommands), with them. */
   load: Map<number, string[]>;
 }
 
@@ -367,8 +389,8 @@ const LIST_ITEM = /^\s{0,3}(?:[-*+]|\d{1,9}[.)])\s/;
 /**
  * A Markdown file's code: fenced blocks (``` / ~~~), indented blocks (four
  * spaces or a tab after a blank line, not a list item's continuation) and
- * inline code spans. A `!` right before a single-backtick span is Claude
- * Code's load-time command (`` !`git status` ``). Spans don't cross lines.
+ * inline code spans (spans don't cross lines) — and the commands Claude Code
+ * runs when it loads the file (loadTimeCommands), on every line each spans.
  */
 export function markdownParts(md: string): MarkdownParts {
   const lines = md.split('\n');
@@ -405,20 +427,23 @@ export function markdownParts(md: string): MarkdownParts {
       if (LIST_ITEM.test(line)) inList = true;
       else if (!/^\s/.test(line)) inList = false;
       const spans = inlineSpans(line);
-      if (spans.length > 0) {
-        inline[i] = spans.map(s => s.code).join(' ; ');
-        const runs = spans.filter(s => s.load).map(s => s.code);
-        if (runs.length > 0) load.set(i + 1, runs);
-      }
+      if (spans.length > 0) inline[i] = spans.join(' ; ');
     }
     prevBlank = blank;
+  }
+  for (const run of loadTimeCommands(md)) {
+    for (let line = run.line; line <= run.endLine; line++) {
+      const at = load.get(line);
+      if (!at) load.set(line, [run.command]);
+      else if (!at.includes(run.command)) at.push(run.command);
+    }
   }
   return { blocks, inline, load };
 }
 
 /** Inline code spans of one line: a run of N backticks to the next run of exactly N. */
-function inlineSpans(line: string): Array<{ code: string; load: boolean }> {
-  const out: Array<{ code: string; load: boolean }> = [];
+function inlineSpans(line: string): string[] {
+  const out: string[] = [];
   let i = line.indexOf('`');
   while (i >= 0 && out.length < 64) {
     let n = 1;
@@ -432,8 +457,74 @@ function inlineSpans(line: string): Array<{ code: string; load: boolean }> {
     }
     if (end < 0) break;
     const code = line.slice(i + n, end).trim();
-    if (code) out.push({ code, load: n === 1 && line[i - 1] === '!' });
+    if (code) out.push(code);
     i = line.indexOf('`', end + n);
   }
   return out;
+}
+
+/** A load-time command and the 1-based lines its form spans. */
+export interface LoadTimeCommand {
+  command: string;
+  line: number;
+  endLine: number;
+}
+
+/** At most this many load-time commands are read from one file. */
+const MAX_LOAD_COMMANDS = 256;
+
+/**
+ * The shell commands Claude Code runs when it loads a skill or a custom
+ * command, before the model reads a word — matched as Claude Code matches
+ * them: a fenced block opened by ```` ```! ```` (to the next ```` ``` ````,
+ * anywhere in the text; the whole block is one command), and `` !`cmd` ``
+ * with the `!` at a line start or after whitespace (`` KEY=!`cmd` `` is
+ * text) — a `!` inside another one-line code span doesn't count. Scanned by
+ * hand: the forms' lazy regexes would rescan the rest of the file for each
+ * unclosed opener.
+ */
+export function loadTimeCommands(md: string): LoadTimeCommand[] {
+  if (!md.includes('```!') && !md.includes('!`')) return [];
+  const starts: number[] = [0];
+  for (let i = md.indexOf('\n'); i >= 0; i = md.indexOf('\n', i + 1)) starts.push(i + 1);
+  const lineAt = (offset: number): number => {
+    let lo = 0;
+    let hi = starts.length - 1;
+    while (lo < hi) {
+      const mid = (lo + hi + 1) >> 1;
+      if (starts[mid] <= offset) lo = mid;
+      else hi = mid - 1;
+    }
+    return lo + 1;
+  };
+  const out: LoadTimeCommand[] = [];
+  const add = (command: string, from: number, to: number) => {
+    const text = command.trim();
+    if (text && out.length < MAX_LOAD_COMMANDS) out.push({ command: text, line: lineAt(from), endLine: lineAt(Math.max(from, to - 1)) });
+  };
+  // ```!\s*\n?([\s\S]*?)\n?```
+  for (let i = md.indexOf('```!'); i >= 0 && out.length < MAX_LOAD_COMMANDS;) {
+    let body = i + 4;
+    while (body < md.length && /\s/.test(md[body])) body++;
+    const close = md.indexOf('```', body);
+    if (close < 0) break;
+    add(md.slice(body, close), i, close + 3);
+    i = md.indexOf('```!', close + 3);
+  }
+  // (?<=^|\s)!`([^`]+)` over the text with its other one-line code spans blanked
+  if (md.includes('!`')) {
+    const text = md.replace(/`[^`\n]+`/g, (span: string, at: number) =>
+      (md[at - 1] === '!' || md[at - 1] === '`' ? span : `\`${' '.repeat(span.length - 2)}\``));
+    for (let i = text.indexOf('!`'); i >= 0 && out.length < MAX_LOAD_COMMANDS;) {
+      const close = text.indexOf('`', i + 2);
+      if (close < 0) break;
+      if ((i === 0 || /\s/.test(text[i - 1])) && close > i + 2) {
+        add(text.slice(i + 2, close), i, close + 1);
+        i = text.indexOf('!`', close + 1);
+      } else {
+        i = text.indexOf('!`', i + 1);
+      }
+    }
+  }
+  return out.sort((a, b) => a.line - b.line);
 }

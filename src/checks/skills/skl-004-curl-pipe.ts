@@ -2,7 +2,7 @@ import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
 import { scanWithPatterns, SECURITY_PATTERNS } from '../../analyzers/pattern-engine.js';
 import { skillFilesOf, skillsDirsOf, noSkillsDirResult } from './skill-files.js';
-import { packageScripts, readSkillSource } from './skill-source.js';
+import { packageScripts, loadFormAt, readSkillSource } from './skill-source.js';
 import { markTestCode } from '../../analyzers/test-paths.js';
 import { hookStatements } from '../../analyzers/hook-commands.js';
 import { truncateSnippet } from '../../core/patterns.js';
@@ -81,7 +81,7 @@ export const skl004 = defineCheck({
         const doc = src.kind !== 'script';
         const lines = doc ? src.text.split('\n') : [];
         for (const match of matches) {
-          const onLoad = src.loadCommands?.get(match.line)?.some(cmd => scanWithPatterns(cmd, CURL_PIPE_RULES).length > 0);
+          const onLoad = loadFormAt(src, match.line, cmd => scanWithPatterns(cmd, CURL_PIPE_RULES).length > 0);
           let tier = doc && !onLoad ? docTier(lines[match.line - 1] ?? match.snippet) : 'critical';
           // A sentence (no code block, no inline code) installing from a
           // named https host describes the install; an opaque source stays critical
@@ -93,7 +93,7 @@ export const skl004 = defineCheck({
             line: match.line,
             snippet: match.snippet,
             detail: onLoad
-              ? `${match.description} in a !\`…\` command — Claude Code runs it when it loads the skill, before the model reads it`
+              ? `${match.description} in a ${onLoad} command — Claude Code runs it when it loads the skill, before the model reads it`
               : sentence ? `${match.description} in a sentence of skill documentation — installer from a named https host`
                 : doc && tier !== 'critical'
                   ? `${match.description} in skill documentation${tier === 'info' ? ' (no download URL, or a well-known vendor installer)' : ' — installer from a named https host'}`

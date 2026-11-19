@@ -2,7 +2,7 @@ import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
 import { scanWithPatterns, SECURITY_PATTERNS } from '../../analyzers/pattern-engine.js';
 import { skillFilesOf, skillsDirsOf, noSkillsDirResult } from './skill-files.js';
-import { analyzeSkillSource, readSkillSource } from './skill-source.js';
+import { analyzeSkillSource, loadFormAt, readSkillSource } from './skill-source.js';
 import { markTestCode } from '../../analyzers/test-paths.js';
 
 const CRED_HARVEST_RULES = SECURITY_PATTERNS.filter(r => r.category === 'credential-harvest');
@@ -64,7 +64,7 @@ export const skl006 = defineCheck({
           // In documentation, a path in inline code is a mention ("keys live
           // in `~/.ssh/id_rsa`"); a code block is a command to run, and a
           // `!`cmd`` span runs when Claude Code loads the skill
-          const onLoad = src.loadCommands?.get(match.line)?.some(cmd => scanWithPatterns(cmd, CRED_HARVEST_RULES).length > 0);
+          const onLoad = loadFormAt(src, match.line, cmd => scanWithPatterns(cmd, CRED_HARVEST_RULES).length > 0);
           // …and a code block line that isn't a command (sample output, a
           // note: "cause: token in ~/.docker/config.json expired") names one
           const mention = !onLoad && src.kind === 'markdown'
@@ -74,7 +74,7 @@ export const skl006 = defineCheck({
             line: match.line,
             snippet: match.snippet,
             detail: placeholder ? `${match.description} — placeholder key written to authorized_keys (setup instructions)`
-              : onLoad ? `${match.description} in a !\`…\` command — Claude Code runs it when it loads the skill, and its output goes into the conversation`
+              : onLoad ? `${match.description} in a ${onLoad} command — Claude Code runs it when it loads the skill, and its output goes into the conversation`
                 : mention ? `${match.description} — path named in inline code in skill documentation` : match.description,
             ...(placeholder || mention ? { mitigated: true } : {}),
           });
