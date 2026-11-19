@@ -4,6 +4,7 @@ import { defineCheck } from '../../core/check-builder.js';
 import { markUnreachable, queryPermissions, readableByOthers } from '../../core/permissions.js';
 import { REBORN_MASTER_KEY_FILE, REBORN_STORAGE_SUBDIRS } from '../../adapters/ironclaw.js';
 import { isLegacy, legacyEnv, legacyToml, lineOf, str } from './layout.js';
+import { secretShape } from '../../core/patterns.js';
 
 /*
  * The secrets master key decrypts every stored credential (LLM keys, channel
@@ -56,7 +57,7 @@ export const ic009 = defineCheck({
         evidence.push({
           file: env.filePath,
           ...(line ? { line } : {}),
-          snippet: `SECRETS_MASTER_KEY=${key.slice(0, 4)}${'*'.repeat(Math.max(0, Math.min(key.length - 4, 12)))}`,
+          snippet: `SECRETS_MASTER_KEY=${secretShape(key)}`,
           detail: 'Plaintext secrets master key in .env — anyone who can read this file can decrypt ironclaw.db secrets',
         });
       }

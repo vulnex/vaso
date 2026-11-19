@@ -1,6 +1,7 @@
 import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
 import { queryPermissions } from '../../core/permissions.js';
+import { secretShape } from '../../core/patterns.js';
 import { asRecord, nanobotConfigs, worldTraversalBarrier } from './shared.js';
 
 // Secret-bearing leaf keys in nanobot's schema: providers.<p>.apiKey,
@@ -40,7 +41,7 @@ function findSecrets(node: unknown, path: string, out: Hit[], depth = 0, underEn
 }
 
 function mask(value: string): string {
-  return `${value.slice(0, 4)}…(${value.length} chars)`;
+  return secretShape(value);
 }
 
 export const nb002 = defineCheck({

@@ -1,7 +1,7 @@
 import { basename } from 'node:path';
 import type { Evidence, ParsedConfig } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
-import { isPlaceholderSecret } from '../../core/patterns.js';
+import { isPlaceholderSecret, secretShape } from '../../core/patterns.js';
 import { isKnownSecretValue, isSecretNamedValue } from '../../analyzers/secret-values.js';
 import { headerSecret } from '../../mcp/config-secrets.js';
 
@@ -77,7 +77,7 @@ export const ghc003 = defineCheck({
         if (m) {
           evidence.push({
             file: config.filePath,
-            snippet: `${m[0].slice(0, 8)}…`,
+            snippet: secretShape(m[0]),
             detail: `Plaintext ${name} in Copilot config — rotate immediately and rely on the OS keychain or gh CLI's hosts.yml`,
           });
         }

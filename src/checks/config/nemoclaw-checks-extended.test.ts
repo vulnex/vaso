@@ -79,7 +79,8 @@ describe('CFG-020: NemoClaw API Key Exposure', () => {
     expect(result.severity).toBe('warning');
     expect(result.message).toContain('plaintext API keys');
     expect(result.evidence).toBeDefined();
-    expect(result.evidence!.some(e => e.detail!.includes('nvapi-FA'))).toBe(true);
+    expect(result.evidence!.some(e => e.detail!.includes('nvapi-FA'))).toBe(false);
+    expect(result.evidence!.some(e => /<literal, \d+ chars>/.test(e.detail!))).toBe(true);
   });
 
   it('is critical when other users can read the plaintext key', async () => {
@@ -125,7 +126,7 @@ describe('CFG-020: NemoClaw API Key Exposure', () => {
     }));
     const result = await cfg020.run(makeContext());
     expect(result.passed).toBe(false);
-    expect(result.evidence!.some(e => e.detail!.includes('sk-12345'))).toBe(true);
+    expect(result.evidence!.some(e => e.detail!.includes('sk-12345'))).toBe(false);
   });
 
   it('is fixable when permissions are loose', async () => {

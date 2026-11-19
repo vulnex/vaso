@@ -1,4 +1,5 @@
 import type { ParsedConfig } from '../../core/types.js';
+import { secretShape } from '../../core/patterns.js';
 import { atomicApproval } from '../../adapters/atomic-agent-config.js';
 
 /** `<stateDir>/config.json` — Atomic Agent's single settings file. */
@@ -34,7 +35,7 @@ export function isEnabled(entry: Record<string, unknown>): boolean {
 }
 
 export function mask(value: string): string {
-  return `${value.slice(0, 4)}…(${value.length} chars)`;
+  return secretShape(value);
 }
 
 const LOOPBACK_HOST = /^(?:localhost|127(?:\.\d{1,3}){3}|\[?::1\]?)$/i;

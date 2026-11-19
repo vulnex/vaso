@@ -1,6 +1,6 @@
 import { basename, dirname, join } from 'node:path';
 import type { Evidence, ParsedConfig, ScanContext } from '../../core/types.js';
-import { API_KEY_PATTERNS, isPlaceholderSecret, isEnvReference } from '../../core/patterns.js';
+import { API_KEY_PATTERNS, isPlaceholderSecret, isEnvReference, secretShape } from '../../core/patterns.js';
 import { shannonEntropy } from '../../analyzers/entropy.js';
 import { parseIfPresent } from '../../adapters/load-if-present.js';
 
@@ -194,5 +194,5 @@ export function literalSecret(key: string, value: string): string | undefined {
 }
 
 export function mask(value: string): string {
-  return `${value.slice(0, 4)}…(${value.length} chars)`;
+  return secretShape(value);
 }

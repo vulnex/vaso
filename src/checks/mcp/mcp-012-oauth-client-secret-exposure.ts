@@ -1,14 +1,13 @@
 import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
-import { API_KEY_PATTERNS, OAUTH_SECRET_PATTERNS, OAUTH_TOKEN_VALUE_PATTERNS, isEnvReference, isPlaceholderSecret } from '../../core/patterns.js';
+import { API_KEY_PATTERNS, OAUTH_SECRET_PATTERNS, OAUTH_TOKEN_VALUE_PATTERNS, isEnvReference, isPlaceholderSecret, secretShape } from '../../core/patterns.js';
 import { shannonEntropy } from '../../analyzers/entropy.js';
 
 const HIGH_ENTROPY_THRESHOLD = 4.5;
 const MIN_SECRET_LENGTH = 16;
 
 function maskValue(value: string): string {
-  if (value.length <= 8) return '*'.repeat(value.length);
-  return value.slice(0, 8) + '*'.repeat(Math.max(0, value.length - 8));
+  return secretShape(value);
 }
 
 export const mcp012 = defineCheck({

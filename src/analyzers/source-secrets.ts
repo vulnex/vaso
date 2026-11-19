@@ -10,7 +10,7 @@
  * repeat the credential.
  */
 
-import { API_KEY_PATTERNS, isPlaceholderSecret } from '../core/patterns.js';
+import { API_KEY_PATTERNS, isPlaceholderSecret, secretShape } from '../core/patterns.js';
 import { shannonEntropy } from './entropy.js';
 import { EXTRA_TOKEN_PATTERNS } from './secret-values.js';
 import { sourceSegments } from '../mcp/source-segments.js';
@@ -315,7 +315,7 @@ function looksLikeSecretValue(value: string): boolean {
 }
 
 function mask(value: string): string {
-  return `${value.slice(0, 4)}… (${value.length} chars)`;
+  return secretShape(value);
 }
 
 export function findSourceSecrets(code: string): SourceSecret[] {
