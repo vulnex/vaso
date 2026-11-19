@@ -1,4 +1,4 @@
-import { basename, dirname, isAbsolute, resolve } from 'node:path';
+import { basename, dirname, isAbsolute, posix, resolve } from 'node:path';
 import type { FSProvider, PermissionFacts } from '../core/fs-provider.js';
 import { queryPermissions } from '../core/permissions.js';
 import { uncollectedPath } from '../core/probe-coverage.js';
@@ -392,11 +392,84 @@ function envCommand(args: readonly string[]): { command: string; args: string[] 
 }
 
 /**
+ * How a wrapper that runs another command reads its own options: `value`
+ * options take the next word (or the rest of a short-option cluster:
+ * `-s9`, `-oL`), `positional` words come before the command (`timeout
+ * DURATION`, `taskset MASK`), `optionalPositional` one more when it matches
+ * (`chrt [PRIORITY]`), `noCommand` options mean it runs none (`ionice -p
+ * PID`). Like their getopt, each stops at the first non-option.
+ */
+interface WrapperSyntax {
+  value: ReadonlySet<string>;
+  positional?: number;
+  optionalPositional?: RegExp;
+  noCommand?: ReadonlySet<string>;
+  /** `nice -5`: an old-style numeric option. */
+  numericFlags?: boolean;
+}
+
+const WRAPPERS: Readonly<Record<string, WrapperSyntax>> = {
+  timeout: { value: new Set(['-s', '--signal', '-k', '--kill-after']), positional: 1 },
+  nice: { value: new Set(['-n', '--adjustment']), numericFlags: true },
+  nohup: { value: new Set() },
+  stdbuf: { value: new Set(['-i', '--input', '-o', '--output', '-e', '--error']) },
+  'xvfb-run': { value: new Set(['-e', '--error-file', '-f', '--auth-file', '-n', '--server-num', '-p', '--xauth-protocol', '-s', '--server-args', '-w', '--wait']) },
+  ionice: { value: new Set(['-c', '--class', '-n', '--classdata']), noCommand: new Set(['-p', '--pid', '-P', '--pgid', '-u', '--uid']) },
+  chrt: {
+    value: new Set(['-T', '--sched-runtime', '-P', '--sched-period', '-D', '--sched-deadline']),
+    optionalPositional: /^\d+$/,
+    noCommand: new Set(['-p', '--pid']),
+  },
+  taskset: { value: new Set(), positional: 1, noCommand: new Set(['-p', '--pid']) },
+};
+
+/** The command a wrapper (`timeout 60 node /x/s.js`) runs, with its arguments. */
+function wrappedCommand(syntax: WrapperSyntax, args: readonly string[]): { command: string; args: string[] } | undefined {
+  let positional = syntax.positional ?? 0;
+  let optional = syntax.optionalPositional;
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i];
+    if (arg === '--') {
+      i++;
+      while (positional > 0 && i < args.length) { positional--; i++; }
+      if (optional && args[i] !== undefined && optional.test(args[i])) i++;
+      return args[i] !== undefined ? { command: args[i], args: args.slice(i + 1) } : undefined;
+    }
+    if (arg.startsWith('--')) {
+      const flag = arg.includes('=') ? arg.slice(0, arg.indexOf('=')) : arg;
+      if (syntax.noCommand?.has(flag)) return undefined;
+      if (!arg.includes('=') && syntax.value.has(flag)) i++;
+      continue;
+    }
+    if (arg.length > 1 && arg.startsWith('-')) {
+      if (syntax.numericFlags && /^-\d+$/.test(arg)) continue;
+      for (let k = 1; k < arg.length; k++) {
+        const flag = `-${arg[k]}`;
+        if (syntax.noCommand?.has(flag)) return undefined;
+        if (syntax.value.has(flag)) {
+          if (k === arg.length - 1) i++;
+          break;
+        }
+      }
+      continue;
+    }
+    if (positional > 0) { positional--; continue; }
+    if (optional) {
+      optional = undefined;
+      if (syntax.optionalPositional!.test(arg)) continue;
+    }
+    return { command: arg, args: args.slice(i + 1) };
+  }
+  return undefined;
+}
+
+/**
  * The local files an interpreter command runs, as the config names them by
  * absolute path: `node /x/server.js`, `python3 /x/s.py`, `deno run /x/m.ts`,
  * `bash -o pipefail /x/run.sh`, `java -jar /x/s.jar`, modules preloaded with
- * `-r`/`--import`, and through `env [NAME=value…] cmd …` the command and
- * what it runs. Relative paths depend on the client's working directory and
+ * `-r`/`--import`, and through `env [NAME=value…] cmd …` (or a wrapper:
+ * `timeout 60 cmd`, `nice -n 5 cmd`, `nohup`, `stdbuf`, `xvfb-run`,
+ * `ionice`, `chrt`, `taskset`) the command and what it runs. Relative paths depend on the client's working directory and
  * are not judged. A path is judged only as the config spells it — a whole
  * argument, an `--option=` value, or a word of one (`env -S`, `bash -c`) —
  * which is what a remote probe stats.
@@ -404,8 +477,9 @@ function envCommand(args: readonly string[]): { command: string; args: string[] 
 export function interpreterScripts(command: string, args: readonly string[]): string[] {
   const named = (p: string) => args.some(a => a === p || a.endsWith(`=${p}`) || a === `file://${p}` || a.trim().split(/\s+/).includes(p));
   const runner = basename(runnerName(command)).toLowerCase();
-  if (runner === 'env') {
-    const inner = envCommand(args);
+  const wrapper = Object.hasOwn(WRAPPERS, runner) ? WRAPPERS[runner] : undefined;
+  if (runner === 'env' || wrapper) {
+    const inner = wrapper ? wrappedCommand(wrapper, args) : envCommand(args);
     if (!inner) return [];
     const out = isAbsolute(inner.command) ? [inner.command] : [];
     return [...new Set([...out, ...interpreterScripts(inner.command, inner.args)].filter(named))];
@@ -422,6 +496,24 @@ export interface WritableLaunchPath {
   role: 'command' | 'script';
   path: string;
   writable: WritableCommandPath;
+}
+
+/** A user name `~name` may carry (POSIX portable names, as on most systems). */
+const TILDE_USER = /^~([A-Za-z_][A-Za-z0-9._-]*)(\/.*)?$/;
+
+/**
+ * `~name/…` as the user's home: Hermes expands it like a shell (Python's
+ * expanduser reads the password database). The scan can't read that
+ * database on a remote host, so the home is taken where the OS puts them —
+ * `/Users/<name>` (macOS; root `/var/root`), `/home/<name>` (Linux; root
+ * `/root`) — the same way the probe stats it, so both judge one path.
+ */
+export function expandUserTilde(value: string, platform: string): string {
+  const m = TILDE_USER.exec(value);
+  if (!m) return value;
+  const name = m[1];
+  const home = name === 'root' ? (platform === 'darwin' ? '/var/root' : '/root') : `${platform === 'darwin' ? '/Users' : '/home'}/${name}`;
+  return home + (m[2] ?? '');
 }
 
 /**
@@ -446,6 +538,7 @@ export async function writableLaunchPaths(
   if (options.hermes) {
     cmd = cmd.trim();
     if (cmd === '~' || cmd.startsWith('~/')) cmd = fs.homedir().replace(/\/$/, '') + cmd.slice(1);
+    else cmd = expandUserTilde(cmd, fs.platform);
     if (fs.kind === 'snapshot') for (const v of [cmd, ...args]) if (v.includes('${')) note(v.trim());
   }
   const targets: Array<{ role: WritableLaunchPath['role']; path: string }> = [];
@@ -453,6 +546,10 @@ export async function writableLaunchPaths(
   for (const s of interpreterScripts(cmd, args)) if (s !== cmd) targets.push({ role: 'script', path: s });
   const out: WritableLaunchPath[] = [];
   for (const t of targets) {
+    // judged where it leads, `/p/safe/../ww/x` as `/p/ww/x` (the probe
+    // records both spellings)
+    t.path = posix.normalize(t.path);
+    if (out.some(o => o.path === t.path)) continue;
     const writable = await worldWritableCommandPath(fs, t.path, options);
     if (writable === 'uncollected') note(t.path);
     else if (writable) out.push({ ...t, writable });

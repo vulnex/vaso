@@ -78,8 +78,8 @@ export function inferPackageName(server: MCPServerEntry): string | undefined {
   return undefined;
 }
 
-/** `python`, `python3`, `python3.12`, `py` — bare or as a path (`.venv/bin/python`). */
-const PYTHON_INTERPRETER = /^(?:python(?:\d+(?:\.\d+)?)?|py)(?:\.exe)?$/i;
+/** `python`, `python3`, `python3.12`, `pypy3`, `py` — bare or as a path (`.venv/bin/python`). */
+const PYTHON_INTERPRETER = /^(?:(?:python|pypy)(?:\d+(?:\.\d+)?)?|py)(?:\.exe)?$/i;
 
 /** Python options that consume the next argument. */
 const PYTHON_VALUE_FLAGS = new Set(['-W', '-X', '-Q', '--check-hash-based-pycs']);

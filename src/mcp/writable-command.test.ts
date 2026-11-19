@@ -7,7 +7,7 @@ import type { FSProvider } from '../core/fs-provider.js';
 import { LocalFSProvider } from '../core/local-fs-provider.js';
 import { SnapshotFSProvider } from '../core/snapshot-fs-provider.js';
 import type { FileEntry, ProbeSnapshot } from '../core/snapshot-types.js';
-import { interpreterScripts, worldWritableCommandPath, writableLaunchText, type WritableCommandPath } from './writable-command.js';
+import { expandUserTilde, interpreterScripts, worldWritableCommandPath, writableLaunchPaths, writableLaunchText, type WritableCommandPath } from './writable-command.js';
 import { hm010 } from '../checks/hermes/hm-010-mcp-server-hardening.js';
 import { at007 } from '../checks/atomic-agent/at-007-mcp-server-hardening.js';
 import { cd009 } from '../checks/claude-desktop/cd-009-world-writable-command.js';
@@ -366,6 +366,26 @@ describe.runIf(posix)('MCP command any local user can replace', () => {
     await chmod(join(root, 'home'), 0o755);
   });
 
+  it('judges a path written with `..` where it leads, locally and from a snapshot', async () => {
+    await mkdir(join(root, 'safe'));
+    await mkdir(join(root, 'ww'));
+    await chmod(join(root, 'ww'), 0o777);
+    const exist = await put('ww/cmd');
+    const missing = `${root}/safe/../ww/missing2`;
+    const existing = `${root}/safe/../ww/cmd`;
+    // the probe records both spellings (configPathsWithin)
+    const remote = await snapshotOf([missing, join(root, 'ww', 'missing2'), existing, exist], { special: true });
+    for (const cmd of [missing, existing]) {
+      const unverifiedLocal: string[] = [];
+      const unverifiedRemote: string[] = [];
+      const l = await writableLaunchPaths(local, cmd, [], unverifiedLocal);
+      const r = await writableLaunchPaths(remote, cmd, [], unverifiedRemote);
+      expect(l.map(w => [w.path, w.writable.path]), cmd).toEqual([[cmd === missing ? join(root, 'ww', 'missing2') : exist, join(root, 'ww')]]);
+      expect(r).toEqual(l);
+      expect(unverifiedRemote).toEqual([]);
+    }
+  });
+
   it('lists each path not verified once', async () => {
     const script = join(root, 'elsewhere', 's.js');
     const config = join(root, 'c.json');
@@ -451,5 +471,54 @@ describe('interpreterScripts', () => {
     expect(interpreterScripts('/usr/bin/env', ['-u', 'X', '-i', '/x/srv', '--port', '1'])).toEqual(['/x/srv']);
     expect(interpreterScripts('/usr/bin/env', ['-S', 'node /x/s.js'])).toEqual(['/x/s.js']);
     expect(interpreterScripts('/usr/bin/env', ['bash', '-c', 'echo hi'])).toEqual([]);
+  });
+
+  it('looks through wrappers to the command they run', () => {
+    expect(interpreterScripts('timeout', ['60', 'node', '/x/s.js'])).toEqual(['/x/s.js']);
+    expect(interpreterScripts('timeout', ['-s', 'KILL', '-k', '5', '60', '/x/srv'])).toEqual(['/x/srv']);
+    expect(interpreterScripts('timeout', ['-s9', '--kill-after=5', '--preserve-status', '1m', '/x/srv'])).toEqual(['/x/srv']);
+    expect(interpreterScripts('/usr/bin/timeout', ['--signal', 'TERM', '60', 'python3', '/x/s.py'])).toEqual(['/x/s.py']);
+    expect(interpreterScripts('nice', ['-n', '5', 'python3', '/x/s.py'])).toEqual(['/x/s.py']);
+    expect(interpreterScripts('nice', ['-n5', '/x/srv'])).toEqual(['/x/srv']);
+    expect(interpreterScripts('nice', ['-10', '/x/srv'])).toEqual(['/x/srv']);
+    expect(interpreterScripts('nohup', ['python3', '/x/s.py'])).toEqual(['/x/s.py']);
+    expect(interpreterScripts('nohup', ['--', '/x/srv'])).toEqual(['/x/srv']);
+    expect(interpreterScripts('stdbuf', ['-oL', 'node', '/x/s.js'])).toEqual(['/x/s.js']);
+    expect(interpreterScripts('stdbuf', ['-o', 'L', '-e', '0', '/x/srv'])).toEqual(['/x/srv']);
+    expect(interpreterScripts('xvfb-run', ['node', '/x/s.js'])).toEqual(['/x/s.js']);
+    expect(interpreterScripts('xvfb-run', ['-a', '-s', '-screen 0 1280x1024x24', '/x/srv'])).toEqual(['/x/srv']);
+    expect(interpreterScripts('xvfb-run', ['--server-args=-ac', '/x/srv'])).toEqual(['/x/srv']);
+    expect(interpreterScripts('ionice', ['-c', '3', '/x/srv'])).toEqual(['/x/srv']);
+    expect(interpreterScripts('ionice', ['-c2', '-n7', 'node', '/x/s.js'])).toEqual(['/x/s.js']);
+    expect(interpreterScripts('ionice', ['-p', '1234'])).toEqual([]);
+    expect(interpreterScripts('chrt', ['-f', '10', '/x/srv'])).toEqual(['/x/srv']);
+    expect(interpreterScripts('chrt', ['--idle', '0', 'node', '/x/s.js'])).toEqual(['/x/s.js']);
+    expect(interpreterScripts('chrt', ['-p', '10', '1234'])).toEqual([]);
+    expect(interpreterScripts('taskset', ['0x3', '/x/srv'])).toEqual(['/x/srv']);
+    expect(interpreterScripts('taskset', ['-c', '0-3', 'python3', '/x/s.py'])).toEqual(['/x/s.py']);
+    expect(interpreterScripts('taskset', ['-p', '0x3', '1234'])).toEqual([]);
+    // nested, and through env
+    expect(interpreterScripts('timeout', ['60', 'nice', '-n', '5', 'nohup', 'node', '/x/s.js'])).toEqual(['/x/s.js']);
+    expect(interpreterScripts('/usr/bin/env', ['timeout', '60', '/x/srv'])).toEqual(['/x/srv']);
+    // no command
+    expect(interpreterScripts('timeout', ['60'])).toEqual([]);
+    expect(interpreterScripts('nohup', [])).toEqual([]);
+  });
+
+  it('reads pypy like python', () => {
+    expect(interpreterScripts('pypy3', ['/x/s.py'])).toEqual(['/x/s.py']);
+    expect(interpreterScripts('/opt/pypy/bin/pypy', ['-u', '/x/s.py'])).toEqual(['/x/s.py']);
+    expect(interpreterScripts('pypy3.10', ['-m', 'pkg'])).toEqual([]);
+  });
+});
+
+describe('expandUserTilde', () => {
+  it('puts ~name where the OS keeps homes, as the probe stats it', () => {
+    expect(expandUserTilde('~alice/tools/mcp-bin', 'darwin')).toBe('/Users/alice/tools/mcp-bin');
+    expect(expandUserTilde('~alice/tools/mcp-bin', 'linux')).toBe('/home/alice/tools/mcp-bin');
+    expect(expandUserTilde('~root/bin/x', 'linux')).toBe('/root/bin/x');
+    expect(expandUserTilde('~root', 'darwin')).toBe('/var/root');
+    expect(expandUserTilde('~/x', 'linux')).toBe('~/x');
+    expect(expandUserTilde('mcp-server', 'linux')).toBe('mcp-server');
   });
 });
