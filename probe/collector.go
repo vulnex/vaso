@@ -1454,50 +1454,6 @@ func redactSecretValues(s string) string {
 	return tokenShaped.ReplaceAllString(s, redactedEnvValue)
 }
 
-// redactJSONValue redacts, inside an inline JSON config
-// (OPENCODE_CONFIG_CONTENT), every string under a credential-named key
-// (apiKey, headers, env…) and URL credentials anywhere, keeping the structure
-// checks read (permissions, MCP commands).
-func redactJSONValue(v interface{}, secret bool) interface{} {
-	switch t := v.(type) {
-	case map[string]interface{}:
-		for k, val := range t {
-			t[k] = redactJSONValue(val, secret || isSecretJSONKey(k))
-		}
-		return t
-	case []interface{}:
-		// an argv: the shared argv rules ("--api-key", "<value>"; "mysql",
-		// "-p…"), the rest judged one by one
-		var argv []string
-		index := map[int]int{}
-		for i, val := range t {
-			if str, ok := val.(string); ok {
-				index[len(argv)] = i
-				argv = append(argv, str)
-			}
-		}
-		hit := map[int][2]int{}
-		for _, h := range judgeArgv(argv) {
-			hit[index[h.tok]] = [2]int{h.from, h.to}
-		}
-		for i, val := range t {
-			if sp, ok := hit[i]; ok {
-				str := val.(string)
-				t[i] = str[:sp[0]] + redactedEnvValue + str[sp[1]:]
-				continue
-			}
-			t[i] = redactJSONValue(val, secret)
-		}
-		return t
-	case string:
-		if secret {
-			return redactedEnvValue
-		}
-		return redactSecretValues(t)
-	}
-	return v
-}
-
 // redactEnvValue is what the snapshot keeps of a collected variable.
 func redactEnvValue(key, val string) string {
 	if isSecretEnvName(key) {
@@ -1510,7 +1466,7 @@ func redactEnvValue(key, val string) string {
 			// JSONC or broken JSON: can't redact inside it, so not at all
 			return redactedEnvValue
 		}
-		if out, err := json.Marshal(redactJSONValue(parsed, false)); err == nil {
+		if out, err := json.Marshal((&collector{}).disguiseJSONValue(parsed, "", false)); err == nil {
 			return string(out)
 		}
 		return redactedEnvValue
