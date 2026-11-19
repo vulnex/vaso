@@ -326,3 +326,60 @@ describe('analyzePythonSinks — alias following', () => {
     expect(Date.now() - start).toBeLessThan(5000);
   });
 });
+
+describe('analyzePythonSinks — file paths taken from tool input', () => {
+  const fileSinks = (lines: string[]) => analyzePythonSinks(lines.join('\n')).filter((f) => f.kind === 'file-path');
+  const tool = (sig: string, ...body: string[]) => ['from pathlib import Path', 'import os, shutil', '@mcp.tool()', `def ${sig}:`, ...body.map((b) => `    ${b}`)];
+
+  it('flags reads, writes and listings of a caller-named path', () => {
+    const read = fileSinks(tool('read(path: str) -> str', 'return Path(path).read_text()'));
+    expect(read).toHaveLength(1);
+    expect(read[0].fileOp).toBe('read');
+    expect(read[0].description).toMatch(/path traversal/);
+    expect(fileSinks(tool('write(path: str, data: str)', 'Path(path).write_text(data)'))[0]?.fileOp).toBe('write');
+    expect(fileSinks(tool('read(path: str)', 'with open(path) as f:', '    return f.read()'))[0]?.fileOp).toBe('read');
+    expect(fileSinks(tool('save(path: str, data: str)', "with open(path, 'w') as f:", '    f.write(data)'))[0]?.fileOp).toBe('write');
+    expect(fileSinks(tool('rm(target: str)', 'os.remove(target)'))[0]?.fileOp).toBe('write');
+    expect(fileSinks(tool('cp(src: str, dst: str)', 'shutil.copy(src, dst)'))[0]?.fileOp).toBe('write');
+    expect(fileSinks(tool('nuke(d: str)', 'shutil.rmtree(d)'))[0]?.fileOp).toBe('write');
+    expect(fileSinks(tool('ls(d: str)', 'return os.listdir(d)'))[0]?.fileOp).toBe('meta');
+    expect(fileSinks(tool('ls(d: str)', 'return [e.name for e in os.scandir(d)]'))[0]?.fileOp).toBe('meta');
+  });
+
+  it('follows the path through assignments, aliases and Path methods', () => {
+    expect(fileSinks(tool('read(name: str)', 'p = Path(name)', 'return p.read_bytes()'))[0]?.fileOp).toBe('read');
+    expect(fileSinks(tool('read(name: str)', 'p = Path(name)', "with p.open('a') as f:", "    f.write('x')"))[0]?.fileOp).toBe('write');
+    expect(fileSinks(['from os import remove', '@mcp.tool()', 'def rm(path: str):', '    remove(path)'])[0]?.fileOp).toBe('write');
+    expect(fileSinks(['import shutil as sh', '@mcp.tool()', 'def mv(a: str, b: str):', '    sh.move(a, b)'])[0]?.fileOp).toBe('write');
+    expect(fileSinks(['@server.call_tool()', 'async def call_tool(name, arguments):', '    return open(arguments["path"]).read()'])[0]?.fileOp).toBe('read');
+  });
+
+  it('does not fire on fixed paths, non-tool functions or non-Path receivers', () => {
+    expect(fileSinks(tool('read() -> str', "return Path('/srv/data/readme.md').read_text()"))).toHaveLength(0);
+    expect(fileSinks(['def helper(path):', '    return open(path).read()'])).toHaveLength(0);
+    expect(fileSinks(tool('read(name: str)', 'with zipfile.ZipFile(ARCHIVE) as z:', '    return z.open(name).read()'))).toHaveLength(0);
+    expect(fileSinks(tool('clean(name: str)', "return name.replace('..', '').strip()"))).toHaveLength(0);
+    expect(fileSinks(tool('read(name: str)', 'return open(os.path.join(BASE, hashlib.sha256(name.encode()).hexdigest())).read()'))).toHaveLength(0);
+    expect(fileSinks(tool('read(verbose: bool)', 'return open(verbose).read()'))).toHaveLength(0);
+  });
+
+  it('does not fire when the file confines paths to a base directory', () => {
+    expect(fileSinks(tool('read(path: str) -> str', 'p = (BASE / path).resolve()',
+      'if not p.is_relative_to(BASE):', "    raise ValueError('outside')", 'return p.read_text()'))).toHaveLength(0);
+    expect(fileSinks(tool('read(path: str)', 'full = os.path.realpath(path)',
+      'if os.path.commonpath([full, ROOT]) != ROOT:', "    raise ValueError('outside')", 'return open(full).read()'))).toHaveLength(0);
+    expect(fileSinks(tool('read(path: str)', 'full = os.path.realpath(path)',
+      'if not full.startswith(ROOT + os.sep):', "    raise ValueError('outside')", 'return open(full).read()'))).toHaveLength(0);
+    expect(fileSinks(tool('read(path: str)', 'full = os.path.realpath(path)',
+      'if full != os.path.realpath(ALLOWED):', "    raise ValueError('outside')", 'return open(full).read()'))).toHaveLength(0);
+    // a literal prefix test confines nothing
+    expect(fileSinks(tool('read(path: str)', 'full = os.path.realpath(path)',
+      "if full.startswith('http'):", "    raise ValueError('url')", 'return open(full).read()'))).toHaveLength(1);
+  });
+
+  it('reports a traversal join once, at the join', () => {
+    const findings = analyzePythonSinks(tool('read(rel_path: str)', 'full = os.path.join(BASE, rel_path)', 'return open(full).read()').join('\n'));
+    expect(findings.filter((f) => f.kind === 'injection')).toHaveLength(1);
+    expect(findings.filter((f) => f.kind === 'file-path')).toHaveLength(0);
+  });
+});

@@ -41,6 +41,8 @@ export interface MCPDiscoveryResult {
   unreadable?: string[];
   /** Explicitly given paths that parsed but hold no MCP servers in any known dialect. */
   empty?: string[];
+  /** The paths in `empty` that are in a known dialect, with a server table that is empty or holds only disabled servers. */
+  noServers?: string[];
   /** Discovered config files (discover) that exist but could not be read or parsed. */
   loadErrors?: MCPConfigLoadError[];
 }

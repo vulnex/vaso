@@ -337,4 +337,18 @@ describe('runMCPScan --source', () => {
     expect(consoleErrorLogs.join('\n')).toContain('No MCP servers found in /home/user/other.json');
     expect(mockScanMCP).toHaveBeenCalled();
   });
+
+  it('says a -p file in a known dialect declares no servers, and keeps the exit code', async () => {
+    mockDiscoverFromPaths.mockResolvedValue({ ...sampleDiscoveryResult, empty: ['/home/user/blank.json', '/home/user/other.json'], noServers: ['/home/user/blank.json'] });
+    mockResolveServerSources.mockResolvedValue([]);
+    mockScanMCP.mockResolvedValue(sampleScanResult);
+
+    await runMCPScan({ format: 'json', path: ['/home/user/blank.json', '/home/user/other.json'] });
+
+    const logs = consoleErrorLogs.join('\n');
+    expect(logs).toContain('No MCP servers found in /home/user/blank.json (the config declares no enabled servers)');
+    expect(logs).toContain('No MCP servers found in /home/user/other.json (no known config dialect matched)');
+    expect(logs).not.toContain('blank.json (no known config dialect matched)');
+    expect(process.exitCode ?? 0).toBe(0);
+  });
 });

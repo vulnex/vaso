@@ -1272,6 +1272,55 @@ describe('MCP-016: Insecure Redirect URI', () => {
   });
 });
 
+describe('MCP-011/MCP-016 beyond literals', () => {
+  const src = (sourceCode: string, language?: 'python'): MCPServerSource[] => [{ serverName: 'pkg', sourceCode, ...(language ? { language } : {}) }];
+  const flags011 = async (code: string, language?: 'python') => !(await mcp011.run(makeContext({ mcpServerSources: src(code, language) }))).passed;
+  const flags016 = async (code: string) => !(await mcp016.run(makeContext({ mcpServerSources: src(code) }))).passed;
+
+  it('MCP-011 folds a plaintext base URL constant into the OAuth URL it builds', async () => {
+    expect(await flags011('const AUTH_HOST = "http://auth.example.com";\nconst authorizeUrl = AUTH_HOST + "/authorize?client_id=" + id;')).toBe(true);
+    expect(await flags011('const AUTH_HOST = "http://auth.example.com";\nconst tokenUrl = new URL("/oauth/token", AUTH_HOST);')).toBe(true);
+    expect(await flags011('const AUTH_HOST = "http://auth.example.com";\nconst u = `${AUTH_HOST}/oauth2/authorize`;')).toBe(true);
+    expect(await flags011('AUTH_HOST = "http://auth.example.com"\nauthorize_url = f"{AUTH_HOST}/authorize"', 'python')).toBe(true);
+    expect(await flags011('AUTH_HOST = "http://auth.example.com"\ntoken_url = urljoin(AUTH_HOST, "/oauth/token")', 'python')).toBe(true);
+    const result = await mcp011.run(makeContext({ mcpServerSources: src('const AUTH_HOST = "http://auth.example.com";\nfetch(AUTH_HOST + "/oauth/token");') }));
+    expect(result.evidence?.map(e => e.line)).toEqual([2]);
+    expect(result.evidence?.[0].detail).toMatch(/same-file string constant/);
+  });
+
+  it('MCP-011 leaves HTTPS, loopback and ambiguous constants alone', async () => {
+    expect(await flags011('const AUTH_HOST = "https://auth.example.com";\nconst u = AUTH_HOST + "/authorize";')).toBe(false);
+    expect(await flags011('const AUTH_HOST = "http://localhost:8080";\nconst u = AUTH_HOST + "/authorize";')).toBe(false);
+    expect(await flags011('const AUTH_HOST = "http://127.0.0.1:9000";\nconst u = new URL("/oauth/token", AUTH_HOST);')).toBe(false);
+    // bound to two values: which one reaches the join is unknown
+    expect(await flags011('let AUTH_HOST = "http://auth.example.com";\nif (prod) { let AUTH_HOST = "https://auth.example.com"; }\nconst u = AUTH_HOST + "/authorize";')).toBe(false);
+    // the constant alone is not an OAuth endpoint
+    expect(await flags011('const API = "http://api.example.com";\nfetch(API + "/v1/items");')).toBe(false);
+  });
+
+  it('MCP-016 follows a request value bound to a name into a redirect', async () => {
+    expect(await flags016('const r = req.query.redirect_uri;\nres.redirect(r + "?code=" + code);')).toBe(true);
+    expect(await flags016('const { next } = req.query;\nres.redirect(302, next);')).toBe(true);
+    expect(await flags016('const to = url.searchParams.get("to");\nres.writeHead(302, { Location: to });')).toBe(true);
+    expect(await flags016('const r = req.query.redirect_uri;\nres.redirect(`${r}?code=${code}`);')).toBe(true);
+  });
+
+  it('MCP-016 leaves checked or fixed-host redirects alone', async () => {
+    expect(await flags016('const r = req.query.redirect_uri;\nif (!client.redirectUris.includes(r)) return res.status(400).end();\nres.redirect(r + "?code=" + code);')).toBe(false);
+    expect(await flags016('const r = req.query.redirect_uri;\nif (r !== registered) throw new Error("bad");\nres.redirect(r);')).toBe(false);
+    expect(await flags016('const r = req.query.next;\nres.redirect("https://app.example.com/?next=" + encodeURIComponent(r));')).toBe(false);
+    expect(await flags016('const r = req.query.next;\nconsole.log(r);\nres.redirect("/home");')).toBe(false);
+  });
+
+  it('MCP-016 flags a wildcard redirect allowlist in a config object', async () => {
+    expect(await flags016('const oauth = { allowedRedirect: "*", scopes: ["read"] };')).toBe(true);
+    expect(await flags016('const cfg = { redirectUris: ["*"] };')).toBe(true);
+    expect(await flags016('ALLOWED_REDIRECTS = ["*"]')).toBe(true);
+    expect(await flags016('const oauth = { allowedRedirect: "https://app.example.com/cb" };')).toBe(false);
+    expect(await flags016('fetch(url, { redirect: "follow" });')).toBe(false);
+  });
+});
+
 // ==================== MCP-017: Overly Broad Scopes ====================
 describe('MCP-017: Overly Broad OAuth Scopes', () => {
   it('detects wildcard and admin scopes', async () => {
@@ -2958,6 +3007,57 @@ describe('Python MCP server source', () => {
   it('MCP-006 does not run the JavaScript data-flow analyzer on Python', async () => {
     const result = await mcp006.run(makeContext({ mcpServerSources: [workspaceServer] }));
     expect(result.passed).toBe(true);
+  });
+
+  const fileTools: MCPServerSource = {
+    serverName: 'files',
+    localPath: '/srv/files.py',
+    language: 'python',
+    sourceCode: [
+      'import os',
+      'from pathlib import Path',
+      '@mcp.tool()',
+      'def read_file(path: str) -> str:',
+      '    return Path(path).read_text()',
+      '@mcp.tool()',
+      'def write_file(path: str, data: str) -> None:',
+      '    Path(path).write_text(data)',
+      '@mcp.tool()',
+      'def list_dir(path: str) -> list[str]:',
+      '    return os.listdir(path)',
+    ].join('\n'),
+  };
+
+  it('MCP-005 reports Python file reads and writes at a caller-named path', async () => {
+    const result = await mcp005.run(makeContext({ mcpServerSources: [fileTools] }));
+    expect(result.evidence?.map(e => e.line)).toEqual([5, 8]);
+    expect(result.evidence?.[0].detail).toMatch(/reads a path taken from tool input \(path\).*path traversal/);
+    expect(result.evidence?.[1].detail).toMatch(/writes/);
+    expect(result.severity).toBe('critical');
+  });
+
+  it('MCP-009 reports a Python listing of a caller-named path; MCP-004 counts none of them as exec', async () => {
+    const scope = await mcp009.run(makeContext({ mcpServerSources: [fileTools] }));
+    expect(scope.evidence?.map(e => e.line)).toEqual([11]);
+    const exec = await mcp004.run(makeContext({ mcpServerSources: [fileTools] }));
+    expect(exec.passed).toBe(true);
+  });
+
+  it('MCP-005/MCP-009 stay quiet when the Python server confines paths', async () => {
+    const confined: MCPServerSource = {
+      ...fileTools,
+      sourceCode: fileTools.sourceCode!.replace('import os\n', [
+        'import os',
+        'def safe(p):',
+        '    full = (ROOT / p).resolve()',
+        '    if not full.is_relative_to(ROOT):',
+        "        raise ValueError('outside root')",
+        '    return full',
+        '',
+      ].join('\n')),
+    };
+    expect((await mcp005.run(makeContext({ mcpServerSources: [confined] }))).passed).toBe(true);
+    expect((await mcp009.run(makeContext({ mcpServerSources: [confined] }))).passed).toBe(true);
   });
 });
 

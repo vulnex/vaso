@@ -3,6 +3,7 @@ import { defineCheck } from '../../core/check-builder.js';
 import { sourceSegments } from '../../mcp/source-segments.js';
 import { isRemotePlaintextUrl } from '../../mcp/remote-endpoint.js';
 import { sourceSnippet } from '../../mcp/source-snippet.js';
+import { foldConstants, stringConstants } from '../../mcp/source-constants.js';
 
 const OAUTH_URL_ENV_PATTERNS = /(?:oauth|auth|token|authorize)[_-]?(?:url|endpoint|uri|server)/i;
 
@@ -12,6 +13,8 @@ const OAUTH_URL_ENV_PATTERNS = /(?:oauth|auth|token|authorize)[_-]?(?:url|endpoi
  * scheme matched in any case (`HTTP://`).
  */
 const REMOTE_HTTP = String.raw`[hH][tT][tT][pP]:\/\/(?!(?:localhost|127(?:\.\d{1,3}){3}|\[::1\])(?:[:/'"\x60\s]|$))`;
+
+const REMOTE_HTTP_URL = new RegExp('^' + REMOTE_HTTP);
 
 const SOURCE_HTTP_OAUTH_PATTERNS = [
   { pattern: new RegExp(String.raw`authorization_endpoint['":\s]*['"]?` + REMOTE_HTTP), detail: 'HTTP authorization_endpoint URL' },
@@ -55,17 +58,24 @@ export const mcp011 = defineCheck({
     // Source scan: check for HTTP OAuth URLs in code
     for (const source of mcpServerSources) {
       if (!source.sourceCode) continue;
-      const segments = sourceSegments(source.sourceCode, { python: source.language === 'python' });
+      const python = source.language === 'python';
+      const segments = sourceSegments(source.sourceCode, { python });
+      // A plaintext base URL held in a constant and joined with an OAuth path
+      // where it is used (`AUTH_HOST + "/authorize"`, `new URL("/oauth/token", AUTH_HOST)`)
+      const constants = stringConstants(source.sourceCode, { python });
+      const remoteConstant = [...constants.values.values()].some((v) => REMOTE_HTTP_URL.test(v));
 
       for (let i = 0; i < segments.length; i++) {
         const line = segments[i].text;
+        const folded = remoteConstant ? foldConstants(line, constants) : undefined;
         for (const { pattern, detail } of SOURCE_HTTP_OAUTH_PATTERNS) {
-          if (pattern.test(line)) {
+          const direct = pattern.test(line);
+          if (direct || (folded !== undefined && pattern.test(folded))) {
             evidence.push({
               file: source.localPath ?? source.serverName,
               line: segments[i].line,
               snippet: sourceSnippet(source, line),
-              detail,
+              detail: direct ? detail : `${detail} (built from a same-file string constant)`,
             });
             break; // one finding per line: the patterns overlap on one URL
           }

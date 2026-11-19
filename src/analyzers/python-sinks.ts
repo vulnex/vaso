@@ -55,7 +55,8 @@ function nextQuote(text: string, from: number): number {
 }
 
 export interface PythonSinkFinding {
-  kind: 'exec' | 'fs-access' | 'injection';
+  /** `file-path`: a file read, written or listed at a path tool input names (see `fileOp`). */
+  kind: 'exec' | 'fs-access' | 'injection' | 'file-path';
   line: number;
   snippet: string;
   /** The whole line when `snippet` is a cut of it. */
@@ -67,8 +68,10 @@ export interface PythonSinkFinding {
   dynamic?: boolean;
   /** exec: the command/code is decoded at runtime (base64, hex, rot13). */
   decoded?: boolean;
-  /** exec: tool input reaches the call — how, e.g. `cmd ← query`. */
+  /** exec, file-path: tool input reaches the call — how, e.g. `cmd ← query`. */
   toolInput?: string;
+  /** file-path: what the call does with the path (listing/stat-only paths are `meta`). */
+  fileOp?: 'read' | 'write' | 'meta';
 }
 
 /** `text` with string-literal contents replaced by spaces (same length, quotes kept). */
@@ -144,7 +147,7 @@ const STRING_LITERAL = /["']([^"']{2,})["']/g;
 const DECODES = /\b(?:b64decode|urlsafe_b64decode|b32decode|b16decode|b85decode|a85decode|unhexlify|a2b_base64|fromhex)\s*\(|\bcodecs\.decode\s*\(/;
 
 /** Modules whose functions are sinks, by the name this file binds them to. */
-const SINK_MODULES = new Set(['os', 'subprocess', 'asyncio', 'pty', 'commands']);
+const SINK_MODULES = new Set(['os', 'subprocess', 'asyncio', 'pty', 'commands', 'shutil']);
 
 export interface CodeLine {
   line: number;
@@ -487,7 +490,7 @@ function aliasRewriter(code: string): (text: string, line?: number) => string {
   // name → the bodies importing it, as [first line, last line, target]
   const scopedCalls = new Map<string, Array<[number, number, string]>>();
   const scopes = definitionScopes(code);
-  for (const m of code.matchAll(/^[ \t]*from[ \t]+(os|subprocess|asyncio|pty)[ \t]+import[ \t]+\(?([^\n#)]+)/gm)) {
+  for (const m of code.matchAll(/^[ \t]*from[ \t]+(os|subprocess|asyncio|pty|shutil)[ \t]+import[ \t]+\(?([^\n#)]+)/gm)) {
     const body = /^[ \t]/.test(m[0]) ? scopes.enclosing(m.index ?? 0) : undefined;
     for (const part of m[2].split(',')) {
       const im = /^\s*(\w+)(?:\s+as\s+(\w+))?\s*$/.exec(part);
@@ -889,7 +892,7 @@ export function topLevelParts(text: string): string[] {
 }
 
 /** Calls whose result still carries their argument's text. */
-const PASSTHROUGH_CALLS = /^(?:str|f|format|join|replace|strip|lstrip|rstrip|lower|upper|split|splitlines|shlex\.split|shlex\.join|os\.path\.join|os\.path\.expanduser|Path|list|tuple|dict|get|pop|encode|decode|append|extend|copy)$/;
+const PASSTHROUGH_CALLS = /^(?:str|f|format|join|replace|strip|lstrip|rstrip|lower|upper|split|splitlines|shlex\.split|shlex\.join|os\.path\.join|os\.path\.expanduser|os\.path\.(?:realpath|abspath|normpath)|Path|list|tuple|dict|get|pop|encode|decode|append|extend|copy)$/;
 
 /**
  * The parts of an assigned expression whose value flows into the variable:
@@ -961,6 +964,92 @@ function taintedNames(stmts: Array<CodeLine & { last: number }>, fns: PyFunction
   return tainted;
 }
 
+/**
+ * Evidence that the file confines caller paths to a base directory: a
+ * resolved path (`resolve()`, `realpath`, `abspath`) checked against a base
+ * (`is_relative_to`, `relative_to`, `commonpath`, `startswith(<base>)`), or
+ * two resolved paths compared. A `startswith("http")` on a literal confines
+ * nothing.
+ */
+const PATH_CONFINES = /\.(?:is_relative_to|relative_to)\s*\(|\bcommon(?:path|prefix)\s*\(|\.startswith\s*\(\s*(?![rRbBuUfF]{0,2}["'])|\b(?:realpath|abspath)\s*\([^\n]*\)\s*(?:==|!=)|(?:==|!=)\s*(?:os\.path\.)?(?:realpath|abspath)\s*\(/;
+function confinesPythonPaths(code: string): boolean {
+  return RESOLVES.test(code) && PATH_CONFINES.test(code);
+}
+
+type FileOp = 'read' | 'write' | 'meta';
+/** Module-level file calls by what they do with their path argument(s). `open` reads or writes by its mode. */
+const PY_FS_FUNCS = new Map<string, { op: FileOp | 'open'; paths: number }>([
+  ...['open', 'io.open', 'codecs.open', 'aiofiles.open'].map((n) => [n, { op: 'open' as const, paths: 1 }] as const),
+  ...['os.remove', 'os.unlink', 'os.rmdir', 'os.removedirs', 'os.makedirs', 'os.mkdir', 'os.chmod', 'os.truncate', 'shutil.rmtree']
+    .map((n) => [n, { op: 'write' as const, paths: 1 }] as const),
+  ...['os.rename', 'os.replace', 'os.symlink', 'os.link', 'shutil.copy', 'shutil.copy2', 'shutil.copyfile', 'shutil.copytree', 'shutil.move']
+    .map((n) => [n, { op: 'write' as const, paths: 2 }] as const),
+  ...['os.listdir', 'os.scandir', 'os.walk', 'os.stat', 'os.lstat', 'glob.glob', 'glob.iglob']
+    .map((n) => [n, { op: 'meta' as const, paths: 1 }] as const),
+]);
+const PY_FS_CALL = /(?<![\w.])(?<!\bdef\s+)((?:io|codecs|aiofiles|os|shutil|glob)\.)?(\w+)\s*\(/g;
+/** Keyword names the path arguments of those calls go by. */
+const PATH_KEYWORDS = ['file', 'path', 'src', 'dst', 'top', 'pathname'];
+/** pathlib methods by what they do with the receiver's path. */
+const PATH_METHODS: Record<string, FileOp | 'open'> = {
+  read_text: 'read', read_bytes: 'read', open: 'open',
+  write_text: 'write', write_bytes: 'write', unlink: 'write', rmdir: 'write', mkdir: 'write', touch: 'write',
+  rename: 'write', symlink_to: 'write', iterdir: 'meta', glob: 'meta', rglob: 'meta', stat: 'meta', lstat: 'meta',
+};
+/** Method names other types share (file objects, zip members, dicts): only a Path receiver counts. */
+const AMBIGUOUS_METHODS = new Set(['open', 'glob', 'stat', 'lstat', 'rename', 'mkdir', 'rmdir']);
+const PATH_METHOD = /\.(read_text|read_bytes|open|write_text|write_bytes|unlink|rmdir|mkdir|touch|rename|symlink_to|iterdir|glob|rglob|stat|lstat)\s*\(/g;
+const PATH_CALL_RECEIVER = /^\(|^(?:pathlib\.)?(?:Pure|Posix|Windows)?Path\s*\(/;
+
+/** A literal open mode that writes (`"w"`, `'ab'`, `"r+"`); anything else reads. */
+const writesMode = (mode: string | undefined): boolean => mode !== undefined && /^\s*[rRbBuU]{0,2}["'][^"']*[wax+]/.test(mode);
+
+/** Where the receiver expression ending right before `code[dot]` starts (`Path(p)`, `(ROOT / name)`, `self.p`). */
+function receiverStart(code: string, dot: number): number | undefined {
+  let i = dot;
+  if (code[i - 1] === ')' || code[i - 1] === ']') {
+    let depth = 0;
+    for (i = dot - 1; i >= 0; i--) {
+      const c = code[i];
+      if (c === ')' || c === ']') depth++;
+      else if ((c === '(' || c === '[') && --depth === 0) break;
+    }
+    if (i < 0) return undefined;
+  }
+  while (i > 0 && /[\w.]/.test(code[i - 1])) i--;
+  return i < dot ? i : undefined;
+}
+
+/** File calls in a statement: the call, what it does with its path(s), and the path expressions. */
+function pythonFileCalls(text: string, pathNames: Set<string>): Array<{ sink: string; op: FileOp; paths: string[] }> {
+  const code = blankStrings(text);
+  const out: Array<{ sink: string; op: FileOp; paths: string[] }> = [];
+  for (const m of code.matchAll(PY_FS_CALL)) {
+    const sink = (m[1] ?? '') + m[2];
+    const spec = PY_FS_FUNCS.get(sink);
+    if (!spec) continue;
+    const { positional, keywords } = splitArgs(callArgs(text, m.index + m[0].length - 1));
+    const op = spec.op === 'open' ? (writesMode(positional[1] ?? keywords.get('mode')) ? 'write' : 'read') : spec.op;
+    const paths = positional.slice(0, spec.paths);
+    for (const kw of PATH_KEYWORDS) if (keywords.has(kw)) paths.push(keywords.get(kw)!);
+    out.push({ sink, op, paths });
+  }
+  for (const m of code.matchAll(PATH_METHOD)) {
+    const method = m[1];
+    const start = receiverStart(code, m.index);
+    if (start === undefined) continue;
+    const receiver = text.slice(start, m.index);
+    if (AMBIGUOUS_METHODS.has(method) && !PATH_CALL_RECEIVER.test(receiver) && !pathNames.has(receiver)) continue;
+    const { positional, keywords } = splitArgs(callArgs(text, m.index + m[0].length - 1));
+    const spec = PATH_METHODS[method];
+    const op = spec === 'open' ? (writesMode(positional[0] ?? keywords.get('mode')) ? 'write' : 'read') : spec;
+    // `p.rename(target)`, `link.symlink_to(target)`: the argument is a path too
+    const paths = method === 'rename' || method === 'symlink_to' ? [receiver, ...positional.slice(0, 1)] : [receiver];
+    out.push({ sink: `${receiver.length > 40 ? receiver.slice(0, 37) + '…' : receiver}.${method}`, op, paths });
+  }
+  return out;
+}
+
 export function analyzePythonSinks(code: string): PythonSinkFinding[] {
   const findings: PythonSinkFinding[] = [];
   const rewrite = aliasRewriter(code);
@@ -982,6 +1071,10 @@ export function analyzePythonSinks(code: string): PythonSinkFinding[] {
   const pathNames = new Set<string>();
   if (touchesFiles) for (const m of code.matchAll(PATH_BINDING)) pathNames.add(m[1]);
   const injectedLines = new Set<number>();
+  // Lines with a path traversal join, and the names they bind: a file call
+  // on that path is the same flaw, reported once at the join
+  const joinLines = new Set<number>();
+  const joinedNames = new Set<string>();
 
   // Physical-line rules: injection shapes visible on one line.
   for (const { line, text: raw } of lines) {
@@ -1021,6 +1114,9 @@ export function analyzePythonSinks(code: string): PythonSinkFinding[] {
       const root = expr?.split('.')[0] ?? '';
       const fromInput = expr && (!fnHere || fnHere.params.includes(root) || root === 'self' || tainted.get(fnHere)?.has(root) === true);
       if (expr && INPUT_PATH_NAME.test(joined) && fromInput) {
+        joinLines.add(line);
+        const target = si >= 0 ? /^\s*([A-Za-z_]\w*)\s*(?::[^=]+)?=(?!=)/.exec(stmts[si].text)?.[1] : undefined;
+        if (target) joinedNames.add(`${fnHere?.start ?? -1}:${target}`);
         findings.push({
           kind: 'injection',
           line,
@@ -1101,6 +1197,39 @@ export function analyzePythonSinks(code: string): PythonSinkFinding[] {
       break;
     }
   });
+
+  // Statement-level: a file read, written or listed at a path tool input
+  // names, with nothing in the file confining paths to a base directory
+  if (!confinesPythonPaths(code)) {
+    const pathBound = new Set(pathNames);
+    if (!touchesFiles) for (const m of code.matchAll(PATH_BINDING)) pathBound.add(m[1]);
+    stmts.forEach((stmt, i) => {
+      const fn = fnAt(i);
+      const names = fn ? tainted.get(fn)! : undefined;
+      if (!fn || !names || names.size === 0) return;
+      for (let l = stmt.line; l <= stmt.last; l++) if (joinLines.has(l)) return;
+      const text = rewrite(stmt.text, stmt.line);
+      for (const call of pythonFileCalls(text, pathBound)) {
+        const from = call.paths.map((p) => dataPart(p)).flatMap((p) => [...names.keys()].filter((n) => mentions(p, n)))[0];
+        if (from === undefined) continue;
+        // Derived from a path already reported at its join
+        const chain = names.get(from)!.split(' ← ');
+        if (chain.some((n) => joinedNames.has(`${fn.start}:${n}`))) continue;
+        const verb = call.op === 'read' ? 'reads' : call.op === 'write' ? 'writes' : 'lists or stats';
+        findings.push({
+          kind: 'file-path',
+          fileOp: call.op,
+          line: stmt.line,
+          ...cutLine((lineText.get(stmt.line) ?? '').trim()),
+          toolInput: names.get(from),
+          description: call.op === 'meta'
+            ? `${call.sink}() takes its path from tool input (${names.get(from)}) with no base-directory check — the tool reaches any path on the host`
+            : `${call.sink}() ${verb} a path taken from tool input (${names.get(from)}) with no containment check — the caller can ${call.op} any file the server can (path traversal)`,
+        });
+        break;
+      }
+    });
+  }
 
   return findings.sort((a, b) => a.line - b.line);
 }

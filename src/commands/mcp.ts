@@ -18,7 +18,11 @@ import type { MCPConfigLoadError, MCPDiscoveryResult } from '../mcp/types.js';
 
 /** Paths named with -p must exist and parse; otherwise nothing would be scanned silently. */
 function reportUnreadable(result: MCPDiscoveryResult): boolean {
-  for (const p of result.empty ?? []) console.error(chalk.yellow(`No MCP servers found in ${p} (no known config dialect matched)`));
+  const declared = new Set(result.noServers);
+  for (const p of result.empty ?? []) {
+    const why = declared.has(p) ? 'the config declares no enabled servers' : 'no known config dialect matched';
+    console.error(chalk.yellow(`No MCP servers found in ${p} (${why})`));
+  }
   if (!result.unreadable?.length) return false;
   for (const p of result.unreadable) console.error(chalk.red(`Cannot read MCP config (missing or not valid JSON): ${p}`));
   process.exitCode = EXIT_USAGE;

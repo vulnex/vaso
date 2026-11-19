@@ -477,6 +477,15 @@ describe('MCPDiscovery — Abacus.AI', () => {
       expect(result.empty).toEqual([join(home, 'none.json')]);
       expect(result.unreadable).toBeUndefined();
     });
+
+    it('-p: tells a known dialect with an empty server table from a file in no dialect', async () => {
+      await w('blank.json', JSON.stringify({ mcpServers: {} }));
+      await w('none.json', JSON.stringify({ theme: 'dark' }));
+      await w('codex.toml', 'model = "o3"\n[mcp_servers]\n');
+      const result = await new MCPDiscovery(new HomeFS()).discoverFromPaths([join(home, 'blank.json'), join(home, 'none.json'), join(home, 'codex.toml')]);
+      expect(result.empty).toEqual([join(home, 'blank.json'), join(home, 'none.json'), join(home, 'codex.toml')]);
+      expect(result.noServers).toEqual([join(home, 'blank.json'), join(home, 'codex.toml')]);
+    });
   });
 });
 

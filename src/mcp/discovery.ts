@@ -581,6 +581,7 @@ export class MCPDiscovery {
     const configs: MCPConfig[] = [];
     const unreadable: string[] = [];
     const empty: string[] = [];
+    const noServers: string[] = [];
 
     for (const filePath of paths) {
       if (!await this.fs.access(filePath)) { unreadable.push(filePath); continue; }
@@ -604,7 +605,10 @@ export class MCPDiscovery {
         }
         // ~/.claude.json: local-scope servers per project
         configs.push(...projects);
-        if (servers.length === 0 && projects.length === 0) empty.push(filePath);
+        if (servers.length === 0 && projects.length === 0) {
+          empty.push(filePath);
+          if (declaresServers(format, data)) noServers.push(filePath);
+        }
       } catch {
         // The caller named this file — report it rather than scan nothing
         unreadable.push(filePath);
@@ -617,8 +621,21 @@ export class MCPDiscovery {
       totalServers,
       ...(unreadable.length > 0 ? { unreadable } : {}),
       ...(empty.length > 0 ? { empty } : {}),
+      ...(noServers.length > 0 ? { noServers } : {}),
     };
   }
+}
+
+/** The file has a server table of some known dialect (`{"mcpServers": {}}`), whatever it holds. */
+function declaresServers(format: 'json' | 'toml' | 'yaml', data: Record<string, unknown>): boolean {
+  const present = (v: unknown): boolean => v !== undefined && v !== null;
+  if (format === 'toml') return present(data.mcp_servers);
+  const tools = data.tools as Record<string, unknown> | undefined;
+  const mcp = data.mcp as Record<string, unknown> | undefined;
+  return present(data.mcpServers) || present(data.servers) || present(data.mcp_servers)
+    || (!!tools && typeof tools === 'object' && (present(tools.mcpServers) || present(tools.mcp_servers)
+      || present((tools.mcp as Record<string, unknown> | undefined)?.servers)))
+    || (!!mcp && typeof mcp === 'object' && !Array.isArray(mcp));
 }
 
 /**
