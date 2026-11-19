@@ -82,10 +82,12 @@ describe('collectSkillInventory', () => {
     const { inventory } = await collectSkillInventory(inst([root]), fs);
 
     expect(inventory.skills).toEqual([]);
+    // every text file is read (a README, notes); only scripts are code
     expect(inventory.otherEntries.map(e => [e.path.slice(root.length + 1), e.type, e.files, e.hasCode]).sort()).toEqual([
-      ['empty-dir', 'directory', 0, false],
+      ['empty-dir', 'directory', 1, false],
       ['helper', 'directory', 1, true],
       ['loose.sh', 'file', 1, true],
+      ['notes.txt', 'file', 1, false],
     ]);
   });
 

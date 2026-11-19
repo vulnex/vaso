@@ -1,7 +1,8 @@
 import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
 import { scanWithPatterns, SECURITY_PATTERNS } from '../../analyzers/pattern-engine.js';
-import { readSkillText, skillFilesOf, skillsDirsOf, noSkillsDirResult } from './skill-files.js';
+import { skillFilesOf, skillsDirsOf, noSkillsDirResult } from './skill-files.js';
+import { readSkillSource } from './skill-source.js';
 import { markTestCode } from '../../analyzers/test-paths.js';
 
 const CRYPTO_RULES = SECURITY_PATTERNS.filter(r => r.category === 'crypto-wallet');
@@ -37,8 +38,11 @@ export const skl009 = defineCheck({
 
     for (const file of files) {
       try {
-        const code = await readSkillText(ctx.fs, file, 'patterns');
-        if (code === undefined) continue;
+        // Code and documentation code blocks: a data file listing token
+        // contracts targets nothing
+        const src = await readSkillSource(ctx, file, 'patterns', 'blocks', { data: false });
+        if (src === undefined || src.kind === 'data' || src.kind === 'manifest') continue;
+        const code = src.text;
         const matches = scanWithPatterns(code, CRYPTO_RULES);
         const addresses = matches.filter(m => ADDRESS_RULES.has(m.pattern));
         const targeting = TARGETING.some(re => re.test(code)) || TRANSFER_TO_LITERAL.test(code);

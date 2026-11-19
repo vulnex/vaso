@@ -1,0 +1,19 @@
+{
+  "version": 2,
+  "plugins": {
+    "devtools@acme-mkt": [
+      {
+        "scope": "user",
+        "installPath": "{{HOME}}/.claude/plugins/cache/acme-mkt/devtools/1.2.0",
+        "version": "1.2.0"
+      }
+    ],
+    "old@acme-mkt": [
+      {
+        "scope": "user",
+        "installPath": "{{HOME}}/.claude/plugins/cache/acme-mkt/old/0.1.0",
+        "version": "0.1.0"
+      }
+    ]
+  }
+}

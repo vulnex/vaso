@@ -1,13 +1,13 @@
 import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
 import { scanWithPatterns, SECURITY_PATTERNS } from '../../analyzers/pattern-engine.js';
-import { readSkillText, skillFilesOf, skillsDirsOf, noSkillsDirResult } from './skill-files.js';
+import { skillFilesOf, skillsDirsOf, noSkillsDirResult } from './skill-files.js';
+import { packageScripts, readSkillSource } from './skill-source.js';
 import { markTestCode } from '../../analyzers/test-paths.js';
+import { hookStatements } from '../../analyzers/hook-commands.js';
+import { truncateSnippet } from '../../core/patterns.js';
 
 const CURL_PIPE_RULES = SECURITY_PATTERNS.filter(r => r.category === 'curl-pipe');
-
-/** Skill documentation (SKILL.md, references): instructions, not code that runs on its own. */
-const DOC_FILE = /\.(?:md|mdx|markdown|txt|rst)$/i;
 /** Hosts that hide where a script really comes from. */
 const OPAQUE_HOSTS = /^(?:bit\.ly|tinyurl\.com|t\.co|is\.gd|goo\.gl|cutt\.ly|rb\.gy|pastebin\.com|paste\.ee|hastebin\.com|termbin\.com|transfer\.sh|0x0\.st|ngrok(?:-free)?\.(?:io|app|dev)|[\w-]+\.ngrok(?:-free)?\.(?:io|app|dev)|[\w-]+\.trycloudflare\.com)$/i;
 /** Official installers of widely used developer tools. */
@@ -52,22 +52,52 @@ export const skl004 = defineCheck({
 
     for (const file of files) {
       try {
-        const code = await readSkillText(ctx.fs, file, 'patterns');
-        if (code === undefined) continue;
-        const matches = scanWithPatterns(code, CURL_PIPE_RULES);
+        const src = await readSkillSource(ctx, file, 'patterns', 'prose');
+        if (src === undefined) continue;
+        if (src.kind === 'manifest') {
+          // npm runs lifecycle scripts by itself on `npm install`; the
+          // others only when asked (`npm run setup`), as documentation does
+          for (const script of packageScripts(src)) {
+            const match = hookStatements(script.command).map(s => scanWithPatterns(s, CURL_PIPE_RULES)[0]).find(Boolean);
+            if (!match) continue;
+            const tier = script.lifecycle ? 'critical' : docTier(script.command);
+            if (tier === 'critical') critical = true;
+            evidence.push({
+              file,
+              line: script.line,
+              snippet: truncateSnippet(`"${script.name}": ${script.command}`),
+              detail: script.lifecycle
+                ? `${match.description} in the npm "${script.name}" script — npm runs it on its own on \`npm install\``
+                : `${match.description} in the npm "${script.name}" script (runs on \`npm run ${script.name}\`)`,
+              ...(tier === 'info' ? { mitigated: true } : {}),
+            });
+          }
+          continue;
+        }
+        const matches = scanWithPatterns(src.text, CURL_PIPE_RULES);
 
-        const doc = DOC_FILE.test(file);
-        const lines = doc ? code.split('\n') : [];
+        // Documentation and data files are instructions, not code that runs
+        // on its own — except the `!`cmd`` spans Claude Code runs on load
+        const doc = src.kind !== 'script';
+        const lines = doc ? src.text.split('\n') : [];
         for (const match of matches) {
-          const tier = doc ? docTier(lines[match.line - 1] ?? match.snippet) : 'critical';
+          const onLoad = src.loadCommands?.get(match.line)?.some(cmd => scanWithPatterns(cmd, CURL_PIPE_RULES).length > 0);
+          let tier = doc && !onLoad ? docTier(lines[match.line - 1] ?? match.snippet) : 'critical';
+          // A sentence (no code block, no inline code) installing from a
+          // named https host describes the install; an opaque source stays critical
+          const sentence = tier === 'warning' && src.proseLines?.has(match.line) === true;
+          if (sentence) tier = 'info';
           if (tier === 'critical') critical = true;
           evidence.push({
             file,
             line: match.line,
             snippet: match.snippet,
-            detail: doc && tier !== 'critical'
-              ? `${match.description} in skill documentation${tier === 'info' ? ' (no download URL, or a well-known vendor installer)' : ' — installer from a named https host'}`
-              : match.description,
+            detail: onLoad
+              ? `${match.description} in a !\`…\` command — Claude Code runs it when it loads the skill, before the model reads it`
+              : sentence ? `${match.description} in a sentence of skill documentation — installer from a named https host`
+                : doc && tier !== 'critical'
+                  ? `${match.description} in skill documentation${tier === 'info' ? ' (no download URL, or a well-known vendor installer)' : ' — installer from a named https host'}`
+                  : match.description,
             ...(tier === 'info' ? { mitigated: true } : {}),
           });
         }

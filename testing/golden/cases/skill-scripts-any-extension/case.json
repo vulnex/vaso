@@ -1,0 +1,9 @@
+{
+  "agent": "claude-code",
+  "source": "True positive: scripts a SKILL.md runs whatever their name (an extensionless 644 script, a .txt run with python3, a .data run with node), a package.json postinstall, a reference doc",
+  "fail": {
+    "SKL-001": "critical",
+    "SKL-004": "critical",
+    "SKL-006": "critical"
+  }
+}

@@ -1,10 +1,12 @@
-import { dirname, extname, join, normalize } from 'node:path';
+import { basename, dirname, join, normalize } from 'node:path';
 import type { Evidence, Severity } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
-import { analyzeCode, type DataFlowResult } from '../../analyzers/ast-analyzer.js';
-import { analyzePythonDataFlow } from '../../analyzers/python-sinks.js';
-import { readSkillText, skillFilesOf, skillsDirsOf, noSkillsDirResult } from './skill-files.js';
+import type { DataFlowResult } from '../../analyzers/ast-analyzer.js';
+import { skillFilesOf, skillsDirsOf, noSkillsDirResult } from './skill-files.js';
+import { analyzeSkillSource, commandsRunOnTheirOwn, readSkillSource } from './skill-source.js';
 import { markTestCode } from '../../analyzers/test-paths.js';
+import { hookCommandRisks } from '../../analyzers/hook-commands.js';
+import { truncateSnippet } from '../../core/patterns.js';
 
 /**
  * How serious a flow is by what it carries. A credential store, the
@@ -60,11 +62,28 @@ export const skl001 = defineCheck({
 
     for (const file of files) {
       try {
-        const code = await readSkillText(ctx.fs, file, 'code');
-        if (code === undefined) continue;
-        // Python skill scripts go through the Python analyzer; Babel can't read them.
-        const flows = extname(file).toLowerCase() === '.py' ? analyzePythonDataFlow(code) : analyzeCode(code, file);
-        for (const flow of flows) {
+        // Shell commands that run on their own: a SKILL.md's `!`cmd`` spans
+        // (Claude Code, on load) and a package.json's install scripts (npm)
+        if (basename(file).toUpperCase() === 'SKILL.MD' || basename(file) === 'package.json') {
+          const src = await readSkillSource(ctx, file, 'patterns', 'prose');
+          for (const run of src ? commandsRunOnTheirOwn(src) : []) {
+            for (const risk of hookCommandRisks(run.command)) {
+              if (!risk.reason.startsWith('sends')) continue;
+              levels.push(risk.tier);
+              evidence.push({
+                file,
+                line: run.line,
+                snippet: truncateSnippet(run.command),
+                detail: `${run.label} ${risk.reason}`,
+                ...(risk.tier === 'info' ? { mitigated: true } : {}),
+              });
+            }
+          }
+          continue;
+        }
+        const src = await readSkillSource(ctx, file, 'code');
+        if (src === undefined) continue;
+        for (const flow of analyzeSkillSource(src)) {
           if (flow.type === 'source-to-sink') add(file, flow, flow.description);
           else if (flow.type === 'module-call') moduleCalls.push({ file, flow });
           else if (flow.type === 'param-sink') paramSinks.set(file, [...(paramSinks.get(file) ?? []), flow]);

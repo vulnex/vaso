@@ -93,7 +93,8 @@ describe('a link in a skills tree to a tree over the entry limit', () => {
     const links = await skl013.run(ctx);
     expect(links.evidence?.find(e => e.file === join(skills, 'big'))?.detail).toMatch(/over the 10000-entry limit VASO walks, so its code is not scanned \(see SKL-002\)/);
     expect(links.evidence?.find(e => e.file === join(skills, 'exact'))?.detail).toMatch(/its code is scanned there/);
-  });
+    // SKL-002 reads every text file of the walked tree: 20,000 empty pad files
+  }, 30_000);
 
   it('a link to a huge tree is refused in about a second', async () => {
     const huge = join(outside, 'huge');

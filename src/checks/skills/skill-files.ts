@@ -1,11 +1,7 @@
-import { extname } from 'node:path';
 import type { CheckModule, CheckResult, Evidence, ScanContext, UnscannedSkillsDir } from '../../core/types.js';
 import type { CheckHelpers } from '../../core/check-builder.js';
-import type { FSProvider } from '../../core/fs-provider.js';
-import { BINARY_EXTENSIONS, getAllSkillsDirs, getSkillFiles, listSkillTree } from '../../core/utils.js';
-import { readCappedFile } from '../../core/file-limits.js';
+import { getAllSkillsDirs, getSkillFiles, listSkillTree } from '../../core/utils.js';
 import { unscannedShortReason } from '../../core/skill-root-scope.js';
-import { binaryFileFormat, sourceText } from '../../analyzers/binary-text.js';
 
 /** Every skills directory of the installation (not just the primary one). */
 export function skillsDirsOf(ctx: ScanContext): string[] {
@@ -78,9 +74,16 @@ export function unscannedRootsNote(ctx: ScanContext): string {
 /** The engine's skill file list, else a walk of every skills directory. */
 export async function skillFilesOf(ctx: ScanContext): Promise<string[]> {
   if (ctx.skillFiles) return ctx.skillFiles;
-  const lists = await Promise.all(skillsDirsOf(ctx).map(d => getSkillFiles(d, ctx.fs)));
-  return [...new Set(lists.flat())];
+  // one walk per context, however many helpers of a check ask
+  let walk = walks.get(ctx);
+  if (!walk) {
+    walk = Promise.all(skillsDirsOf(ctx).map(d => getSkillFiles(d, ctx.fs))).then(lists => [...new Set(lists.flat())]);
+    walks.set(ctx, walk);
+  }
+  return walk;
 }
+
+const walks = new WeakMap<ScanContext, Promise<string[]>>();
 
 /**
  * Folders inside the skill trees that can't be listed (a chmod-000 folder in
@@ -92,56 +95,6 @@ export async function skillUnlistableDirsOf(ctx: ScanContext): Promise<string[]>
   if (ctx.skillFiles) return ctx.skillUnlistableDirs ?? [];
   const lists = await Promise.all(skillsDirsOf(ctx).map(async d => (await listSkillTree(d, ctx.fs)).unlistableNested));
   return [...new Set(lists.flat())];
-}
-
-function isMarkdown(file: string): boolean {
-  return extname(file).toLowerCase() === '.md';
-}
-
-/** Source or script (AST-analyzable), as opposed to SKILL.md or a compiled binary. */
-export function isSourceFile(file: string): boolean {
-  const ext = extname(file).toLowerCase();
-  return ext !== '.md' && !BINARY_EXTENSIONS.has(ext);
-}
-
-/**
- * Fenced code blocks of a Markdown file, every other line blanked so line
- * numbers still point into the file. SKILL.md is instructions: the agent runs
- * what its code blocks say (`curl … | bash` as an "install step"), while the
- * prose is SKL-007's subject.
- */
-export function markdownCodeBlocks(md: string): string {
-  let fence: string | undefined;
-  return md.split('\n').map(line => {
-    const m = /^\s{0,3}(`{3,}|~{3,})/.exec(line);
-    if (m) {
-      if (!fence) fence = m[1];
-      else if (m[1][0] === fence[0] && m[1].length >= fence.length) fence = undefined;
-      return '';
-    }
-    return fence ? line : '';
-  }).join('\n');
-}
-
-/**
- * Text of a skill file for a check, or undefined when the check has nothing
- * to read in it:
- *  - 'code' (AST analysis): scripts and source only — not SKILL.md, not
- *    compiled binaries;
- *  - 'patterns' (regex rules): also SKILL.md, reduced to its code blocks.
- * Binary content (an extensionless native `helper`, an archive — told by its
- * format signature; a script never is) is skipped by both: BinarySkillFile
- * is thrown, which every check skips and SKL-002 reports (unreadableSkillFile). Throws
- * ScanLimitError for a file over the size limit.
- */
-export async function readSkillText(fs: FSProvider, file: string, mode: 'code' | 'patterns'): Promise<string | undefined> {
-  if (BINARY_EXTENSIONS.has(extname(file).toLowerCase())) return undefined;
-  if (mode === 'code' && !isSourceFile(file)) return undefined;
-  const raw = await readCappedFile(fs, file);
-  const format = await binaryFileFormat(fs, file, raw);
-  if (format) throw new BinarySkillFile(file, format);
-  const text = sourceText(raw);
-  return isMarkdown(file) ? markdownCodeBlocks(text) : text;
 }
 
 /** A skill file whose content is a compiled executable or an archive, not source. */

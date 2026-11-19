@@ -4,7 +4,8 @@ import { defineCheck } from '../../core/check-builder.js';
 import { findHighEntropyBlocks } from '../../analyzers/entropy.js';
 import { OBFUSCATION_PATTERNS, analyzeObfuscation, isBenignEncodedData, isBinaryHexEscapes } from '../../analyzers/obfuscation.js';
 import { ScanLimitError } from '../../core/file-limits.js';
-import { readSkillText, skillFilesOf, skillsDirsOf, skillUnlistableDirsOf, unreadableSkillFile, unscannedShort, MAX_LISTED_IN_MESSAGE } from './skill-files.js';
+import { skillFilesOf, skillsDirsOf, skillUnlistableDirsOf, unreadableSkillFile, unscannedShort, MAX_LISTED_IN_MESSAGE } from './skill-files.js';
+import { jsAnalyzerName, readSkillSource, vendorFolderRefs } from './skill-source.js';
 import { unlistableSkillDirs } from '../../core/utils.js';
 import { markTestCode } from '../../analyzers/test-paths.js';
 import { analysisEvasion } from '../../analyzers/ast-analyzer.js';
@@ -30,8 +31,11 @@ export const skl002 = defineCheck({
 
     for (const file of files) {
       try {
-        const code = await readSkillText(ctx.fs, file, 'patterns');
-        if (code === undefined) continue;
+        // Scripts and documentation code blocks: data files (lockfiles,
+        // datasets, fixtures) are high-entropy by nature and run nowhere
+        const src = await readSkillSource(ctx, file, 'patterns', 'blocks', { data: false });
+        if (src === undefined || src.kind === 'data' || src.kind === 'manifest') continue;
+        const code = src.text;
 
         const lines = code.split('\n');
 
@@ -77,7 +81,7 @@ export const skl002 = defineCheck({
         }
 
         // Code built to overflow the parser hides itself from the AST checks
-        const evasion = analysisEvasion(code, file);
+        const evasion = src.lang === 'js' ? analysisEvasion(code, jsAnalyzerName(src)) : undefined;
         if (evasion !== undefined) {
           const deep = evasion.line;
           const text = (lines[deep - 1] ?? '').trim();
@@ -102,6 +106,15 @@ export const skl002 = defineCheck({
         const unreadable = unreadableSkillFile(file, err);
         if (unreadable) evidence.push(unreadable);
       }
+    }
+
+    // A vendor folder a SKILL.md runs (`node node_modules/helper`): the walk
+    // skips vendor dirs and reads only the files a SKILL.md names there
+    for (const { dir, skillMd } of await vendorFolderRefs(ctx)) {
+      evidence.push({
+        file: dir,
+        detail: `not scanned: vendor folder run by ${skillMd} — vendor folders are skipped, only the files a SKILL.md names in them are read`,
+      });
     }
 
     // A skill directory the scan can't list (mode 111) hides its scripts from

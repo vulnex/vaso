@@ -1,9 +1,7 @@
-import { extname } from 'node:path';
 import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
-import { analyzeCode } from '../../analyzers/ast-analyzer.js';
-import { analyzePythonDataFlow } from '../../analyzers/python-sinks.js';
-import { readSkillText, skillFilesOf, skillsDirsOf, noSkillsDirResult } from './skill-files.js';
+import { skillFilesOf, skillsDirsOf, noSkillsDirResult } from './skill-files.js';
+import { analyzeSkillSource, readSkillSource } from './skill-source.js';
 import { markTestCode } from '../../analyzers/test-paths.js';
 
 export const skl010 = defineCheck({
@@ -22,10 +20,10 @@ export const skl010 = defineCheck({
 
     for (const file of files) {
       try {
-        const code = await readSkillText(ctx.fs, file, 'code');
-        if (code === undefined) continue;
+        const src = await readSkillSource(ctx, file, 'code');
+        if (src === undefined) continue;
         // Python skill scripts go through the Python analyzer; Babel can't read them.
-        const flows = extname(file).toLowerCase() === '.py' ? analyzePythonDataFlow(code) : analyzeCode(code, file);
+        const flows = analyzeSkillSource(src);
         const fsAccess = flows.filter(f => f.type === 'fs-access');
 
         for (const flow of fsAccess) {

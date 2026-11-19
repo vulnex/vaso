@@ -68,14 +68,18 @@ describe('a skill folder named like a vendor dir', () => {
     expect(r.evidence?.map(e => e.file).sort()).toEqual([join(dir, 'node_modules', 'run.js'), join(dir, 'venv', 'run.js')]);
   });
 
-  it('isExcludedPath exempts only the first segment it is given', () => {
+  it('isExcludedPath exempts only the folders it is given', () => {
     const skills = vendorNamedSkills('/r', [{ name: 'skill.md', isFile: true, isDirectory: false, parentPath: '/r/venv' }]);
     expect([...skills]).toEqual(['venv']);
     expect(isExcludedPath('/r', '/r/venv', { keepBuildOutput: true, skills })).toBe(false);
     expect(isExcludedPath('/r', '/r/venv/node_modules', { keepBuildOutput: true, skills })).toBe(true);
     expect(isExcludedPath('/r', '/r/s/venv', { keepBuildOutput: true, skills })).toBe(true);
-    // a SKILL.md deeper down makes no vendor dir a skill
-    expect([...vendorNamedSkills('/r', [{ name: 'SKILL.md', isFile: true, isDirectory: false, parentPath: '/r/s/venv' }])]).toEqual([]);
+    // one nested in a category folder holding its own SKILL.md is a skill too
+    const nested = vendorNamedSkills('/r', [{ name: 'SKILL.md', isFile: true, isDirectory: false, parentPath: '/r/s/venv' }]);
+    expect([...nested]).toEqual([join('s', 'venv')]);
+    expect(isExcludedPath('/r', '/r/s/venv', { keepBuildOutput: true, skills: nested })).toBe(false);
+    // a SKILL.md deeper inside a vendor dir makes no vendor dir a skill
+    expect([...vendorNamedSkills('/r', [{ name: 'SKILL.md', isFile: true, isDirectory: false, parentPath: '/r/s/venv/pkg' }])]).toEqual([]);
   });
 
   it('the same from a snapshot', async () => {

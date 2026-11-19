@@ -1,0 +1,12 @@
+{
+  "agent": "claude-code",
+  "source": "Inventory + true positive: an enabled plugin's skills are listed as <plugin>:<skill> and scanned; a disabled plugin's are not",
+  "fail": {
+    "SKL-001": "critical"
+  },
+  "inventory": {
+    "skills": [
+      "devtools:deploy"
+    ]
+  }
+}

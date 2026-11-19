@@ -1,0 +1,9 @@
+{
+  "agent": "claude-code",
+  "source": "True positive: files a SKILL.md runs from vendor folders (node_modules, .cache, venv) are read; a vendor folder it runs is reported not scanned",
+  "fail": {
+    "SKL-001": "critical",
+    "SKL-002": "warning",
+    "SKL-004": "critical"
+  }
+}
