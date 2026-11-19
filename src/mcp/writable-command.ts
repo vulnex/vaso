@@ -406,6 +406,10 @@ interface WrapperSyntax {
   noCommand?: ReadonlySet<string>;
   /** `nice -5`: an old-style numeric option. */
   numericFlags?: boolean;
+  /** `sudo NAME=value cmd`: environment assignments before the command. */
+  assignments?: boolean;
+  /** `flock FILE -c 'cmd …'`: right after the positional words, options whose value is a shell command line. */
+  commandLine?: ReadonlySet<string>;
 }
 
 const WRAPPERS: Readonly<Record<string, WrapperSyntax>> = {
@@ -421,6 +425,16 @@ const WRAPPERS: Readonly<Record<string, WrapperSyntax>> = {
     noCommand: new Set(['-p', '--pid']),
   },
   taskset: { value: new Set(), positional: 1, noCommand: new Set(['-p', '--pid']) },
+  sudo: {
+    value: new Set(['-u', '--user', '-g', '--group', '-h', '--host', '-p', '--prompt', '-C', '--close-from', '-D', '--chdir',
+      '-R', '--chroot', '-T', '--command-timeout', '-U', '--other-user', '-r', '--role', '-t', '--type']),
+    noCommand: new Set(['-l', '--list', '-v', '--validate', '-K', '--remove-timestamp', '-V', '--version', '-e', '--edit', '--help']),
+    assignments: true,
+  },
+  doas: { value: new Set(['-u', '-a']), noCommand: new Set(['-C', '-L']) },
+  caffeinate: { value: new Set(['-t', '-w']) },
+  flock: { value: new Set(['-w', '--wait', '--timeout', '-E', '--conflict-exit-code']), positional: 1, commandLine: new Set(['-c', '--command']) },
+  setsid: { value: new Set() },
 };
 
 /** The command a wrapper (`timeout 60 node /x/s.js`) runs, with its arguments. */
@@ -453,7 +467,15 @@ function wrappedCommand(syntax: WrapperSyntax, args: readonly string[]): { comma
       }
       continue;
     }
-    if (positional > 0) { positional--; continue; }
+    if (positional > 0) {
+      positional--;
+      // `flock /x/lock -c 'node /x/s.js'`: a shell runs the command line
+      if (positional === 0 && syntax.commandLine?.has(args[i + 1] ?? '')) {
+        return args[i + 2] !== undefined ? { command: 'sh', args: ['-c', args[i + 2]] } : undefined;
+      }
+      continue;
+    }
+    if (syntax.assignments && ENV_ASSIGNMENT.test(arg)) continue;
     if (optional) {
       optional = undefined;
       if (syntax.optionalPositional!.test(arg)) continue;
@@ -469,7 +491,8 @@ function wrappedCommand(syntax: WrapperSyntax, args: readonly string[]): { comma
  * `bash -o pipefail /x/run.sh`, `java -jar /x/s.jar`, modules preloaded with
  * `-r`/`--import`, and through `env [NAME=value…] cmd …` (or a wrapper:
  * `timeout 60 cmd`, `nice -n 5 cmd`, `nohup`, `stdbuf`, `xvfb-run`,
- * `ionice`, `chrt`, `taskset`) the command and what it runs. Relative paths depend on the client's working directory and
+ * `ionice`, `chrt`, `taskset`, `sudo -u user`, `doas -u user`, `caffeinate`,
+ * `flock FILE`, `setsid`) the command and what it runs. Relative paths depend on the client's working directory and
  * are not judged. A path is judged only as the config spells it — a whole
  * argument, an `--option=` value, or a word of one (`env -S`, `bash -c`) —
  * which is what a remote probe stats.
