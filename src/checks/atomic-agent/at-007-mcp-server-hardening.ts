@@ -58,11 +58,12 @@ export const at007 = defineCheck({
         // A command (or the script an interpreter runs) any local user can
         // replace; on a snapshot, a path the probe didn't record: unknown, not safe
         for (const w of await writableLaunchPaths(ctx.fs, command, argList, unverified, { config: config.filePath })) {
-          const { where, detail } = writableLaunchText(w);
+          const { where, detail, mitigated } = writableLaunchText(w);
           evidence.push({
             file: config.filePath,
             snippet: `mcp.servers[${name}].transport.${w.role === 'command' ? 'command' : 'args'} = ${w.path}${where}`,
             detail,
+            ...(mitigated ? { mitigated } : {}),
           });
         }
 

@@ -1,4 +1,4 @@
-import { access as fsAccess, open, readdir, readFile, stat, realpath, readlink } from 'node:fs/promises';
+import { access as fsAccess, lstat, open, readdir, readFile, stat, realpath, readlink } from 'node:fs/promises';
 import { execFileSync, execFile } from 'node:child_process';
 import { constants as fsConstants, type Dirent } from 'node:fs';
 import { isUtf8 } from 'node:buffer';
@@ -186,9 +186,9 @@ export class LocalFSProvider implements FSProvider {
     return posixPermissionFacts(s.mode);
   }
 
-  async ownership(path: string): Promise<{ uid: number; gid: number } | undefined> {
+  async ownership(path: string, options?: { noFollow?: boolean }): Promise<{ uid: number; gid: number } | undefined> {
     if (this.platform === 'win32') return undefined;
-    const s = await stat(this.fsPath(path));
+    const s = await (options?.noFollow ? lstat : stat)(this.fsPath(path));
     return { uid: s.uid, gid: s.gid };
   }
 

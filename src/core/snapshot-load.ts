@@ -126,9 +126,12 @@ export function validateSnapshot(value: unknown): string[] {
   if (s.specialModeBits !== undefined && typeof s.specialModeBits !== 'boolean') {
     errors.push('Invalid specialModeBits field (a boolean expected)');
   }
-  if (s.owners !== undefined && (!isRecord(s.owners) || !Object.values(s.owners).every(o =>
-    Array.isArray(o) && o.length === 2 && o.every(id => Number.isInteger(id) && id >= 0)))) {
-    errors.push('Invalid owners field ([uid, gid] pairs expected)');
+  for (const field of ['owners', 'linkOwners'] as const) {
+    const owners = s[field];
+    if (owners !== undefined && (!isRecord(owners) || !Object.values(owners).every(o =>
+      Array.isArray(o) && o.length === 2 && o.every(id => Number.isInteger(id) && id >= 0)))) {
+      errors.push(`Invalid ${field} field ([uid, gid] pairs expected)`);
+    }
   }
   if (!isRecord(s.commandOutputs)) {
     errors.push('Missing or invalid commandOutputs field');

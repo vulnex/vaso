@@ -131,8 +131,9 @@ export interface FSProvider {
    * this method.
    */
   permissions?(path: string): Promise<PermissionQuery>;
-  /** Owner uid/gid of a path (POSIX). Optional; undefined means unknown. */
-  ownership?(path: string): Promise<{ uid: number; gid: number } | undefined>;
+  /** Owner uid/gid of a path (POSIX). Optional; undefined means unknown.
+   *  `noFollow`: of a link itself, not what it points to (lstat). */
+  ownership?(path: string, options?: { noFollow?: boolean }): Promise<{ uid: number; gid: number } | undefined>;
   /** User-private groups on the scanned host: gid → the one user (uid) it
    *  serves (see core/private-groups.ts). Optional; Linux only. */
   privateGroups?(): Promise<ReadonlyMap<number, number>>;

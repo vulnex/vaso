@@ -7,7 +7,7 @@ import type { FSProvider } from '../core/fs-provider.js';
 import { LocalFSProvider } from '../core/local-fs-provider.js';
 import { SnapshotFSProvider } from '../core/snapshot-fs-provider.js';
 import type { FileEntry, ProbeSnapshot } from '../core/snapshot-types.js';
-import { interpreterScripts, worldWritableCommandPath } from './writable-command.js';
+import { interpreterScripts, worldWritableCommandPath, writableLaunchText, type WritableCommandPath } from './writable-command.js';
 import { hm010 } from '../checks/hermes/hm-010-mcp-server-hardening.js';
 import { at007 } from '../checks/atomic-agent/at-007-mcp-server-hardening.js';
 import { cd009 } from '../checks/claude-desktop/cd-009-world-writable-command.js';
@@ -24,8 +24,11 @@ describe.runIf(posix)('MCP command any local user can replace', () => {
   let root: string;
   const local = new LocalFSProvider();
   beforeEach(async () => {
-    // realpath: macOS tmpdir is under the /var → /private/var link
-    root = await realpath(await mkdtemp(join(tmpdir(), 'vaso-wwdir-')));
+    // realpath: macOS tmpdir is under the /var → /private/var link. Under
+    // /tmp, opened up: other users must reach the tree (macOS's per-user
+    // tmpdir is 700, which mitigates every finding beneath it)
+    root = await realpath(await mkdtemp(join('/tmp', 'vaso-wwdir-')));
+    await chmod(root, 0o755);
   });
   afterEach(async () => { await rm(root, { recursive: true, force: true }); });
 
@@ -41,8 +44,14 @@ describe.runIf(posix)('MCP command any local user can replace', () => {
    * The host as a probe would ship it: the given paths stat'd (mode, owner),
    * every directory above root..path recorded, links recorded. With
    * `special`, directory modes carry the sticky bit (probe ≥ specialModeBits).
+   * A missing path (or a dangling link's target): its missing directories
+   * recorded as absent and the existing ones above recorded — unless
+   * `oldProbe` (1.4.1 and the dt24 build record nothing there).
    */
-  async function snapshotOf(paths: string[], opts: { special?: boolean; owners?: Record<string, number>; links?: Record<string, string> } = {}): Promise<SnapshotFSProvider> {
+  async function snapshotOf(paths: string[], opts: {
+    special?: boolean; owners?: Record<string, number>; links?: Record<string, string>;
+    linkOwners?: Record<string, number>; oldProbe?: boolean;
+  } = {}): Promise<SnapshotFSProvider> {
     const files: Record<string, FileEntry> = {};
     const directoryModes: Record<string, number> = {};
     const owners: Record<string, [number, number]> = {};
@@ -55,6 +64,13 @@ describe.runIf(posix)('MCP command any local user can replace', () => {
         if (dirname(d) === d) break;
       }
     };
+    const recordAbsent = async (p: string) => {
+      for (let d = dirname(p); ; d = dirname(d)) {
+        const there = await stat(d).then(() => true, () => false);
+        if (there) return recordDirs(join(d, 'x'));
+        files[d] = { content: '', mode: 0, exists: false };
+      }
+    };
     for (const p of paths) {
       try {
         const s = await stat(p);
@@ -65,12 +81,17 @@ describe.runIf(posix)('MCP command any local user can replace', () => {
         if (l.isSymbolicLink()) await recordDirs(await realpath(p));
       } catch {
         files[p] = { content: '', mode: 0, exists: false };
+        if (opts.oldProbe) continue;
+        await recordAbsent(p);
+        const target = opts.links?.[p];
+        if (target) await recordAbsent(target);
       }
     }
     return new SnapshotFSProvider({
       version: 1, hostname: 'box', platform: process.platform === 'darwin' ? 'darwin' : 'linux', homedir: root, timestamp: 't',
       privilege: { uid, username: 'u', isRoot: false, sudoAvailable: false, escalated: false, scannedUsers: ['u'], skippedPaths: [] },
       files, directoryModes, owners, symlinks: opts.links ?? {},
+      linkOwners: Object.fromEntries(Object.entries(opts.linkOwners ?? {}).map(([k, v]) => [k, [v, 0]])),
       directories: {}, commandOutputs: {}, env: {},
       ...(opts.special ? { specialModeBits: true } : {}),
     } as ProbeSnapshot);
@@ -176,7 +197,7 @@ describe.runIf(posix)('MCP command any local user can replace', () => {
     it('still flags a command another user owns', async () => {
       const cmd = await put('shared/srv');
       const remote = await snapshotOf([cmd], { special: true, owners: { [cmd]: uid + 4242 } });
-      expect(await worldWritableCommandPath(remote, cmd)).toEqual({ kind: 'directory', path: dir, octal: '777', mode: '1777', foreignOwner: true });
+      expect(await worldWritableCommandPath(remote, cmd)).toEqual({ kind: 'directory', path: dir, octal: '777', mode: '1777', foreignOwner: true, owner: uid + 4242, entry: cmd });
     });
 
     it('prints the mode the same way in every check', async () => {
@@ -203,6 +224,138 @@ describe.runIf(posix)('MCP command any local user can replace', () => {
     expect(await worldWritableCommandPath(local, cmd)).toBeUndefined();
     expect(await worldWritableCommandPath(await snapshotOf([cmd], { special: true }), cmd)).toBeUndefined();
   });
+
+  describe('a command that does not exist yet', () => {
+    beforeEach(async () => {
+      await mkdir(join(root, 'open'));
+      await chmod(join(root, 'open'), 0o777);
+    });
+
+    it('is plantable in a world-writable directory, locally and from a snapshot alike', async () => {
+      for (const cmd of [join(root, 'open', 'missing'), join(root, 'open', 'nodir', 'x', 'cmd')]) {
+        const want = { kind: 'directory', path: join(root, 'open'), octal: '777', mode: '777', missing: true };
+        expect(await worldWritableCommandPath(local, cmd)).toEqual(want);
+        expect(await worldWritableCommandPath(await snapshotOf([cmd], { special: true }), cmd)).toEqual(want);
+      }
+    });
+
+    it('passes in a safe directory, locally and from a snapshot', async () => {
+      const cmd = join(root, 'safe', 'sub', 'missing');
+      await mkdir(join(root, 'safe'));
+      expect(await worldWritableCommandPath(local, cmd)).toBeUndefined();
+      expect(await worldWritableCommandPath(await snapshotOf([cmd], { special: true }), cmd)).toBeUndefined();
+    });
+
+    it('is not verified from a probe that recorded nothing above it', async () => {
+      const cmd = join(root, 'open', 'nodir', 'cmd');
+      expect(await worldWritableCommandPath(await snapshotOf([cmd], { special: true, oldProbe: true }), cmd)).toBe('uncollected');
+    });
+
+    it('a dangling link into a world-writable directory: its target can be planted', async () => {
+      await mkdir(join(root, 'safe'));
+      const link = join(root, 'safe', 'dang');
+      const target = join(root, 'open', 'notthere');
+      await symlink(target, link);
+      const want = { kind: 'directory', path: join(root, 'open'), octal: '777', mode: '777', via: target };
+      expect(await worldWritableCommandPath(local, link)).toEqual(want);
+      expect(await worldWritableCommandPath(await snapshotOf([link], { special: true, links: { [link]: target } }), link)).toEqual(want);
+    });
+  });
+
+  describe('a sticky directory owned by another user', () => {
+    it('does not protect what is in it: its owner can rename it', async () => {
+      const dir = join(root, 'bobst');
+      await mkdir(dir);
+      await chmod(dir, 0o1777);
+      const cmd = await put('bobst/srv');
+      const remote = await snapshotOf([cmd], { special: true, owners: { [dir]: uid + 7 } });
+      const got = await worldWritableCommandPath(remote, cmd);
+      expect(got).toEqual({ kind: 'directory', path: dir, octal: '777', mode: '1777', foreignDirOwner: true, owner: uid + 7 });
+      const { detail } = writableLaunchText({ role: 'command', path: cmd, writable: got as WritableCommandPath });
+      expect(detail).toBe(`MCP server command: its directory ${dir} is world-writable and sticky, but the directory belongs to another user (uid ${uid + 7}) — that user (or root) can swap ${cmd} before launch`);
+    });
+
+    it('a link is judged by its own owner, not its target\'s', async () => {
+      const dir = join(root, 'shared');
+      await mkdir(dir);
+      await chmod(dir, 0o1777);
+      const real = await put('safe/real');
+      const link = join(dir, 'srv');
+      await symlink(real, link);
+      // Another user's link to the user's own file: that user can swap the link
+      const remote = await snapshotOf([link], { special: true, links: { [link]: real }, linkOwners: { [link]: uid + 9 } });
+      const got = await worldWritableCommandPath(remote, link);
+      expect(got).toEqual({ kind: 'directory', path: dir, octal: '777', mode: '1777', foreignOwner: true, owner: uid + 9, entry: link });
+      expect(writableLaunchText({ role: 'command', path: link, writable: got as WritableCommandPath }).detail)
+        .toContain(`sticky, but it belongs to another user (uid ${uid + 9}) — that user (or root) can swap ${link}`);
+      // The user's own link: protected, locally and remotely; a probe that didn't record its owner: not verified
+      expect(await worldWritableCommandPath(local, link)).toBeUndefined();
+      expect(await worldWritableCommandPath(await snapshotOf([link], { special: true, links: { [link]: real }, linkOwners: { [link]: uid } }), link)).toBeUndefined();
+      expect(await worldWritableCommandPath(await snapshotOf([link], { special: true, links: { [link]: real } }), link)).toBe('uncollected');
+    });
+  });
+
+  it('a world-writable directory other users can\'t reach is a mitigated finding', async () => {
+    await mkdir(join(root, 'priv'));
+    await mkdir(join(root, 'priv', 'open'));
+    await chmod(join(root, 'priv', 'open'), 0o777);
+    await chmod(join(root, 'priv'), 0o700);
+    const cmd = await put('priv/open/srv');
+    const want = { kind: 'directory', path: join(root, 'priv', 'open'), octal: '777', mode: '777', barrier: `${join(root, 'priv')} (700)` };
+    expect(await worldWritableCommandPath(local, cmd)).toEqual(want);
+    expect(await worldWritableCommandPath(await snapshotOf([cmd], { special: true }), cmd)).toEqual(want);
+    for (const [check, format, name, data] of cases) {
+      const { local: l, remote: r } = await runBoth(check, format, name, data(cmd, []), await snapshotOf([cmd, join(root, name)], { special: true }));
+      expect(l.passed, check.id).toBe(false);
+      expect(l.severity, check.id).toBe('info');
+      expect(l.evidence![0].mitigated, check.id).toBe(true);
+      expect(l.evidence![0].detail, check.id).toContain(`mitigated: not reachable by other users, parent ${join(root, 'priv')} (700) blocks traversal`);
+      expect(r.evidence).toEqual(l.evidence);
+    }
+    await chmod(join(root, 'priv'), 0o755);
+  });
+
+  it('lists each path not verified once', async () => {
+    const script = join(root, 'elsewhere', 's.js');
+    const config = join(root, 'c.json');
+    await writeFile(config, '{}');
+    const data = { mcpServers: { a: { command: 'node', args: [script] }, b: { command: 'node', args: [script] } } };
+    const remote = await snapshotOf([]);
+    const res = await cd009.run({
+      installation: { agent: 'claude-desktop', installDir: root, configFiles: [] },
+      configs: [{ raw: '', format: 'json', filePath: config, data }], platform: remote.platform, fs: remote,
+    });
+    expect(res.message).toBe(`command path(s) ${script} not verified — the remote probe doesn't collect it (checked on local scans)`.replace('command path(s)', 'MCP command path(s)'));
+  });
+
+  describe('Hermes commands', () => {
+    it('expands a leading ~ and strips spaces, as Hermes does; args are taken as written', async () => {
+      await mkdir(join(root, 'tools'));
+      await chmod(join(root, 'tools'), 0o777);
+      const bin = await put('tools/mcp-bin');
+      const home = Object.assign(Object.create(local) as LocalFSProvider, { homedir: () => root });
+      for (const command of ['~/tools/mcp-bin', `  ${bin} `]) {
+        const config: ParsedConfig = { raw: '', format: 'yaml', filePath: join(root, 'config.yaml'), data: { mcp_servers: { s: { command } } } };
+        await writeFile(config.filePath, '');
+        const remote = await snapshotOf([bin, config.filePath], { special: true });
+        const ctx = (fs: FSProvider): ScanContext => ({ installation: { agent: 'hermes', installDir: root, configFiles: [config] }, configs: [config], platform: fs.platform, fs });
+        const l = await hm010.run(ctx(home));
+        expect(l.passed, command).toBe(false);
+        expect(l.evidence![0].snippet).toBe(`mcp_servers.s.command = ${bin}: ${join(root, 'tools')} (mode 777)`);
+        expect((await hm010.run(ctx(remote))).evidence).toEqual(l.evidence);
+      }
+      // Claude Desktop runs the command as written: a `~` path is no absolute path
+      const { local: l } = await runBoth(cd009, 'json', 'c.json', { mcpServers: { s: { command: '~/tools/mcp-bin' } } }, await snapshotOf([]));
+      expect(l.passed).toBe(true);
+    });
+
+    it('a ${VAR} a snapshot could not expand is not verified', async () => {
+      const config: ParsedConfig = { raw: '', format: 'yaml', filePath: join(root, 'config.yaml'), data: { mcp_servers: { s: { command: '${TOOLS}/mcp-bin' } } } };
+      const remote = await snapshotOf([]);
+      const r = await hm010.run({ installation: { agent: 'hermes', installDir: root, configFiles: [config] }, configs: [config], platform: remote.platform, fs: remote });
+      expect(r.message).toContain('${TOOLS}/mcp-bin not verified');
+    });
+  });
 });
 
 describe('interpreterScripts', () => {
@@ -220,5 +373,32 @@ describe('interpreterScripts', () => {
     expect(interpreterScripts('npx', ['-y', '@scope/server@1.0.0'])).toEqual([]);
     expect(interpreterScripts('/opt/bin/srv', ['/data'])).toEqual([]);
     expect(interpreterScripts('bash', ['-c', 'exec x'])).toEqual([]);
+  });
+
+  it('skips the values of each interpreter\'s options', () => {
+    expect(interpreterScripts('bash', ['-o', 'pipefail', '/x/s.sh'])).toEqual(['/x/s.sh']);
+    expect(interpreterScripts('bash', ['-O', 'extglob', '/x/s.sh'])).toEqual(['/x/s.sh']);
+    expect(interpreterScripts('bash', ['-eo', 'pipefail', '/x/s.sh'])).toEqual(['/x/s.sh']);
+    expect(interpreterScripts('bash', ['--', '/x/s.sh'])).toEqual(['/x/s.sh']);
+    expect(interpreterScripts('bash', ['-c', '/x/s.sh --flag'])).toEqual(['/x/s.sh']);
+    expect(interpreterScripts('bash', ['-s', '/x/arg'])).toEqual([]);
+    expect(interpreterScripts('perl', ['-I', '/safe', '/x/x.pl'])).toEqual(['/x/x.pl']);
+    expect(interpreterScripts('perl', ['-I/safe', '/x/x.pl'])).toEqual(['/x/x.pl']);
+    expect(interpreterScripts('perl', ['-e', 'print 1', '/x/arg'])).toEqual([]);
+    expect(interpreterScripts('ruby', ['-r', '/x/pre.rb', '/x/x.rb'])).toEqual(['/x/pre.rb', '/x/x.rb']);
+    expect(interpreterScripts('php', ['-d', 'x=1', '-f', '/x/s.php'])).toEqual(['/x/s.php']);
+    expect(interpreterScripts('lua', ['-l', 'socket', '/x/s.lua'])).toEqual(['/x/s.lua']);
+    expect(interpreterScripts('java', ['-jar', '/x/s.jar'])).toEqual(['/x/s.jar']);
+    expect(interpreterScripts('java', ['-cp', '/x/lib', 'com.x.Main'])).toEqual([]);
+    expect(interpreterScripts('/usr/bin/java', ['/x/Main.java'])).toEqual(['/x/Main.java']);
+    expect(interpreterScripts('node', ['--require=/x/pre.js', '/x/s.js'])).toEqual(['/x/s.js', '/x/pre.js']);
+  });
+
+  it('looks through env to the command it runs', () => {
+    expect(interpreterScripts('env', ['FOO=1', 'node', '/x/s.js'])).toEqual(['/x/s.js']);
+    expect(interpreterScripts('/usr/bin/env', ['python3', '/x/s.py'])).toEqual(['/x/s.py']);
+    expect(interpreterScripts('/usr/bin/env', ['-u', 'X', '-i', '/x/srv', '--port', '1'])).toEqual(['/x/srv']);
+    expect(interpreterScripts('/usr/bin/env', ['-S', 'node /x/s.js'])).toEqual(['/x/s.js']);
+    expect(interpreterScripts('/usr/bin/env', ['bash', '-c', 'echo hi'])).toEqual([]);
   });
 });

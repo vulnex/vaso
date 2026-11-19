@@ -153,7 +153,8 @@ export function prepareHermesYaml(configs: ParsedConfig[], fs: FSProvider, versi
       const v = c.data[name];
       if (typeof v === 'string') return v;
     }
-    return fs.getEnv(name);
+    // HOME is the scanned user's home (a snapshot ships no HOME variable)
+    return name === 'HOME' ? fs.homedir() : fs.getEnv(name);
   };
   for (const config of configs) {
     if (config.format !== 'yaml') continue;

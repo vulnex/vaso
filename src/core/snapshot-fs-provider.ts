@@ -248,8 +248,11 @@ export class SnapshotFSProvider implements FSProvider {
     return this.snapshot.specialModeBits === true;
   }
 
-  async ownership(path: string): Promise<{ uid: number; gid: number } | undefined> {
-    const owner = this.snapshot.owners?.[path];
+  async ownership(path: string, options?: { noFollow?: boolean }): Promise<{ uid: number; gid: number } | undefined> {
+    // A link's own owner (probe newer than 1.4.1 records it); unknown otherwise
+    const owner = options?.noFollow && Object.hasOwn(this.snapshot.symlinks ?? {}, path)
+      ? this.snapshot.linkOwners?.[path]
+      : this.snapshot.owners?.[path];
     return owner ? { uid: owner[0], gid: owner[1] } : undefined;
   }
 

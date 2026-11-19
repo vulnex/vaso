@@ -53,12 +53,14 @@ export const hm010 = defineCheck({
         // A command (or the script an interpreter runs) any local user can
         // replace: world-writable, or swappable through a directory above it.
         // On a snapshot, a path the probe didn't record: unknown, not safe
-        for (const w of await writableLaunchPaths(ctx.fs, command, argList, unverified, { config: config.filePath })) {
-          const { where, detail } = writableLaunchText(w);
+        // (Hermes strips the command and expands a leading ~)
+        for (const w of await writableLaunchPaths(ctx.fs, command, argList, unverified, { config: config.filePath, hermes: true })) {
+          const { where, detail, mitigated } = writableLaunchText(w);
           push({
             file: config.filePath,
             snippet: `mcp_servers.${name}.${w.role === 'command' ? 'command' : 'args'} = ${w.path}${where}`,
             detail,
+            ...(mitigated ? { mitigated } : {}),
           });
         }
 

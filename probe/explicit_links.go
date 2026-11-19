@@ -49,6 +49,7 @@ func (c *collector) recordLinkChain(snapshot *ProbeSnapshot, p string) {
 				break
 			}
 			snapshot.Symlinks[comp] = target
+			recordLinkOwner(snapshot, comp, info)
 			abs := target
 			if !filepath.IsAbs(abs) {
 				abs = filepath.Join(filepath.Dir(comp), target)
