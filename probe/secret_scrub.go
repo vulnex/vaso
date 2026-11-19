@@ -1269,13 +1269,20 @@ func (c *collector) disguiseKeyed(key, v string) string {
 	return c.disguiseAs(v, strongCredentialKey(key), true)
 }
 
-// integerValue: a whole number as a config writes one, no leading zero.
-var integerValue = regexp.MustCompile(`^-?[1-9][0-9]+$`)
+// numberValue: a number as JSON, JSON5 and TOML write one — no leading zero
+// in its whole part (0 alone, or 0.5, is fine), an optional fraction and
+// exponent.
+var numberValue = regexp.MustCompile(`^-?(?:0|[1-9][0-9]*)(?:\.[0-9]+)?(?:[eE][-+]?[0-9]+)?$`)
 
-// leadingZero reports whether a number's first digit is 0 (after a sign).
+// leadingZero reports whether a number's whole part has more than one digit
+// and starts with 0 (after a sign).
 func leadingZero(v string) bool {
 	v = strings.TrimPrefix(v, "-")
-	return len(v) > 1 && v[0] == '0'
+	whole := v
+	if i := strings.IndexAny(v, ".eE"); i >= 0 {
+		whole = v[:i]
+	}
+	return len(whole) > 1 && whole[0] == '0'
 }
 
 // disguiseAs: passphrase — under a password name, where a passphrase, a PIN
@@ -1321,12 +1328,12 @@ func (c *collector) disguiseAs(v string, passphrase, keyed bool) string {
 	// only, moved to a random place of its run clear of the kept head and
 	// tail — next to the head it would show more of the value than reports do.
 	want := verdictsOf(lead + core)
-	// an integer written without a leading zero (token_refresh_buffer_ms:
-	// 300000) keeps one: JSON, JSON5 and TOML reject 0100500, so the whole
-	// config would stop parsing remotely
-	integer := integerValue.MatchString(core)
+	// a number written without a leading zero (token_refresh_buffer_ms:
+	// 300000, weight: 98765.4321) keeps one: JSON, JSON5 and TOML reject
+	// 0100500 and 06895.3274, so the whole config would stop parsing remotely
+	number := numberValue.MatchString(core)
 	fits := func(cand string) bool {
-		return verdictsOf(cand) == want && (!integer || !leadingZero(cand[len(lead):]))
+		return verdictsOf(cand) == want && (!number || numberValue.MatchString(cand[len(lead):]))
 	}
 	spans := [][2]int{{-1, -1}}
 	if want.weak {
@@ -1367,7 +1374,7 @@ func (c *collector) disguiseAs(v string, passphrase, keyed bool) string {
 	}
 	if out == "" {
 		out = lead + head + randomLike(mid, midHeld) + tail
-		if integer && leadingZero(out[len(lead):]) {
+		if number && leadingZero(out[len(lead):]) {
 			out = lead + strings.Replace(out[len(lead):], "0", string(rune('1'+randIndex(9))), 1)
 		}
 	}

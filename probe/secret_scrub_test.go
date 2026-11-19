@@ -573,18 +573,18 @@ func TestNestedEscapedQuotedPairs(t *testing.T) {
 	}
 }
 
-// A whole number under a credential-looking name (token_refresh_buffer_ms)
+// A number under a credential-looking name (token_refresh_buffer_ms, a weight)
 // is disguised as one without a leading zero: JSON and TOML reject 0100500,
 // and a config that stops parsing remotely hides every server in it.
-func TestDisguisedIntegersStayValidNumbers(t *testing.T) {
+func TestDisguisedNumbersStayValidNumbers(t *testing.T) {
 	for i := 0; i < 200; i++ {
 		out := scrubFile(t, &collector{}, "/h/.claude.json",
-			`{"bridge": {"token_refresh_buffer_ms": 300000, "api_key_pin": 48213579, "secret_offset": -730215}, "mcpServers": {"s": {"command": "npx"}}}`)
+			`{"bridge": {"token_refresh_buffer_ms": 300000, "api_key_pin": 48213579, "secret_offset": -730215, "apiKey_float": 7930721.714, "token_ratio": 0.7342, "secret_exp": 31415.9e-3}, "mcpServers": {"s": {"command": "npx"}}}`)
 		var v map[string]any
 		if err := json.Unmarshal([]byte(out), &v); err != nil {
 			t.Fatalf("JSON no longer parses: %v\n%s", err, out)
 		}
-		doc := "[bridge]\ntoken_refresh_buffer_ms = 300000\napi_key_pin = 48213579\n"
+		doc := "[bridge]\ntoken_refresh_buffer_ms = 300000\napi_key_pin = 48213579\napi_key_weight = 98765.4321\n"
 		tout := scrubFile(t, &collector{}, "/h/.codex/config.toml", doc)
 		var tv map[string]any
 		if _, err := toml.Decode(tout, &tv); err != nil {
