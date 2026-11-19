@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { isPlaceholderSecret, isSecretReference, redactSecret, redactSecretsInLine, snippetAround, truncateSnippet } from './patterns.js';
+import { isPlaceholderSecret, isSecretReference, redactSecret, redactSecretsInLine, snippetAround, storedFallback, truncateSnippet } from './patterns.js';
+import { isSecretNamedValue } from '../analyzers/secret-values.js';
 
 describe('isSecretReference (dt17 MD-C)', () => {
   it('knows secret manager references, key files, profile names and env references', () => {
@@ -211,5 +212,27 @@ describe('snippetAround', () => {
     const out = snippetAround(line, at, 12);
     expect(out).toContain('evil.example');
     expect(out).not.toMatch(/Ih0Gf/);
+  });
+});
+
+// dt24 g4-R3: a short default under a credential name was read as a reference
+describe('storedFallback', () => {
+  it('is the default a ${VAR:-default} stores under a credential name', () => {
+    expect(storedFallback('DB_PASS', '${DB_PASS:-Xe5rT2yQ8u}')).toBe('Xe5rT2yQ8u');
+    expect(storedFallback('API_TOKEN', '${API_TOKEN-hunterpass}')).toBe('hunterpass');
+    expect(storedFallback('AUTH', 'Bearer ${API_TOK:-Zq1wE6rT3y}')).toBe('Zq1wE6rT3y');
+    expect(storedFallback('dbPassword', '${DB:=s3cr3t}')).toBe('s3cr3t');
+  });
+
+  it('is none for a setting, an empty default, a placeholder or another reference', () => {
+    for (const [k, v] of [['LOG_LEVEL', '${LOG_LEVEL:-info}'], ['DB_PASS', '${DB_PASS:-}'], ['DB_PASS', '${DB_PASS:-changeme}'], ['DB_PASS', '${DB_PASS:-$OTHER_PASS}'], ['DB_PASS', '${DB_PASS}'], ['DB_PASS', '${DB_PASS:?required}'], ['DB_PASS', 'Xe5rT2yQ8u']]) {
+      expect(storedFallback(k, v), `${k}=${v}`).toBeUndefined();
+    }
+  });
+
+  it('makes the value a stored secret for the plaintext-secret checks', () => {
+    expect(isSecretNamedValue('DB_PASS', '${DB_PASS:-Xe5rT2yQ8u}')).toBe(true);
+    expect(isSecretNamedValue('DB_PASS', '${DB_PASS}')).toBe(false);
+    expect(isSecretNamedValue('DB_PASS', '${DB_PASS:-changeme}')).toBe(false);
   });
 });

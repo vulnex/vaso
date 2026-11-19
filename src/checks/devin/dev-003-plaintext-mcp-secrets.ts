@@ -1,6 +1,6 @@
 import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
-import { API_KEY_PATTERNS, envReference, isPlaceholderSecret, secretShape } from '../../core/patterns.js';
+import { API_KEY_PATTERNS, envReference, isPlaceholderSecret, secretShape, storedFallback } from '../../core/patterns.js';
 
 // Devin supports secret interpolation: ${env:VAR} and ${file:/path}, also
 // embedded in a larger value (`Bearer ${env:TOKEN}`). Whatever remains after
@@ -85,6 +85,16 @@ export const dev003 = defineCheck({
           if (!map || typeof map !== 'object' || Array.isArray(map)) continue;
           for (const [key, value] of Object.entries(map as Record<string, unknown>)) {
             if (typeof value !== 'string') continue;
+            // `${DB_PASS:-<pw>}`: Devin passes the text as is, the password in it
+            const fallback = storedFallback(key, value);
+            if (fallback !== undefined) {
+              evidence.push({
+                file: config.filePath,
+                snippet: `mcpServers.${name}.${field}.${key}: \${…:-${mask(fallback)}}`,
+                detail: `Literal secret as the default of "${key}" in MCP ${field} — Devin doesn't expand \${VAR:-default}, the server receives the text with the secret in it; use \${env:VAR} or \${file:/path} interpolation`,
+              });
+              continue;
+            }
             const ref = unexpandedReference(value, `mcpServers.${name}.${field}.${key}`, config.filePath);
             if (ref) {
               evidence.push(ref);

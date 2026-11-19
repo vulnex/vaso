@@ -9,7 +9,7 @@
  * the scanning machine).
  */
 
-import { API_KEY_PATTERNS, MAX_SNIPPET, OAUTH_TOKEN_VALUE_PATTERNS, isEnvReference, isPathValue, isPlaceholderSecret, secretShape, truncateSnippet } from '../core/patterns.js';
+import { API_KEY_PATTERNS, MAX_SNIPPET, OAUTH_TOKEN_VALUE_PATTERNS, isEnvReference, isPathValue, isPlaceholderSecret, secretShape, storedFallback, truncateSnippet } from '../core/patterns.js';
 import { maskCommandCredentials, maskUrlSecrets } from '../mcp/config-secrets.js';
 import { escapeJsonUnsafe } from './text-safety.js';
 import { EXTRA_TOKEN_PATTERNS } from '../analyzers/secret-values.js';
@@ -1114,7 +1114,12 @@ export function maskCredentialsDeep<T>(value: T, key = ''): T {
 }
 
 function maskMap(map: Record<string, unknown>): Record<string, unknown> {
-  return Object.fromEntries(Object.entries(map).map(([k, v]) => [k, typeof v === 'string' && !keepValue(v) ? maskValue(v) : v]));
+  return Object.fromEntries(Object.entries(map).map(([k, v]) => {
+    if (typeof v !== 'string') return [k, v];
+    // `DB_PASS: ${DB_PASS:-<pw>}`: the reference stays, its stored default doesn't
+    if (storedFallback(k, v) !== undefined) return [k, v.replace(/^(\s*(?:(?:Bearer|Basic|Token)\s+)?\$\{[A-Za-z_][A-Za-z0-9_]*:?[-=]).*(\}\s*)$/i, `$1${MASK}$2`)];
+    return [k, keepValue(v) ? v : maskValue(v)];
+  }));
 }
 
 export function reportReplacer(this: unknown, key: string, value: unknown): unknown {

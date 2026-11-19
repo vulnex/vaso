@@ -211,3 +211,28 @@ describe('shared secret helpers print a secret\'s shape, no character of it', ()
     expect(JSON.parse(toReportJson({ snippet: `"apiKey":"${secretShape(OPENAI_KEY, 'OpenAI API key')}"` })).snippet).toContain('OpenAI API key');
   });
 });
+
+/** dt24 g4-R3: a short `${VAR:-default}` under a credential name is a stored secret. */
+describe('a stored default under a credential name', () => {
+  beforeAll(() => {
+    if (checkRegistry.getAll().length === 0) registerAllChecks();
+  });
+  const PW = 'Xe5rT2yQ8u';
+  const server = { command: 'npx', args: ['-y', 'dmcp@1.0.0'], env: { DB_PASS: `${'$'}{DB_PASS:-${PW}}`, LOG_LEVEL: '${LOG_LEVEL:-info}' } };
+
+  it.each([['gemini-cli', 'GEM-001', '/.gemini/settings.json'], ['devin', 'DEV-003', '/.config/devin/mcp_config.json']] as const)('%s: %s flags it, quoting none of it', async (agent, id, rel) => {
+    const data = { mcpServers: { a: server } };
+    const configs = [{ raw: JSON.stringify(data), format: 'json', filePath: HOME + rel, data }] as ParsedConfig[];
+    const ctx: ScanContext = { installation: { agent, installDir: HOME, configFiles: configs }, configs, platform: 'linux', fs: emptyFs() };
+    const r = await checkRegistry.getAll().find(c => c.id === id)!.run(ctx);
+    expect(r.passed).toBe(false);
+    expect(r.evidence?.some(e => !e.mitigated && e.snippet?.includes('DB_PASS'))).toBe(true);
+    expect(toReportJson(r)).not.toContain(PW.slice(2, 8));
+    expect(r.evidence?.some(e => e.snippet?.includes('LOG_LEVEL') && !e.mitigated)).toBe(false);
+  });
+
+  it('mcp list JSON masks the default, keeping the reference', () => {
+    const out = JSON.parse(toReportJson({ configs: [{ servers: [{ name: 'a', ...server }] }] }));
+    expect(out.configs[0].servers[0].env).toEqual({ DB_PASS: '${DB_PASS:-***}', LOG_LEVEL: '${LOG_LEVEL:-info}' });
+  });
+});

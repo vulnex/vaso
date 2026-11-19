@@ -111,6 +111,23 @@ export function isEnvReference(value: string): boolean {
   return envReference(value) !== undefined;
 }
 
+/** A credential word in a key or variable name (`DB_PASS`, `apiKey`, `GITHUB_TOKEN`). */
+const CREDENTIAL_NAME_WORD = /api[_-]?key|apikey|token|secret|passw|passphrase|(?:^|[_.-])pass(?:$|[_.-])|pwd|credential|auth|private[_-]?key|(?:^|[_.-])(?:key|pat)$/i;
+
+/**
+ * The default a `${VAR:-default}` (`${VAR-…}`, `${VAR:=…}`) value under a
+ * credential-named key stores: the credential itself, however short
+ * (`DB_PASS: ${DB_PASS:-Xe5rT2yQ8u}`) — envReference only counts a 16+
+ * character one, as it can't see the key. Undefined when there is none, or
+ * it is empty, a placeholder or another reference. probe/secret_scrub_fallback.go.
+ */
+export function storedFallback(name: string, value: string): string | undefined {
+  if (!CREDENTIAL_NAME_WORD.test(name)) return undefined;
+  const fallback = /^\$\{[A-Za-z_][A-Za-z0-9_]*:?[-=](.*)\}$/.exec(value.replace(AUTH_SCHEME_PREFIX, '').trim())?.[1].trim();
+  if (!fallback || isPlaceholderSecret(fallback) || isEnvReference(fallback) || isSecretReference(fallback)) return undefined;
+  return fallback;
+}
+
 /**
  * Where a secret is kept, written in place of the secret: a secret manager's
  * reference, which the server or a wrapper (`op run`, `vals`, the platform)

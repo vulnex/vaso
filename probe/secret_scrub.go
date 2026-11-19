@@ -1266,6 +1266,10 @@ func (c *collector) disguiseURLPassword(v string) string {
 // disguiseKeyed disguises a value found under key: under a password or
 // secret name, a passphrase of lowercase words too (see passphraseLike).
 func (c *collector) disguiseKeyed(key, v string) string {
+	// ${DB_PASS:-<pw>}: the default is the secret, the reference stays
+	if out, ok := c.disguiseFallback(key, v); ok {
+		return out
+	}
 	return c.disguiseAs(v, strongCredentialKey(key), true)
 }
 
@@ -1511,6 +1515,9 @@ func shortSecret(v string) bool {
 // looks like one anywhere, or, under a name that holds a password, key or
 // token itself, a passphrase, a lowercase word or a short value.
 func keyedSecret(key, value string) bool {
+	if _, _, _, ok := storedFallback(key, value); ok {
+		return true
+	}
 	if credentialLike(value) {
 		return true
 	}
