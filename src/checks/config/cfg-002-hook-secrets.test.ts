@@ -123,3 +123,21 @@ describe('CFG-002 passwords in hook commands', () => {
     expect(found.every(s => !s.masked.includes(PW))).toBe(true);
   });
 });
+
+// dt24 g8-S1: in a one-line config the text around the matched key held a
+// neighbouring opaque value under a non-credential key, quoted as written
+describe('CFG-002 snippet in a one-line config', () => {
+  it('names a neighbouring opaque value by its shape', async () => {
+    const key = 'sk-proj-Hq4Tz9Wm2Vb7Kc5Rn8Ld3Fs6Gj1Py0AaXw2Qe';
+    const other = 'Zk8Qw3Lp7Vn2Rt9Xm4Hs6Jd1Fb5Gc0Ny';
+    const raw = JSON.stringify({ model: 'claude-sonnet-4-5', k: key, a: other, path: '/usr/local/bin/node' });
+    const config: ParsedConfig = { raw, format: 'json', filePath: '/home/test/.claude/settings.json', data: JSON.parse(raw) };
+    const r = await cfg002.run(ctx([config]));
+    expect(r.passed).toBe(false);
+    const snippet = r.evidence?.[0]?.snippet ?? '';
+    expect(snippet).not.toContain(key.slice(8, 20));
+    expect(snippet).not.toContain(other.slice(4));
+    expect(snippet).toContain(`"a":"<literal, ${other.length} chars, high-entropy value>"`);
+    expect(snippet).toContain('claude-sonnet-4-5');
+  });
+});
