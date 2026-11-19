@@ -9,7 +9,7 @@
  * the scanning machine).
  */
 
-import { API_KEY_PATTERNS, MAX_SNIPPET, OAUTH_TOKEN_VALUE_PATTERNS, isEnvReference, isPathValue, isPlaceholderSecret, truncateSnippet } from '../core/patterns.js';
+import { API_KEY_PATTERNS, MAX_SNIPPET, OAUTH_TOKEN_VALUE_PATTERNS, isEnvReference, isPathValue, isPlaceholderSecret, secretShape, truncateSnippet } from '../core/patterns.js';
 import { maskCommandCredentials, maskUrlSecrets } from '../mcp/config-secrets.js';
 import { escapeJsonUnsafe } from './text-safety.js';
 import { EXTRA_TOKEN_PATTERNS } from '../analyzers/secret-values.js';
@@ -21,7 +21,8 @@ import {
 const MASKED_MAPS = new Set(['env', 'headers']);
 
 function maskValue(value: string): string {
-  return value.length > 8 ? `${value.slice(0, 4)}…(${value.length} chars)` : '***';
+  // its length only (secretShape): a 4-character prefix was half of a short secret
+  return value.length > 8 ? secretShape(value) : '***';
 }
 
 const MASK = '***';
@@ -36,7 +37,8 @@ function keepValue(value: string): boolean {
   const v = value.trim().replace(/^\$(?=\\*['"])/, '').replace(/^\\*['"]|\\*['"]$/g, '');
   if (v === '' || v === MASK) return true;
   // how evidence names a secret by its length (secretShape: `<literal, 11 chars>`)
-  if (/^<literal,?$|^<literal, \d+ chars>$/.test(v)) return true;
+  // …and with the token's kind (`<literal, 40 chars, GitHub PAT>`)
+  if (/^<literal,?$|^<literal, \d+ chars(?:, [\w .()/-]{1,48})?>$/.test(v)) return true;
   // a switch (`websocketRequiresToken: true`), not a credential
   if (/^(?:true|false|null)$/.test(v)) return true;
   // a file holding the credential (`--ssh-key ~/.ssh/id_rsa`), not the

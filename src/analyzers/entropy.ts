@@ -51,8 +51,9 @@ export function findHighEntropyBlocks(
         results.push({
           line: i + 1,
           entropy: Math.round(entropy * 100) / 100,
-          // The block is the suspected secret itself: never quote it
-          snippet: `${str.slice(0, 4)}…${str.slice(-4)} (${str.length} chars)`,
+          // The block is the suspected secret itself: never quote any of it
+          // (secretShape's form; patterns.ts imports this module)
+          snippet: `<literal, ${str.length} chars, high-entropy string>`,
         });
       }
     }

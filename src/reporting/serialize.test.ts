@@ -18,8 +18,9 @@ describe('toReportJson', () => {
       configs: [{ servers: [{ name: 'gh', env: { GITHUB_TOKEN: token, DEBUG: '1' }, headers: { Authorization: `Bearer ${SECRET}` } }] }],
     }));
     const server = out.configs[0].servers[0];
-    expect(server.env).toEqual({ GITHUB_TOKEN: `ghp_…(${token.length} chars)`, DEBUG: '***' });
-    expect(server.headers.Authorization).toBe(`Bear…(${SECRET.length + 7} chars)`);
+    // its length only: no character of the value (a prefix was half of a short secret)
+    expect(server.env).toEqual({ GITHUB_TOKEN: `<literal, ${token.length} chars>`, DEBUG: '***' });
+    expect(server.headers.Authorization).toBe(`<literal, ${SECRET.length + 7} chars>`);
   });
 
   it('masks every credential on a quoted one-line JSON snippet', () => {

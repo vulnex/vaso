@@ -20,18 +20,12 @@ describe('isSecretReference (dt17 MD-C)', () => {
 });
 
 describe('redactSecret', () => {
-  it('reveals first 4 + last 4 characters of long tokens', () => {
+  // dt24: first 4 + last 4 characters were 8 of a short token's characters
+  it('names a token by its kind and length, none of its characters', () => {
     const token = 'sk-ant-aaaaaaaaaaaaaaaaaaaabbbbcccc';
-    expect(redactSecret(token)).toBe('sk-a...cccc');
-  });
-
-  it('fully masks short tokens with their length', () => {
-    expect(redactSecret('short')).toBe('[REDACTED:5c]');
-    expect(redactSecret('twelve_chars')).toBe('[REDACTED:12c]');
-  });
-
-  it('switches to fingerprint at 13 characters', () => {
-    expect(redactSecret('thirteen_char')).toBe('thir...char');
+    expect(redactSecret(token)).toBe('<literal, 35 chars>');
+    expect(redactSecret(token, 'Anthropic API key')).toBe('<literal, 35 chars, Anthropic API key>');
+    expect(redactSecret('short')).toBe('<literal, 5 chars>');
   });
 });
 
@@ -41,7 +35,7 @@ describe('redactSecretsInLine', () => {
     const out = redactSecretsInLine(line);
     expect(out).toContain('"apiKey":');
     expect(out).not.toContain('sk-abc123456789012345678901234567890123');
-    expect(out).toMatch(/sk-a\.\.\./);
+    expect(out).toContain('<literal, 39 chars, OpenAI API key>');
   });
 
   it('redacts every secret in a line, even when multiple distinct patterns match', () => {
@@ -102,7 +96,8 @@ describe('redactSecretsInLine', () => {
     const out = redactSecretsInLine(line);
     expect(out).not.toContain(tok);
     expect(out).not.toContain('AAWXYZ');
-    expect(out).toMatch(/ghp_\.\.\.WXYZ/);
+    expect(out).not.toContain('WXYZ');
+    expect(out).toContain('<literal, 46 chars, ');
   });
 
   it('redacts a longer-than-spec gho_ token without leaking bridging bytes', () => {
@@ -111,7 +106,8 @@ describe('redactSecretsInLine', () => {
     const out = redactSecretsInLine(line);
     expect(out).not.toContain(tok);
     expect(out).not.toContain('BBWXYZ');
-    expect(out).toMatch(/gho_\.\.\.WXYZ/);
+    expect(out).not.toContain('WXYZ');
+    expect(out).toContain('<literal, 48 chars, GitHub OAuth token>');
   });
 
   it('redacts a Telegram bot token longer than 35 chars after the colon', () => {
@@ -132,7 +128,8 @@ describe('redactSecretsInLine', () => {
     const out = redactSecretsInLine(line);
     expect(out).not.toContain(tok);
     expect(out).not.toContain('BWXYZ');
-    expect(out).toMatch(/AKIA\.\.\.WXYZ/);
+    expect(out).not.toContain('WXYZ');
+    expect(out).toContain('<literal, 26 chars, AWS Access Key>');
   });
 });
 

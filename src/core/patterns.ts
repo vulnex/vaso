@@ -240,13 +240,19 @@ export const OAUTH_TOKEN_VALUE_PATTERNS = [
  * secret, and the report masker reads a trailing `…` as a placeholder
  * (`sk-ant-…`), so it printed it in every format.
  */
-export function secretShape(value: string): string {
-  return `<literal, ${value.length} chars>`;
+export function secretShape(value: string, kind?: string): string {
+  // the kind inside the brackets: before them, the report masker read its
+  // first word as the value (`token: *** PAT <literal, 40 chars>`)
+  return kind ? `<literal, ${value.length} chars, ${kind}>` : `<literal, ${value.length} chars>`;
 }
 
-export function redactSecret(token: string): string {
-  if (token.length <= 12) return `[REDACTED:${token.length}c]`;
-  return `${token.slice(0, 4)}...${token.slice(-4)}`;
+/**
+ * A recognised token as evidence prints it: its length and kind, no
+ * character of it (`<literal, 40 chars, GitHub PAT>`). The first and last
+ * four characters it used to keep were 8 of a short token's characters.
+ */
+export function redactSecret(token: string, kind?: string): string {
+  return secretShape(token, kind);
 }
 
 function withGlobalFlag(pattern: RegExp): RegExp {
@@ -306,10 +312,26 @@ export function snippetAround(line: string, index: number, length: number, maxLe
   return `${start > 0 ? '... ' : ''}${truncateSnippet(text.slice(start), keep)}`;
 }
 
-export function redactSecretsInLine(line: string, maxLen = 80): string {
-  let redacted = line;
-  for (const { pattern } of API_KEY_PATTERNS) {
-    redacted = redacted.replace(withGlobalFlag(pattern), (m) => redactSecret(m));
+/** `text` with every recognised token replaced by its kind and length. */
+function redactTokens(text: string): string {
+  let redacted = text;
+  for (const { pattern, name } of API_KEY_PATTERNS) {
+    redacted = redacted.replace(withGlobalFlag(pattern), (m) => redactSecret(m, name));
   }
-  return truncateSnippet(redacted.trim(), maxLen);
+  return redacted;
+}
+
+export function redactSecretsInLine(line: string, maxLen = 80): string {
+  return truncateSnippet(redactTokens(line).trim(), maxLen);
+}
+
+/**
+ * redactSecretsInLine around the match at `index` (length `length`): in a
+ * one-line (minified) file the line is the whole file, and a snippet from
+ * its start quoted whatever values came first, not the match.
+ */
+export function redactSecretsAround(line: string, index: number, length: number, maxLen = 80): string {
+  const before = redactTokens(line.slice(0, index));
+  const at = redactTokens(line.slice(index, index + length));
+  return snippetAround(before + at + redactTokens(line.slice(index + length)), before.length, at.length, maxLen);
 }

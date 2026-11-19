@@ -96,7 +96,7 @@ export function scanMemorySecrets(file: string, content: string, kind = 'memory 
         file,
         line: i + 1,
         // no more of a key than reports show anywhere (8 characters)
-        snippet: `${m[0].slice(0, 4)}…${m[0].slice(-4)} (${m[0].length} chars)`,
+        snippet: secretShape(m[0], name),
         detail: `Plaintext ${name} in ${kind}`,
       };
       CREDENTIAL_EVIDENCE.add(item);
