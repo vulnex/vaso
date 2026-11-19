@@ -35,6 +35,8 @@ function keepValue(value: string): boolean {
   // (bash's $'…' and $"…" quote like '…' and "…")
   const v = value.trim().replace(/^\$(?=\\*['"])/, '').replace(/^\\*['"]|\\*['"]$/g, '');
   if (v === '' || v === MASK) return true;
+  // how evidence names a secret by its length (secretShape: `<literal, 11 chars>`)
+  if (/^<literal,?$|^<literal, \d+ chars>$/.test(v)) return true;
   // a switch (`websocketRequiresToken: true`), not a credential
   if (/^(?:true|false|null)$/.test(v)) return true;
   // a file holding the credential (`--ssh-key ~/.ssh/id_rsa`), not the

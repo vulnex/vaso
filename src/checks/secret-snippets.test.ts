@@ -3,7 +3,7 @@ import type { AgentInstallation, AgentType, CheckResult, ParsedConfig, ScanConte
 import { AGENT_TYPES } from '../core/types.js';
 import { SnapshotFSProvider } from '../core/snapshot-fs-provider.js';
 import { checkRegistry } from '../core/check-registry.js';
-import { toReportJson } from '../reporting/serialize.js';
+import { maskCredentialsInLine, maskCredentialsInText, toReportJson } from '../reporting/serialize.js';
 import { registerAllChecks } from './index.js';
 
 /**
@@ -119,6 +119,13 @@ describe('plaintext-secret evidence never quotes a secret', () => {
     }
     expect(leaks).toEqual([]);
     expect(report.length).toBeGreaterThan(0);
+  });
+
+  it('reports print the shape as the check wrote it', () => {
+    for (const s of ['DB_PASSWORD=<literal, 11 chars>', 'mcpServers.x.env.API_KEY: <literal, 40 chars>', 'Server "a": TOKEN=<literal, 24 chars>']) {
+      expect(maskCredentialsInText(s)).toBe(s);
+      expect(maskCredentialsInLine(s)).toBe(s);
+    }
   });
 
   it('flags the planted secrets (the test reaches the checks it guards)', async () => {
