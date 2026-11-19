@@ -1445,9 +1445,12 @@ func redactEnvValue(key, val string) string {
 	trimmed := strings.TrimSpace(val)
 	if strings.HasPrefix(trimmed, "{") || strings.HasPrefix(trimmed, "[") {
 		var parsed interface{}
+		// JSONC (comments, trailing commas) as the CLI reads it (stripJSONC);
+		// broken JSON can't be disguised inside, so it is redacted whole
 		if err := json.Unmarshal([]byte(trimmed), &parsed); err != nil {
-			// JSONC or broken JSON: can't redact inside it, so not at all
-			return redactedEnvValue
+			if err := json.Unmarshal([]byte(stripJSONC(trimmed)), &parsed); err != nil {
+				return redactedEnvValue
+			}
 		}
 		if out, err := json.Marshal((&collector{}).disguiseJSONValue(parsed, "", false)); err == nil {
 			return string(out)

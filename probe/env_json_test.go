@@ -46,3 +46,35 @@ func TestEnvJSONConfigDisguised(t *testing.T) {
 		t.Errorf("structure lost: %s", got)
 	}
 }
+
+// dt24 g9-R3: OPENCODE_CONFIG_CONTENT written as JSONC (comments, a
+// trailing comma), which the CLI reads (stripJsonc), was redacted whole.
+func TestEnvJSONCConfigDisguised(t *testing.T) {
+	const token = "Zq7Wm3Kv8Rb2LpXyT4nQ"
+	for _, val := range []string{
+		`{"mcp": {"z": {"environment": {"API_TOKEN": "` + token + `"}}}, /* note */ "share": "auto",}`,
+		"{\n  // the token\n  \"mcp\": {\"z\": {\"environment\": {\"API_TOKEN\": \"" + token + "\",},},},\n  \"share\": \"auto\"\n}",
+	} {
+		got := redactEnvValue("OPENCODE_CONFIG_CONTENT", val)
+		if got == redactedEnvValue || strings.Contains(got, hiddenPart(token)) {
+			t.Errorf("%q → %s", val, got)
+			continue
+		}
+		var m map[string]interface{}
+		if err := json.Unmarshal([]byte(got), &m); err != nil || m["share"] != "auto" {
+			t.Errorf("not the config as JSON: %s", got)
+			continue
+		}
+		s := m["mcp"].(map[string]interface{})["z"].(map[string]interface{})["environment"].(map[string]interface{})["API_TOKEN"].(string)
+		if verdictsOf(s) != verdictsOf(token) || len(s) != len(token) {
+			t.Errorf("stand-in %q judged unlike %q", s, token)
+		}
+	}
+	// a comment marker inside a string stays; broken JSON is still redacted
+	if got := redactEnvValue("OPENCODE_CONFIG_CONTENT", `{"url": "https://x.example/a", "n": 1,}`); !strings.Contains(got, `https://x.example/a`) {
+		t.Errorf("string content lost: %s", got)
+	}
+	if got := redactEnvValue("OPENCODE_CONFIG_CONTENT", `{"mcp": {`); got != redactedEnvValue {
+		t.Errorf("broken JSON shipped: %s", got)
+	}
+}
