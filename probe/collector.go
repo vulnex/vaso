@@ -188,15 +188,12 @@ func inExcludedDirAs(pattern, match string, skills bool) bool {
 		literal[seg] = true
 	}
 	parts := strings.Split(filepath.ToSlash(rel), "/")
-	top := -1
-	if skills {
-		top = skillTopIndex(slashPattern)
-	}
 	for i, seg := range parts[:len(parts)-1] {
 		if excludedGlobDirs[seg] && !literal[seg] && !(skills && skillTreeBuildDirs[seg]) {
-			// A folder directly under the skills root that holds a SKILL.md
-			// is a skill, whatever it is called (`venv`, `node_modules`)
-			if i == top && vendorNamedSkill(filepath.Join(filepath.FromSlash(base), filepath.Join(parts[:i+1]...))) {
+			// A folder in a skills tree that holds a SKILL.md is a skill,
+			// whatever it is called (`venv`, `node_modules`) and however deep
+			// (Hermes loads skills nested in category folders, `.cache/` too)
+			if skills && vendorNamedSkill(filepath.Join(filepath.FromSlash(base), filepath.Join(parts[:i+1]...))) {
 				continue
 			}
 			return true
@@ -205,31 +202,13 @@ func inExcludedDirAs(pattern, match string, skills bool) bool {
 	return false
 }
 
-// skillTopIndex is, for a skills glob ending in its only `**` (`<root>/**`,
-// `~/.openclaw/agents/*/skills/**`), the index in a match's path below the
-// glob's static base of the folder directly under the skills root; -1 for
-// any other pattern.
-func skillTopIndex(slashPattern string) int {
-	_, rest := doublestar.SplitPattern(slashPattern)
-	segs := strings.Split(rest, "/")
-	if len(segs) == 0 || segs[len(segs)-1] != "**" {
-		return -1
-	}
-	for _, seg := range segs[:len(segs)-1] {
-		if strings.Contains(seg, "**") {
-			return -1
-		}
-	}
-	return len(segs) - 1
-}
-
 // vendorNamedSkills caches vendorNamedSkill by directory.
 var vendorNamedSkills = map[string]bool{}
 
-// vendorNamedSkill: dir, a folder directly under a skills root named like a
-// vendor dir, holds a SKILL.md (any case) — a skill the agent loads, not
-// vendored code: collected like any skill (vendorNamedSkills in
-// src/core/utils.ts). A real virtualenv or node_modules holds none at its top.
+// vendorNamedSkill: dir, a folder in a skills tree named like a vendor dir,
+// holds a SKILL.md (any case) — a skill the agent loads, not vendored code:
+// collected like any skill (vendorNamedSkills in src/core/utils.ts). A real
+// virtualenv or node_modules holds none at its top.
 func vendorNamedSkill(dir string) bool {
 	if v, ok := vendorNamedSkills[dir]; ok {
 		return v
@@ -673,6 +652,7 @@ func (c *collector) collectGlob(snapshot *ProbeSnapshot, pattern string) {
 	c.collectNonUTF8Names(snapshot, pattern)
 	c.recordDeniedDirs(snapshot, pattern)
 	if c.inSkillTree {
+		c.collectVendorReferences(snapshot, pattern, matches)
 		c.collectUnlistableSkills(snapshot, pattern)
 		if !c.configTree {
 			c.collectLinkedSkillBases(snapshot, pattern)

@@ -12,6 +12,7 @@ import { getUserHomeDirs } from './openclaw.js';
 import { queryCliVersion, readPackageVersion } from './version-query.js';
 import { withoutLoadedConfigs, scanCwd, isLoadedInstallDir } from './project-configs.js';
 import { envPath } from './env-path.js';
+import { claudePlugins, claudePluginSkillsDir } from './claude-plugins.js';
 
 const CLAUDE_DIR_NAME = '.claude';
 const SETTINGS_FILES = ['settings.json', 'settings.local.json'];
@@ -222,6 +223,14 @@ export const claudeCodeAdapter: AgentAdapter = {
 
       const version = installs.primary?.version;
       const skillsDir = this.getSkillsDir(claudeDir);
+      // Enabled plugins' skills load beside the user's own; a disabled
+      // plugin's don't (a settings change that enables one shows up in the
+      // next scan)
+      const pluginSkillsDirs: string[] = [];
+      for (const plugin of await claudePlugins(claudeDir, configFiles, fs)) {
+        const dir = claudePluginSkillsDir(plugin);
+        if (plugin.enabled && !pluginSkillsDirs.includes(dir) && await fs.stat(dir).then(st => st.isDirectory(), () => false)) pluginSkillsDirs.push(dir);
+      }
 
       installations.push({
         agent: 'claude-code',
@@ -229,6 +238,7 @@ export const claudeCodeAdapter: AgentAdapter = {
         installDir: claudeDir,
         configFiles,
         skillsDir,
+        ...(skillsDir && pluginSkillsDirs.length > 0 ? { skillsDirs: [skillsDir, ...pluginSkillsDirs] } : {}),
         models: await this.getModels?.(configFiles, fs),
         user: options?.allUsers ? user : undefined,
         cliBinary,
@@ -374,6 +384,9 @@ export const claudeCodeAdapter: AgentAdapter = {
       ],
       globPatterns: [
         '~/.claude/skills/**',
+        // Installed plugins' skills, collected as skill trees — before the
+        // plugins glob below, which would collect them as plugin data first
+        '~/.claude/plugins/cache/*/*/*/skills/**',
         '~/.claude/plugins/**',
         '~/.claude/agents/**',
         // User-level memory rules (CC-012)

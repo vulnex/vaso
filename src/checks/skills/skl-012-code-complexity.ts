@@ -1,9 +1,10 @@
 import _traverse from '@babel/traverse';
 import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
-import { readSkillText, skillFilesOf, skillsDirsOf, noSkillsDirResult } from './skill-files.js';
+import { skillFilesOf, skillsDirsOf, noSkillsDirResult } from './skill-files.js';
+import { readSkillSource } from './skill-source.js';
 import { markTestCode } from '../../analyzers/test-paths.js';
-import { mayBeJavaScript, parseJs } from '../../analyzers/js-parse.js';
+import { parseJs } from '../../analyzers/js-parse.js';
 
 // Handle ESM/CJS interop
 const traverse = typeof _traverse === 'function' ? _traverse : (_traverse as { default: typeof _traverse }).default;
@@ -41,12 +42,11 @@ export const skl012 = defineCheck({
 
     for (const file of files) {
       try {
-        const code = await readSkillText(ctx.fs, file, 'code');
-        if (code === undefined) continue;
+        const src = await readSkillSource(ctx, file, 'code');
         // Shell, Python and data files aren't JavaScript; Babel's error
         // recovery would invent functions in them
-        if (!mayBeJavaScript(file)) continue;
-        const ast = parseJs(code);
+        if (src?.lang !== 'js') continue;
+        const ast = parseJs(src.text);
         if (!ast) continue;
 
         // One pass: a decision point counts toward every function it sits in

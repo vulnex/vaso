@@ -6,7 +6,9 @@ import type { DirentInfo, FSProvider } from './fs-provider.js';
 import type { AgentInstallation } from './types.js';
 import { walkSkillTree } from './skill-walk.js';
 import { relEscapes } from './path-rel.js';
-import { isCredentialNotProgram } from '../analyzers/credential-file-names.js';
+import { CREDENTIAL_FILE_NAME, startsLikeProgram } from '../analyzers/credential-file-names.js';
+import { isSkillAsset, vendorReferencePaths } from './skill-tree-files.js';
+import { readCappedFile } from './file-limits.js';
 
 export { relEscapes };
 import { LocalFSProvider } from './local-fs-provider.js';
@@ -45,9 +47,11 @@ export function getNestedValue(obj: Record<string, unknown>, path: KeyPath): unk
 /** Key path segments that reach an object's prototype rather than a key of it. */
 const PROTOTYPE_KEYS = new Set(['__proto__', 'prototype', 'constructor']);
 
-const CODE_EXTENSIONS = new Set([
-  '.js', '.ts', '.mjs', '.cjs', '.jsx', '.tsx', '.mts', '.cts', '.py',
-  '.sh', '.bash', '.zsh', '.ksh', '.fish', '.ps1', '.psm1',
+/** Scripts and source by extension: a skill's code (inventory `hasCode`). */
+export const CODE_EXTENSIONS: ReadonlySet<string> = new Set([
+  '.js', '.ts', '.mjs', '.cjs', '.jsx', '.tsx', '.mts', '.cts', '.py', '.pyw',
+  '.sh', '.bash', '.zsh', '.ksh', '.fish', '.command', '.ps1', '.psm1', '.bat', '.cmd',
+  '.rb', '.pl', '.pm', '.php', '.lua',
 ]);
 /**
  * Compiled code a skill can ship and run (`./helper`, a native addon). Read as
@@ -81,8 +85,8 @@ export function isVendorDirName(name: string): boolean {
 
 /**
  * True when parentPath lies under a vendor/VCS dir below root — or a build
- * output dir, unless `keepBuildOutput` (skill trees). `skills`: names of
- * folders directly under root that are skills though named like a vendor dir
+ * output dir, unless `keepBuildOutput` (skill trees). `skills`: folders
+ * (paths relative to root) that are skills though named like a vendor dir
  * (vendorNamedSkills) — not excluded themselves; vendor dirs inside them are.
  */
 export function isExcludedPath(
@@ -97,27 +101,31 @@ export function isExcludedPath(
   for (let i = 0; i < segments.length; i++) {
     const segment = segments[i];
     if (!segment) continue;
-    if (i === 0 && opts.skills?.has(segment)) continue;
-    if (VENDOR_DIRS.has(segment)) return true;
+    if (VENDOR_DIRS.has(segment)) {
+      if (opts.skills?.has(segments.slice(0, i + 1).join(sep))) continue;
+      return true;
+    }
     if (!opts.keepBuildOutput && BUILD_OUTPUT_DIRS.has(segment)) return true;
   }
   return false;
 }
 
 /**
- * Folders directly under the skills directory `root` that are named like a
- * vendor dir (`venv`, `node_modules`, `.git`) yet hold a SKILL.md (any case):
- * skills the agent loads, not vendored code, so they are read like any other
+ * Folders anywhere under the skills directory `root` that are named like a
+ * vendor dir (`venv`, `node_modules`, `.cache`) yet hold a SKILL.md (any
+ * case) directly: skills, not vendored code — Hermes loads skills nested in
+ * category folders, `.cache/` among them — so they are read like any other
  * (isExcludedPath's `skills`). A real virtualenv or node_modules holds no
- * SKILL.md at its top. The probe judges a folder the same way
- * (vendorNamedSkill in probe/collector.go).
+ * SKILL.md at its top. Paths relative to root. The probe judges a folder the
+ * same way (vendorNamedSkill in probe/collector.go).
  */
 export function vendorNamedSkills(root: string, entries: readonly DirentInfo[]): ReadonlySet<string> {
   const out = new Set<string>();
   for (const e of entries) {
     if (!e.parentPath || e.name.toUpperCase() !== 'SKILL.MD') continue;
-    const name = basename(e.parentPath);
-    if (VENDOR_DIRS.has(name) && join(root, name) === e.parentPath) out.add(name);
+    if (!VENDOR_DIRS.has(basename(e.parentPath))) continue;
+    const rel = relative(root, e.parentPath);
+    if (rel && !relEscapes(rel) && !isAbsolute(rel)) out.add(rel);
   }
   return out;
 }
@@ -137,11 +145,15 @@ export function getAllSkillsDirs(installation: AgentInstallation): string[] {
 }
 
 /**
- * Every file under a skills directory that skill/IOC checks read: code and
- * scripts by extension, SKILL.md (the agent runs its code blocks), compiled
- * binaries, and extensionless executables (`scripts/setup` with a shebang, a
- * native `helper`). Vendor dirs are skipped, build output is not — see
- * VENDOR_DIRS / BUILD_OUTPUT_DIRS.
+ * Every file under a skills directory that skill/IOC checks read: every file
+ * but assets (images, fonts, archives — SKILL_ASSET_EXTENSIONS), hidden
+ * extensionless files (`.gitignore`, `.DS_Store`) and key or token files
+ * that aren't programs. A script runs whatever its extension (`bash
+ * scripts/install`, `python3 helper.txt`) and a reference doc is
+ * instructions as much as SKILL.md is; each check decides what it reads in
+ * which (checks/skills/skill-files.ts). Vendor dirs are skipped, build output
+ * is not — see VENDOR_DIRS / BUILD_OUTPUT_DIRS — except the files a SKILL.md
+ * runs from a vendor folder (`node node_modules/helper/index.js`).
  */
 export async function getSkillFiles(dir: string, fs?: FSProvider, opts: { uncapped?: boolean } = {}): Promise<string[]> {
   return (await listSkillTree(dir, fs, opts)).files;
@@ -153,6 +165,13 @@ export interface SkillTreeListing {
   entries: DirentInfo[];
   /** The files skill/IOC checks read — see getSkillFiles. */
   files: string[];
+  /** Those of `files` that are code: scripts and source by extension,
+   *  compiled helpers, extensionless executables and the vendor-folder files
+   *  a SKILL.md runs (inventory `hasCode`). */
+  codeFiles: string[];
+  /** Folders inside vendor dirs a SKILL.md runs (`node node_modules/helper`):
+   *  only the files it names are read, so SKL-002 reports them as not scanned. */
+  vendorDirRefs: string[];
   /** Skill directories that exist but can't be listed (see unlistableSkillDirs). */
   unlistable: string[];
   /** Folders deeper in the tree (inside a skill) that exist but can't be
@@ -179,6 +198,8 @@ export interface SkillTreeListing {
 export async function listSkillTree(dir: string, fs?: FSProvider, opts: { uncapped?: boolean } = {}): Promise<SkillTreeListing> {
   const provider = fs ?? new LocalFSProvider();
   const files: string[] = [];
+  const codeFiles: string[] = [];
+  const vendorDirRefs: string[] = [];
   let entries: DirentInfo[] = [];
   let error: NodeJS.ErrnoException | undefined;
   const refusedLinks: string[] = [];
@@ -189,17 +210,46 @@ export async function listSkillTree(dir: string, fs?: FSProvider, opts: { uncapp
     // Follows symlinked skills that point outside the tree (walkSkillTree)
     entries = await walkSkillTree(provider, dir, refusedLinks, { overLimit: overLimitLinks, overTotal: overTotalLinks, unrecorded: unrecordedLinks, uncapped: opts.uncapped });
     const skills = vendorNamedSkills(dir, entries);
+    const skillMds: string[] = [];
     for (const entry of entries) {
       if (!entry.isFile) continue;
       if (isExcludedPath(dir, entry.parentPath, { keepBuildOutput: true, skills })) continue;
       const fullPath = entry.parentPath ? join(entry.parentPath, entry.name) : join(dir, entry.name);
       const ext = extname(entry.name).toLowerCase();
-      if (CODE_EXTENSIONS.has(ext) || BINARY_EXTENSIONS.has(ext) || entry.name.toUpperCase() === 'SKILL.MD') {
+      if (CODE_EXTENSIONS.has(ext) || BINARY_EXTENSIONS.has(ext)) {
         files.push(fullPath);
-      } else if (ext === '' && !entry.name.startsWith('.') && await isExecutable(provider, fullPath)
-        // an id_ed25519 or token with an execute bit is a key, not a program
-        && !(await isCredentialNotProgram(provider, fullPath, entry.name))) {
+        codeFiles.push(fullPath);
+      } else if (entry.name.toUpperCase() === 'SKILL.MD') {
         files.push(fullPath);
+        skillMds.push(fullPath);
+      // an id_ed25519 or token (with an execute bit or not) is a key, not a program
+      } else if ((ext === '' && entry.name.startsWith('.')) || isSkillAsset(entry.name) || await keyFile(provider, fullPath, entry.name)) {
+        continue;
+      } else {
+        files.push(fullPath);
+        if (ext === '' && await isExecutable(provider, fullPath)) codeFiles.push(fullPath);
+      }
+    }
+    // Files a SKILL.md runs from a vendor folder the walk skips
+    const listed = new Set(files);
+    for (const skillMd of skillMds) {
+      let text: string;
+      try {
+        text = await readCappedFile(provider, skillMd);
+      } catch {
+        continue;
+      }
+      for (const path of vendorReferencePaths(dir, skillMd, text)) {
+        if (listed.has(path) || !isExcludedPath(dir, dirname(path), { keepBuildOutput: true, skills })) continue;
+        const st = await provider.stat(path).catch(() => undefined);
+        if (st?.isDirectory()) {
+          if (!vendorDirRefs.includes(path)) vendorDirRefs.push(path);
+          continue;
+        }
+        if (!st?.isFile() || isSkillAsset(path) || await keyFile(provider, path, basename(path))) continue;
+        listed.add(path);
+        files.push(path);
+        codeFiles.push(path);
       }
     }
   } catch (err) {
@@ -215,7 +265,12 @@ export async function listSkillTree(dir: string, fs?: FSProvider, opts: { uncapp
   }
   // Sorted: a local walk and a snapshot list folders in different orders
   const unlistableNested = (await unlistableSubdirs(provider, dir, entries)).filter(d => !unlistable.includes(d)).sort();
-  return { entries, files, unlistable: unlistable.sort(), unlistableNested, refusedLinks, overLimitLinks, overTotalLinks, unrecordedLinks, ...(error ? { error } : {}) };
+  return { entries, files, codeFiles, vendorDirRefs: vendorDirRefs.sort(), unlistable: unlistable.sort(), unlistableNested, refusedLinks, overLimitLinks, overTotalLinks, unrecordedLinks, ...(error ? { error } : {}) };
+}
+
+/** A key or token file by its name that isn't a program (isCredentialNotProgram) — the name is tested first. */
+async function keyFile(fs: FSProvider, path: string, name: string): Promise<boolean> {
+  return CREDENTIAL_FILE_NAME.test(name) && !(await startsLikeProgram(fs, path));
 }
 
 /**

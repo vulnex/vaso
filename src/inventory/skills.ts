@@ -8,6 +8,7 @@ import { maskCredentialsInLine } from '../reporting/serialize.js';
 import { shannonEntropy } from '../analyzers/entropy.js';
 import { configTreeGap, probeCoversTree } from '../core/probe-coverage.js';
 import { missingRootReason, refusedSkillLink, unscannedReason, unscannedRootMissing } from '../core/skill-root-scope.js';
+import { pluginOfSkillsDir } from '../adapters/claude-plugins.js';
 
 /**
  * Folders under a skills directory whose skills an agent doesn't load: Hermes
@@ -17,6 +18,14 @@ import { missingRootReason, refusedSkillLink, unscannedReason, unscannedRootMiss
  * skills; the folder is listed as an other entry. Codex's `.system/` is loaded.
  */
 const INACTIVE_SKILL_DIRS = new Set(['.archive', '.curator_backups', '.hub', '.locks', '.git', '.github']);
+
+/**
+ * Hermes skips a SKILL.md anywhere under these too (EXCLUDED_SKILL_DIRS): a
+ * skill nested in a `venv/` or `node_modules/` isn't one it loads — one in
+ * `.cache/` or `.next/` is. The checks read them all (vendorNamedSkills).
+ */
+const HERMES_EXCLUDED_SKILL_DIRS = new Set(['.hermes-dist', '.venv', 'venv', 'node_modules', 'site-packages', '__pycache__',
+  '.tox', '.nox', '.pytest_cache', '.mypy_cache', '.ruff_cache']);
 
 /** Longest description carried into reports. */
 export const MAX_SKILL_DESCRIPTION = 200;
@@ -101,6 +110,9 @@ export async function collectSkillInventory(installation: AgentInstallation, fs:
     // (SKL-002 reports it as not scanned)
     for (const dir of listing.unlistableNested) incomplete.push(`${dir}: contents can't be listed — not scanned`);
     unlistableDirs.push(...listing.unlistableNested);
+    // A vendor folder a SKILL.md runs: only the files it names were read
+    // (SKL-002 reports it as not scanned)
+    for (const dir of listing.vendorDirRefs) incomplete.push(`${dir}: vendor folder a SKILL.md runs — only the files it names are read`);
     // A skill linked to where no skills tree is walked: the agent loads it,
     // no scan reads it — not scanned, as a skills directory there would be
     // (SKL-002 reports it from unscannedSkillsDirs)
@@ -144,10 +156,11 @@ export async function collectSkillInventory(installation: AgentInstallation, fs:
     // Files and code files under each directory, counted once per file
     // (a lookup per skill over every file was quadratic: 7000 skills, 3 min)
     const fileSet = new Set(listing.files);
+    const codeSet = new Set(listing.codeFiles);
     const filesUnder = new Map<string, number>();
     const codeUnder = new Map<string, number>();
     for (const f of listing.files) {
-      const code = !isSkillMd(f);
+      const code = codeSet.has(f);
       for (const d of upTo(dirname(f), root)) {
         filesUnder.set(d, (filesUnder.get(d) ?? 0) + 1);
         if (code) codeUnder.set(d, (codeUnder.get(d) ?? 0) + 1);
@@ -159,7 +172,8 @@ export async function collectSkillInventory(installation: AgentInstallation, fs:
     // is a skill only when nothing below it is (`vaso skill audit <skill>`):
     // agents load <root>/<name>/SKILL.md, so a stray root SKILL.md would
     // otherwise swallow every skill.
-    const inactive = (dir: string) => relative(root, dir).split(sep).some(seg => INACTIVE_SKILL_DIRS.has(seg));
+    const inactive = (dir: string) => relative(root, dir).split(sep)
+      .some(seg => INACTIVE_SKILL_DIRS.has(seg) || (installation.agent === 'hermes' && HERMES_EXCLUDED_SKILL_DIRS.has(seg)));
     const found = [...new Set([...listing.files.filter(isSkillMd).map(f => dirname(f)), ...linked.keys()])]
       .filter(dir => !inactive(dir));
     const candidates = (found.some(d => d !== root) ? found.filter(d => d !== root) : found)
@@ -171,6 +185,8 @@ export async function collectSkillInventory(installation: AgentInstallation, fs:
       if (!inside && !(dir !== root && chosen.has(root))) chosen.add(dir);
     }
     const skillDirs = [...chosen];
+    // A Claude Code plugin's skills load as `<plugin>:<name>`
+    const plugin = installation.agent === 'claude-code' ? pluginOfSkillsDir(root) : undefined;
 
     for (const dir of skillDirs) {
       const target = linked.get(dir);
@@ -179,11 +195,12 @@ export async function collectSkillInventory(installation: AgentInstallation, fs:
       const skillMd = target ? join(dir, 'SKILL.md') : listing.files.find(f => dirname(f) === dir && isSkillMd(f));
       const front = skillMd ? await readFrontmatter(fs, skillMd) : {};
       const link = target ?? await symlinkTarget(fs, dir);
+      const name = front.name ?? cleanDescription(basename(dir)) ?? basename(dir);
       skills.push({
-        name: front.name ?? cleanDescription(basename(dir)) ?? basename(dir),
+        name: plugin ? `${cleanDescription(plugin) ?? plugin}:${name}` : name,
         path: dir,
         root,
-        scope,
+        scope: plugin ? 'plugin' : scope,
         kind: 'skill-md',
         ...(front.description ? { description: front.description } : {}),
         files: count(filesUnder),
@@ -222,7 +239,7 @@ export async function collectSkillInventory(installation: AgentInstallation, fs:
       if (!isFile && (entry.isDirectory || entry.isSymbolicLink)) {
         otherEntries.push({ path, root, type: 'directory', files, hasCode: (codeUnder.get(path) ?? 0) > 0 });
       } else if (isFile && files > 0) {
-        otherEntries.push({ path, root, type: 'file', files: 1, hasCode: !isSkillMd(path) });
+        otherEntries.push({ path, root, type: 'file', files: 1, hasCode: codeSet.has(path) });
       }
     }
   }

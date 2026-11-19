@@ -2,7 +2,7 @@ import { describe, it, expect, afterEach } from 'vitest';
 import { mkdtemp, rm, readFile, stat, mkdir, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { getNestedValue, setNestedValue, deepMerge, writeFileEnsureDir, getSkillFiles, isExcludedPath, writeFileOwnerOnly } from './utils.js';
+import { getNestedValue, setNestedValue, deepMerge, writeFileEnsureDir, getSkillFiles, isExcludedPath, listSkillTree, writeFileOwnerOnly } from './utils.js';
 import { lstat, readdir, symlink } from 'node:fs/promises';
 
 describe.skipIf(process.platform === 'win32')('writeFileOwnerOnly', () => {
@@ -188,15 +188,18 @@ describe('getSkillFiles', () => {
     expect(files).toEqual(['secrets', 'setup', 'tokens']);
   });
 
-  it('collects code files by extension and skips other files', async () => {
+  it('collects every text file; skips assets, hidden extensionless files and key files', async () => {
     const root = await mkdtemp(join(tmpdir(), 'vaso-sf-'));
     roots.push(root);
     await writeFile(join(root, 'a.js'), 'a');
     await writeFile(join(root, 'b.py'), 'b');
     await writeFile(join(root, 'README.md'), 'docs');
     await writeFile(join(root, 'data.json'), '{}');
+    await writeFile(join(root, 'logo.png'), 'x');
+    await writeFile(join(root, '.DS_Store'), 'x');
+    await writeFile(join(root, 'server.key'), 'x');
     const files = await getSkillFiles(root);
-    expect(files.map(f => f.replace(root + '/', '')).sort()).toEqual(['a.js', 'b.py']);
+    expect(files.map(f => f.replace(root + '/', '')).sort()).toEqual(['README.md', 'a.js', 'b.py', 'data.json']);
   });
 
   it('excludes node_modules subtrees', async () => {
@@ -252,7 +255,10 @@ describe('getSkillFiles', () => {
     }
     await writeFile(join(root, 's', 'scripts', 'setup'), '#!/bin/sh\nid\n', { mode: 0o755 });
     const names = (await getSkillFiles(root)).map(f => f.slice(root.length + 3)).sort();
-    expect(names).toEqual(['SKILL.md', 'a.mts', 'b.cts', 'c.zsh', 'd.ps1', 'scripts/setup', 'tool.node', 'x.exe']);
+    expect(names).toEqual(['LICENSE', 'README.md', 'SKILL.md', 'a.mts', 'b.cts', 'c.zsh', 'd.ps1', 'scripts/setup', 'tool.node', 'x.exe']);
+    // what counts as code (inventory hasCode)
+    const code = (await listSkillTree(root)).codeFiles.map(f => f.slice(root.length + 3)).sort();
+    expect(code).toEqual(['a.mts', 'b.cts', 'c.zsh', 'd.ps1', 'scripts/setup', 'tool.node', 'x.exe']);
   });
 
   it('does not exclude directories whose names merely contain an excluded segment', async () => {

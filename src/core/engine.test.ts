@@ -299,6 +299,7 @@ describe('ScanEngine', () => {
           { name: 'a.py', isFile: true, isDirectory: false, parentPath: dir },
           { name: 'b.js', isFile: true, isDirectory: false, parentPath: dir },
           { name: 'c.txt', isFile: true, isDirectory: false, parentPath: dir },
+          { name: 'd.png', isFile: true, isDirectory: false, parentPath: dir },
         ];
       },
     };
@@ -332,9 +333,11 @@ describe('ScanEngine', () => {
     await engine.scan({});
 
     expect(readdirCalledWith).toBe('/snap/openclaw/skills');
+    // every text file of a skill is read; assets aren't
     expect(captured).toEqual([
       '/snap/openclaw/skills/a.py',
       '/snap/openclaw/skills/b.js',
+      '/snap/openclaw/skills/c.txt',
     ]);
   });
 

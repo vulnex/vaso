@@ -1,7 +1,8 @@
 import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
 import { scanWithPatterns, SECURITY_PATTERNS } from '../../analyzers/pattern-engine.js';
-import { readSkillText, skillFilesOf, skillsDirsOf, noSkillsDirResult } from './skill-files.js';
+import { skillFilesOf, skillsDirsOf, noSkillsDirResult } from './skill-files.js';
+import { readSkillSource } from './skill-source.js';
 import { markTestCode } from '../../analyzers/test-paths.js';
 
 const REVERSE_SHELL_RULES = SECURITY_PATTERNS.filter(r => r.category === 'reverse-shell');
@@ -22,16 +23,19 @@ export const skl005 = defineCheck({
 
     for (const file of files) {
       try {
-        const code = await readSkillText(ctx.fs, file, 'patterns');
-        if (code === undefined) continue;
-        const matches = scanWithPatterns(code, REVERSE_SHELL_RULES);
+        // Every line of documentation too: a reverse shell one-liner has no
+        // use in a skill's instructions
+        const src = await readSkillSource(ctx, file, 'patterns', 'prose');
+        if (src === undefined) continue;
+        const matches = scanWithPatterns(src.text, REVERSE_SHELL_RULES);
 
         for (const match of matches) {
+          const onLoad = src.loadCommands?.get(match.line)?.some(cmd => scanWithPatterns(cmd, REVERSE_SHELL_RULES).length > 0);
           evidence.push({
             file,
             line: match.line,
             snippet: match.snippet,
-            detail: match.description,
+            detail: onLoad ? `${match.description} in a !\`…\` command — Claude Code runs it when it loads the skill` : match.description,
           });
         }
       } catch {}
