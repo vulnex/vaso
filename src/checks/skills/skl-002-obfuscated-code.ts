@@ -15,6 +15,14 @@ import { configTreeGap, probeCoversTree } from '../../core/probe-coverage.js';
 import type { FSProvider } from '../../core/fs-provider.js';
 import { missingRootReason, unscannedReason, unscannedRootMissing } from '../../core/skill-root-scope.js';
 
+/** A URL (`https://…`, `<https://…>`) or a Markdown link target (`](…)`). */
+const LINK = /<?\bhttps?:\/\/[^\s"'`<>]+>?|\]\([^)\s]+\)/g;
+
+/** Markdown text with its URLs and link targets blanked (lines kept). */
+export function withoutLinks(text: string): string {
+  return text.replace(LINK, '');
+}
+
 export const skl002 = defineCheck({
   id: 'SKL-002',
   name: 'Obfuscated Code',
@@ -40,8 +48,10 @@ export const skl002 = defineCheck({
         const lines = code.split('\n');
 
         // Entropy-based detection. Data URIs and integrity digests are
-        // high-entropy by nature, not hidden code.
-        const blocks = findHighEntropyBlocks(code).filter(b => !isBenignEncodedData(lines[b.line - 1]));
+        // high-entropy by nature, not hidden code; so are the links of
+        // documentation (signed asset URLs, `[x](…)` targets)
+        const blocks = findHighEntropyBlocks(src.kind === 'markdown' ? withoutLinks(code) : code)
+          .filter(b => !isBenignEncodedData(lines[b.line - 1]));
         // One finding per line (a Set: scanning the evidence for each match was quadratic)
         const reportedLines = new Set(blocks.map(b => b.line));
         for (const block of blocks) {

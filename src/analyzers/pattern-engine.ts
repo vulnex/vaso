@@ -69,7 +69,7 @@ export const SECURITY_PATTERNS: PatternRule[] = [
   { id: 'CP-006', pattern: /\b(?:iwr|irm|invoke-webrequest|invoke-restmethod)\b(?<!\b(?:iwr|irm|invoke-webrequest|invoke-restmethod)\b[^|]*?\b(?:iwr|irm|invoke-webrequest|invoke-restmethod)\b)[^|]*\|\s*(?:iex|invoke-expression)\b|\b(?:iex|invoke-expression)\s*(?:\(\s*){0,2}(?:iwr|irm|invoke-webrequest|invoke-restmethod|new-object\s+net\.webclient)\b/i, category: 'curl-pipe', severity: 'critical', description: 'PowerShell download-and-execute' },
 
   // Credential harvesting (from B@dskills)
-  { id: 'CH-001', pattern: /\/\.ssh\/(?:id_rsa|id_ed25519|authorized_keys|config)/i, category: 'credential-harvest', severity: 'critical', description: 'SSH key access' },
+  { id: 'CH-001', pattern: /\/\.ssh\/(?:(?:id_rsa|id_ed25519)(?!\.pub\b)|authorized_keys|config)/i, category: 'credential-harvest', severity: 'critical', description: 'SSH key access' },
   { id: 'CH-002', pattern: /\/\.aws\/credentials/i, category: 'credential-harvest', severity: 'critical', description: 'AWS credentials access' },
   { id: 'CH-003', pattern: /\/\.gnupg\//i, category: 'credential-harvest', severity: 'critical', description: 'GPG key access' },
   { id: 'CH-004', pattern: /\/\.kube\/config/i, category: 'credential-harvest', severity: 'critical', description: 'Kubernetes config access' },
