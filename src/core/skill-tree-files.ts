@@ -82,8 +82,26 @@ export function vendorReferencePaths(root: string, skillMd: string, text: string
  */
 export const RELATIVE_LOAD = /(?:\brequire\s*\(\s*|\bimport\s*\(\s*|\bfrom\s+|\bimport\s+)(?:'(\.\.?\/[^'\n]{1,256})'|"(\.\.?\/[^"\n]{1,256})")/g;
 
-/** Files whose loads are followed: JavaScript by extension, and package.json (its scripts' files). */
-export const LOAD_SOURCE_EXTENSIONS = new Set(['.js', '.mjs', '.cjs', '.jsx', '.ts', '.tsx', '.mts', '.cts']);
+/**
+ * A module path built from the script's own folder out of literal segments:
+ * `path.join(__dirname, '..', '.cache', 'lib.js')`, `resolve(import.meta.dirname, '../x')`
+ * (group 1: the segment list); `new URL('../.cache/x.js', import.meta.url)`
+ * (group 2 or 3); Python's `os.path.join(os.path.dirname(__file__), '..', 'lib.py')`
+ * (group 4) and `sys.path.insert(0, '<dir>')` / `.append('<dir>')` (group 5,
+ * or a dirname join in group 6) — a folder the script then imports modules
+ * from. Folded into relative paths (foldedLoads). RE2 syntax, kept equal to
+ * probe/skill_refs.go builtLoad by a Go test.
+ */
+export const BUILT_LOAD = /\b(?:path\.)?(?:join|resolve)\s*\(\s*(?:__dirname|import\.meta\.dirname)\s*((?:,\s*(?:'[^'\n]*'|"[^"\n]*")\s*)+)\)|\bnew\s+URL\s*\(\s*(?:'([^'\n]{1,256})'|"([^"\n]{1,256})")\s*,\s*import\.meta\.url\s*\)|\bos\.path\.join\s*\(\s*os\.path\.dirname\s*\(\s*(?:os\.path\.(?:abspath|realpath)\s*\(\s*__file__\s*\)|__file__)\s*\)\s*((?:,\s*(?:'[^'\n]*'|"[^"\n]*")\s*)+)\)|\bsys\.path\.(?:insert\s*\(\s*\d+\s*,|append\s*\()\s*(?:'([^'\n]{1,256})'|"([^"\n]{1,256})"|os\.path\.join\s*\(\s*os\.path\.dirname\s*\(\s*(?:os\.path\.(?:abspath|realpath)\s*\(\s*__file__\s*\)|__file__)\s*\)\s*((?:,\s*(?:'[^'\n]*'|"[^"\n]*")\s*)+)\))/g;
+
+/** A quoted literal in a BUILT_LOAD segment list. */
+const SEGMENT = /'([^'\n]*)'|"([^"\n]*)"/g;
+
+/** A Python import's top-level module name (`import x`, `import x.y as z, w`, `from x.y import z`). */
+const PY_IMPORT = /^[ \t]*(?:import[ \t]+([\w.]+(?:[ \t]+as[ \t]+\w+)?(?:[ \t]*,[ \t]*[\w.]+(?:[ \t]+as[ \t]+\w+)?)*)|from[ \t]+(\w[\w.]*)[ \t]+import\b)/gm;
+
+/** Files whose loads are followed: JavaScript and Python by extension, and package.json (its scripts' files). */
+export const LOAD_SOURCE_EXTENSIONS = new Set(['.js', '.mjs', '.cjs', '.jsx', '.ts', '.tsx', '.mts', '.cts', '.py']);
 
 /** Vendor-folder files a tree's loads add at most, and how many loads deep they are followed. */
 export const MAX_VENDOR_LOADS = 64;
@@ -102,11 +120,70 @@ export function isLoadSource(path: string): boolean {
  */
 export function loadReferences(path: string, text: string): string[] {
   if (basename(path) === 'package.json') return vendorReferences(text);
-  const out: string[] = [];
+  const found: Array<[number, string]> = [];
   RELATIVE_LOAD.lastIndex = 0;
-  for (let m = RELATIVE_LOAD.exec(text); m && out.length < MAX_VENDOR_REFERENCES; m = RELATIVE_LOAD.exec(text)) {
-    const spec = m[1] ?? m[2];
+  for (let m = RELATIVE_LOAD.exec(text); m; m = RELATIVE_LOAD.exec(text)) found.push([m.index, m[1] ?? m[2]]);
+  const folded = foldedLoads(text);
+  found.push(...folded.loads);
+  // a sys.path folder: the modules the script imports from it
+  if (folded.dirs.length > 0) {
+    const modules = pythonImports(text);
+    for (const [at, dir] of folded.dirs) {
+      for (const mod of modules) found.push([at, `${dir}/${mod}.py`], [at, `${dir}/${mod}/__init__.py`]);
+    }
+  }
+  // in source order (a stable sort keeps a sys.path folder's modules together)
+  found.sort((a, b) => a[0] - b[0]);
+  const out: string[] = [];
+  for (const [, spec] of found) {
+    if (out.length >= MAX_VENDOR_REFERENCES) break;
     if (!out.includes(spec)) out.push(spec);
+  }
+  return out;
+}
+
+/** A path from literal segments as a relative specifier, or undefined (an absolute or empty one). */
+function relativeSpec(segs: string[]): string | undefined {
+  const parts = segs.flatMap(s => s.split('/')).filter(s => s !== '' && s !== '.');
+  if (parts.length === 0 || segs.length > 16 || segs.some(s => s.length > 256 || s.startsWith('/') || s.startsWith('~') || s.includes('\\') || s.includes(':'))) return undefined;
+  return `./${parts.join('/')}`;
+}
+
+function segments(list: string): string[] {
+  const out: string[] = [];
+  SEGMENT.lastIndex = 0;
+  for (let m = SEGMENT.exec(list); m; m = SEGMENT.exec(list)) out.push(m[1] ?? m[2]);
+  return out;
+}
+
+/**
+ * BUILT_LOAD matches as relative specifiers, with their offsets: module
+ * paths (`loads`) and Python sys.path folders (`dirs`).
+ */
+export function foldedLoads(text: string): { loads: Array<[number, string]>; dirs: Array<[number, string]> } {
+  const loads: Array<[number, string]> = [];
+  const dirs: Array<[number, string]> = [];
+  BUILT_LOAD.lastIndex = 0;
+  for (let m = BUILT_LOAD.exec(text); m; m = BUILT_LOAD.exec(text)) {
+    const list = m[1] ?? m[4] ?? m[7];
+    const single = m[2] ?? m[3] ?? m[5] ?? m[6];
+    const spec = relativeSpec(list !== undefined ? segments(list) : [single as string]);
+    if (spec === undefined) continue;
+    (m[5] !== undefined || m[6] !== undefined || m[7] !== undefined ? dirs : loads).push([m.index, spec]);
+  }
+  return { loads, dirs };
+}
+
+/** The top-level module names a Python file imports, in order, without duplicates. */
+function pythonImports(text: string): string[] {
+  const out: string[] = [];
+  PY_IMPORT.lastIndex = 0;
+  for (let m = PY_IMPORT.exec(text); m; m = PY_IMPORT.exec(text)) {
+    const names = m[1] !== undefined ? m[1].split(',').map(n => n.trim().split(/[ \t]/)[0]) : [m[2]];
+    for (const name of names) {
+      const top = name.split('.')[0];
+      if (top && !out.includes(top)) out.push(top);
+    }
   }
   return out;
 }
@@ -162,9 +239,15 @@ function interpreterLang(prog: string): SkillLang | undefined {
  */
 const RUN_REFERENCE = /(?:^|[\s`'"(;&|$])((?:[\w./-]*\/)?(?:node(?:js)?|bun|deno|tsx|ts-node|python[\d.]*|pypy[\d.]*|bash|sh|zsh|ksh|dash|source|ruby|perl|php[\d.]*|lua[\d.]*|pwsh|powershell))(?:\s+(?:run|-[\w-]+(?:=\S*)?))*\s+["']?(?:\.\/|\$\{?CLAUDE_SKILL_DIR\}?\/)?((?:[\w.@+-]+\/)*[\w.@+-]+)/g;
 
+/** A code fence's opening marker and info string (```` ```bash ````, `~~~ sh`). */
+const FENCE_INFO = /^([ \t]*(?:`{3,}|~{3,}))[ \t]*[^\s`]*/gm;
+
 /** The skill files a SKILL.md runs through an interpreter, and the language it runs them as. */
 export function runReferences(skillMd: string, text: string): Array<[string, SkillLang]> {
   const out: Array<[string, SkillLang]> = [];
+  // a fence's info string names the block's language, not a command: in
+  // ```` ```bash\nnode x.dat ```` the command is `node x.dat`
+  text = text.replace(FENCE_INFO, '$1');
   RUN_REFERENCE.lastIndex = 0;
   for (let m = RUN_REFERENCE.exec(text); m; m = RUN_REFERENCE.exec(text)) {
     const lang = interpreterLang(basename(m[1]));
