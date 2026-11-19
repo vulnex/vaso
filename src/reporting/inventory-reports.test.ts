@@ -120,6 +120,50 @@ describe('inventory in reports', () => {
   });
 });
 
+describe('inventory in reports — links, profiles, host notes', () => {
+  const failed = (id: string) => ({ id, name: 'n', category: 'coding-agent', severity: 'warning', passed: false, message: 'm' }) as ScanResult['agents'][number]['results'][number];
+
+  it('HTML: inventory finding ids link to their row; ids from rules are made safe', () => {
+    const r = result();
+    const evil = 'ORG-1"><script>alert(1)</script>';
+    r.agents[0].results = [failed('CC-005'), failed('CONFIG-LOAD'), failed('CONFIG-LOAD'), failed(evil)];
+    r.agents[0].installation.inventory!.mcpServers![0].findings = ['CC-005', evil];
+    const html = getReporter('html').render(r);
+    expect(html).toContain('<tr id="finding-0-CC-005">');
+    expect(html).toContain('<a href="#finding-0-CC-005">CC-005</a>');
+    // a finding id with no row of its own (SKL-001 passed here) stays text
+    expect(html).toContain('<td>SKL-001</td>');
+    // one anchor per id
+    expect(html.match(/id="finding-0-CONFIG-LOAD"/g)).toHaveLength(1);
+    expect(html).not.toContain('<script>');
+    const id = /<tr id="(finding-0-ORG-1[^"]*)">/.exec(html)?.[1];
+    expect(id).toMatch(/^[A-Za-z0-9_-]+$/);
+    expect(html).toContain(`<a href="#${id}">ORG-1&quot;&gt;&lt;script&gt;alert(1)&lt;/script&gt;</a>`);
+    // .muted styles the Host section too, not only the collapsed surface
+    expect(html).toMatch(/\n {2}\.muted \{/);
+  });
+
+  it('names a shared server\'s profile and project, and the host notes, in every format', () => {
+    const r = result();
+    r.hostInventory!.sharedMcpServers![0].users = [
+      { agent: 'openclaw', installDir: '/home/u/.openclaw', server: 's', configFile: '/home/u/.openclaw/openclaw.json', pin: 'none' },
+      { agent: 'openclaw', profile: 'work', installDir: '/home/u/.openclaw-work', server: 's', configFile: '/home/u/.openclaw-work/openclaw.json', pin: 'none' },
+      { agent: 'claude-code', installDir: '/home/u/.claude', server: 'x', project: '/srv/app', configFile: '/home/u/.claude.json', pin: 'none' },
+    ];
+    r.hostInventory!.incomplete = ['/home/u/.config/Code/User/settings.json: VS Code settings are not collected by the remote probe'];
+    const html = getReporter('html').render(r);
+    expect(html).toContain('openclaw (profile work): s');
+    expect(html).toContain('claude-code: x (project /srv/app)');
+    expect(html).toContain('! /home/u/.config/Code/User/settings.json: VS Code settings are not collected');
+    const md = getReporter('markdown').render(r);
+    expect(md).toContain('openclaw: s, openclaw (profile work): s, claude-code: x (project /srv/app)');
+    expect(md).toContain('VS Code settings are not collected');
+    expect(getReporter('terminal').render(r)).toContain('VS Code settings are not collected');
+    const sarif = JSON.parse(getReporter('sarif').render(r));
+    expect(sarif.runs[0].properties.inventory.host.incomplete).toHaveLength(1);
+  });
+});
+
 describe('markdown link syntax from scanned text', () => {
   it('escapes link and image syntax in names and descriptions', async () => {
     const { MarkdownReporter } = await import('./markdown.js');

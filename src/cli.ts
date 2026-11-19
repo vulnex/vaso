@@ -243,6 +243,7 @@ program
   .option('--parallel <n>', 'max hosts to detect concurrently (default: 5)')
   .option('--snapshot <path>', 'detect from a local probe snapshot JSON file')
   .option('--save-snapshot <dir>', 'after fetching SSH snapshots, write each as <hostname>.json under this directory (for debugging)')
+  .option('--host-inventory', 'json: write one host as { installations, hostInventory } (host-level and shared MCP servers) instead of the bare installations array; multi-host JSON always carries hostInventory')
   .option('--no-color', 'disable colored output')
   .action(async (options) => {
     if (!validateAgentOption(options) || !validateFormatOption(options, LISTING_FORMATS)) return;

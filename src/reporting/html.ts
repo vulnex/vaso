@@ -25,6 +25,22 @@ function escapeHtml(str: string): string {
     .replace(/'/g, '&#39;');
 }
 
+/** Markup for one finding id in the inventory: a link to its row, or the escaped id. */
+type FindingLinker = (id: string) => string;
+
+/**
+ * The id attribute of an agent's finding row: unique per agent section, and
+ * only letters, digits, `-` and `_` (a rule's id is user-written) — every
+ * other character, `_` included, is spelled `_<hex>_`, so two ids never meet.
+ */
+function findingAnchor(agentIndex: number, id: string): string {
+  return `finding-${agentIndex}-${id.replace(/[^A-Za-z0-9-]/g, c => `_${c.codePointAt(0)!.toString(16)}_`)}`;
+}
+
+function findingList(ids: string[] | undefined, link: FindingLinker): string {
+  return ids?.length ? ids.map(link).join(', ') : '—';
+}
+
 function gradeColor(grade: Grade): string {
   switch (grade) {
     case 'A':
@@ -192,7 +208,7 @@ const CSS = `
     margin: 0.75rem 0 0.25rem;
     color: #475569;
   }
-  .surface .muted {
+  .muted {
     color: #94a3b8;
   }
   .passed-list h3 {
@@ -304,12 +320,10 @@ export class HtmlReporter implements Reporter {
     lines.push('</div>');
 
     // Agent sections
-    for (const agent of result.agents) {
-      lines.push(this.renderAgent(agent));
-    }
+    result.agents.forEach((agent, index) => lines.push(this.renderAgent(agent, index)));
 
     const host = result.hostInventory;
-    if (host && (host.mcpServers.length > 0 || host.sharedMcpServers?.length)) {
+    if (host && (host.mcpServers.length > 0 || host.sharedMcpServers?.length || host.incomplete?.length)) {
       lines.push('<div class="agent-section">');
       lines.push('<div class="agent-header"><h2>Host</h2></div>');
       if (host.sharedMcpServers?.length) {
@@ -326,6 +340,7 @@ export class HtmlReporter implements Reporter {
         lines.push('<h4>MCP servers no detected agent owns (VS Code, a project mcp.json)</h4>');
         lines.push(this.renderMcpTable(host.mcpServers));
       }
+      for (const note of host.incomplete ?? []) lines.push(`<div class="evidence">! ${escapeHtml(note)}</div>`);
       lines.push('</div>');
     }
 
@@ -350,7 +365,7 @@ export class HtmlReporter implements Reporter {
     return `<div class="card"><div class="count" style="color:${color}">${count}</div><div class="label">${label}</div></div>`;
   }
 
-  private renderAgent(agent: AgentScanResult): string {
+  private renderAgent(agent: AgentScanResult, index: number): string {
     const lines: string[] = [];
     const inst = agent.installation;
     const agentLabel = inst.agentName
@@ -372,18 +387,24 @@ export class HtmlReporter implements Reporter {
     metaParts.push(`<span>Install: ${escapeHtml(inst.installDir)}</span>`);
     lines.push(`<div class="agent-meta">${metaParts.join('')}</div>`);
 
-    if (inst.inventory) lines.push(this.renderSurface(inst.inventory));
-
     // Findings table
     const failed = agent.results.filter(r => !r.passed);
     const passed = agent.results.filter(r => r.passed);
+    // Inventory findings link to their row: the first row of each id
+    const anchored = new Set(failed.map(r => r.id));
+    const link: FindingLinker = id => (anchored.has(id) ? `<a href="#${findingAnchor(index, id)}">${escapeHtml(id)}</a>` : escapeHtml(id));
+
+    if (inst.inventory) lines.push(this.renderSurface(inst.inventory, link));
 
     if (failed.length > 0) {
       lines.push('<table>');
       lines.push('<thead><tr><th>ID</th><th>Name</th><th>Severity</th><th>Message</th><th>Evidence</th><th>Fixable</th></tr></thead>');
       lines.push('<tbody>');
+      const rowIds = new Set<string>();
       for (const r of failed) {
-        lines.push('<tr>');
+        const first = !rowIds.has(r.id);
+        rowIds.add(r.id);
+        lines.push(first ? `<tr id="${findingAnchor(index, r.id)}">` : '<tr>');
         lines.push(`<td>${escapeHtml(r.id)}</td>`);
         lines.push(`<td>${escapeHtml(r.name)}</td>`);
         lines.push(`<td><span class="severity-badge" style="background:${severityColor(r.severity)}">${escapeHtml(r.severity)}</span></td>`);
@@ -413,7 +434,7 @@ export class HtmlReporter implements Reporter {
   }
 
   /** Skills and MCP servers the agent loads; collapsed — a host can carry dozens. */
-  private renderSurface(inventory: AgentInventory): string {
+  private renderSurface(inventory: AgentInventory, link: FindingLinker): string {
     const lines: string[] = ['<details class="surface">'];
     lines.push(`<summary>Attack surface: ${escapeHtml(surfaceCounts(inventory))}</summary>`);
     const dirs = inventory.skillsDirs
@@ -426,27 +447,27 @@ export class HtmlReporter implements Reporter {
       lines.push('<thead><tr><th>Name</th><th>Description</th><th>Path</th><th>Files</th><th>Code</th><th>Findings</th></tr></thead>');
       lines.push('<tbody>');
       for (const skill of inventory.skills) {
-        const link = skill.symlinkTarget ? `<br><span class="muted">→ ${escapeHtml(skill.symlinkTarget)}</span>` : '';
+        const target = skill.symlinkTarget ? `<br><span class="muted">→ ${escapeHtml(skill.symlinkTarget)}</span>` : '';
         lines.push(`<tr><td>${escapeHtml(skill.name)}</td><td>${escapeHtml(skill.description ?? '')}</td>`
-          + `<td class="evidence">${escapeHtml(skill.path)}${link}</td><td>${skill.files}</td><td>${skill.hasCode ? 'yes' : '—'}</td>`
-          + `<td>${escapeHtml((skill.findings ?? []).join(', ')) || '—'}</td></tr>`);
+          + `<td class="evidence">${escapeHtml(skill.path)}${target}</td><td>${skill.files}</td><td>${skill.hasCode ? 'yes' : '—'}</td>`
+          + `<td>${findingList(skill.findings, link)}</td></tr>`);
       }
       lines.push('</tbody></table>');
     }
     if (inventory.otherEntries.length > 0) {
       lines.push('<h4>Other entries (no SKILL.md)</h4>');
-      lines.push(`<div class="evidence">${inventory.otherEntries.map(e => `${escapeHtml(e.path)} <span class="muted">(${e.type}, ${e.files} file${e.files === 1 ? '' : 's'})</span>${e.findings?.length ? ` — ${escapeHtml(e.findings.join(', '))}` : ''}`).join('<br>')}</div>`);
+      lines.push(`<div class="evidence">${inventory.otherEntries.map(e => `${escapeHtml(e.path)} <span class="muted">(${e.type}, ${e.files} file${e.files === 1 ? '' : 's'})</span>${e.findings?.length ? ` — ${findingList(e.findings, link)}` : ''}`).join('<br>')}</div>`);
     }
     if (inventory.mcpServers?.length) {
       lines.push('<h4>MCP servers</h4>');
-      lines.push(this.renderMcpTable(inventory.mcpServers));
+      lines.push(this.renderMcpTable(inventory.mcpServers, link));
     }
     for (const note of inventory.incomplete ?? []) lines.push(`<div class="evidence">! ${escapeHtml(note)}</div>`);
     lines.push('</details>');
     return lines.join('\n');
   }
 
-  private renderMcpTable(servers: McpServerItem[]): string {
+  private renderMcpTable(servers: McpServerItem[], link: FindingLinker = escapeHtml): string {
     const lines: string[] = ['<table>'];
     lines.push('<thead><tr><th>Name</th><th>Transport</th><th>Runs / reaches</th><th>Scope</th><th>Env / headers</th><th>Config</th><th>Findings</th></tr></thead>');
     lines.push('<tbody>');
@@ -456,7 +477,7 @@ export class HtmlReporter implements Reporter {
       lines.push(`<tr><td>${escapeHtml(server.name)}${off}</td><td>${escapeHtml(server.transport)}</td>`
         + `<td class="evidence">${escapeHtml(mcpTarget(server))}</td><td>${escapeHtml(mcpScope(server))}</td>`
         + `<td class="evidence">${escapeHtml(names) || '—'}</td><td class="evidence">${escapeHtml(server.configFile)}</td>`
-        + `<td>${escapeHtml((server.findings ?? []).join(', ')) || '—'}</td></tr>`);
+        + `<td>${findingList(server.findings, link)}</td></tr>`);
     }
     lines.push('</tbody></table>');
     return lines.join('\n');

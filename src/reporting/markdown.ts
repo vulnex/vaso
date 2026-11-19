@@ -88,7 +88,7 @@ export class MarkdownReporter implements Reporter {
     }
 
     const host = result.hostInventory;
-    if (host && (host.mcpServers.length > 0 || host.sharedMcpServers?.length)) {
+    if (host && (host.mcpServers.length > 0 || host.sharedMcpServers?.length || host.incomplete?.length)) {
       lines.push('## Host');
       lines.push('');
       if (host.sharedMcpServers?.length) {
@@ -111,6 +111,8 @@ export class MarkdownReporter implements Reporter {
         lines.push('');
         lines.push(...renderMcpTable(host.mcpServers));
       }
+      for (const note of host.incomplete ?? []) lines.push(`- ! ${mdInline(note)}`);
+      if (host.incomplete?.length) lines.push('');
     }
 
     const owasp = renderOwaspMcpCoverageMarkdown(result);

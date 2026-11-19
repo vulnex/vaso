@@ -248,6 +248,8 @@ export interface HostInventory {
   mcpServers: McpServerItem[];
   /** The same MCP server configured for several installations, in separate config files. */
   sharedMcpServers?: SharedMcpServer[];
+  /** Why the lists may be partial (a remote scan can't read a file that may hold servers). */
+  incomplete?: string[];
 }
 
 /** One MCP server several installations configure: a change to it (or a compromise of it) reaches all of them. */

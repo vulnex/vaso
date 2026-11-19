@@ -1,6 +1,6 @@
 import { dirname, isAbsolute, relative } from 'node:path';
 import type { FSProvider } from '../core/fs-provider.js';
-import type { AgentInstallation, AgentType, McpServerItem } from '../core/types.js';
+import type { AgentInstallation, AgentType, HostInventory, McpServerItem } from '../core/types.js';
 import type { MCPConfig, MCPServerEntry } from '../mcp/types.js';
 
 export { ironclawExtensionConfigs, nanoclawGroupConfigs } from '../mcp/discovery.js';
@@ -12,12 +12,15 @@ import { maskArgSecrets, maskUrlSecrets } from '../mcp/config-secrets.js';
 import { maskCredentialsInText } from '../reporting/serialize.js';
 import { scanCwd } from '../adapters/project-configs.js';
 import { recordServerSpans } from './spans.js';
+import { buildHostInventory, hostInventoryGaps } from './host.js';
 
 export interface McpAssignment {
   /** Servers per installation; only installations whose MCP configs VASO reads have an entry. */
   byInstallation: Map<AgentInstallation, McpServerItem[]>;
   /** Servers in files no detected agent owns. */
   host: McpServerItem[];
+  /** Host-level files that may hold servers but couldn't be read (a remote scan). */
+  incomplete?: string[];
 }
 
 function isWithin(path: string, dir: string): boolean {
@@ -137,17 +140,21 @@ export async function discoverMcpAssignment(installations: AgentInstallation[], 
     const extra = [...nanoclaw, ...ironclaw].filter(c => !discovered.has(c.filePath));
     const assignment = assignMcpServers(installations, [...result.configs, ...extra], { home: fs.homedir(), inventoried: inventoriedAgents(fs), projectDir });
     await recordServerSpans([...[...assignment.byInstallation.values()].flat(), ...assignment.host], fs);
-    return assignment;
+    const incomplete = await hostInventoryGaps(fs);
+    return incomplete.length > 0 ? { ...assignment, incomplete } : assignment;
   } catch {
     return { byInstallation: new Map(), host: [] };
   }
 }
 
-/** Attach each installation's MCP servers (detect); returns the host-level ones. */
-export async function attachMcpInventories(installations: AgentInstallation[], fs: FSProvider): Promise<McpServerItem[]> {
-  const { byInstallation, host } = await discoverMcpAssignment(installations, fs);
+/**
+ * Attach each installation's MCP servers (detect); returns the host's
+ * inventory, shaped like a scan's (`agentFilter`: only shared servers).
+ */
+export async function attachMcpInventories(installations: AgentInstallation[], fs: FSProvider, options: { agentFilter?: boolean } = {}): Promise<HostInventory> {
+  const { byInstallation, host, incomplete } = await discoverMcpAssignment(installations, fs);
   for (const [inst, servers] of byInstallation) {
     inst.inventory = { skillsDirs: [], skills: [], otherEntries: [], ...inst.inventory, mcpServers: servers };
   }
-  return host;
+  return buildHostInventory(installations, { mcpServers: host, incomplete }, options);
 }

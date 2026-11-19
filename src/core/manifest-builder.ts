@@ -197,6 +197,11 @@ export function buildProbeManifest(adapters: AgentAdapter[]): ProbeManifest {
     '~/.config/Code/User/mcp.json',
     '~/Library/Application Support/Code/User/mcp.json',
   );
+  // …only that it exists: a remote report says its servers went unlisted
+  merged.metadataGlobPatterns!.push(
+    '~/.config/Code/User/settings.json',
+    '~/Library/Application Support/Code/User/settings.json',
+  );
 
   // Lists that switch MCP servers off by name or policy (src/mcp/off-lists.ts):
   // Gemini's /mcp disable state; Claude Code's managed settings and its

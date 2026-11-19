@@ -143,7 +143,7 @@ describe('attachMcpInventories', () => {
 
     const host = await attachMcpInventories([cursor], fs);
 
-    expect(host).toEqual([]);
+    expect(host.mcpServers).toEqual([]);
     expect(cursor.inventory?.mcpServers?.map(s => [s.name, s.package?.pin, s.envNames])).toEqual([['gh', 'none', ['GITHUB_TOKEN']]]);
     expect(JSON.stringify(cursor.inventory)).not.toContain('ghp_');
   });

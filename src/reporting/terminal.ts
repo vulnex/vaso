@@ -97,6 +97,7 @@ export class TerminalReporter implements Reporter {
       const unpinned = shared.filter(g => g.unpinned).length;
       lines.push(`  Shared MCP servers: ${shared.length}${unpinned ? chalk.yellow(` (${unpinned} unpinned somewhere)`) : ''}`);
     }
+    for (const note of result.hostInventory?.incomplete ?? []) lines.push(chalk.yellow(`  ! ${note}`));
     lines.push(`  Overall: ${this.formatScore(result.totalScore)} (${result.totalGrade})`);
     if (result.agents.length > 1) {
       // Headline is worst-case (weakest agent); show the mean as context.
