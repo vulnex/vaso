@@ -1319,6 +1319,28 @@ export function analyzePythonSinks(code: string): PythonSinkFinding[] {
   const touchesFiles = FILE_OPS.test(code);
   const pathNames = new Set<string>();
   if (touchesFiles) for (const m of code.matchAll(PATH_BINDING)) pathNames.add(m[1]);
+  /**
+   * Whether the path bound at statement `at` is confined afterwards, itself
+   * or through what is derived from it (`p = base / p` then
+   * `resolved = p.resolve()` and `resolved.is_relative_to(base)`).
+   */
+  const confinedLater = (fn: PyFunction, target: string, at: number): boolean => {
+    const confinedHere = confinedIn.get(fn);
+    if (!confinedHere || confinedHere.size === 0) return false;
+    if (confinedHere.has(target)) return true;
+    const derived = new Set([target]);
+    for (let i = at + 1; i < fn.end; i++) {
+      if (fnAt(i) !== fn) continue;
+      const assign = /^\s*([A-Za-z_]\w*)\s*(?::[^=]+)?=(?!=)\s*([\s\S]+)$/.exec(rewrite(stmts[i].text, stmts[i].line));
+      if (!assign) continue;
+      const rhs = dataPart(assign[2]);
+      if ([...derived].some((n) => mentions(rhs, n))) {
+        derived.add(assign[1]);
+        if ((confinedHere.get(assign[1]) ?? -1) > i) return true;
+      }
+    }
+    return false;
+  };
   const injectedLines = new Set<number>();
   // Lines with a path traversal join, and the names they bind: a file call
   // on that path is the same flaw, reported once at the join
@@ -1369,9 +1391,11 @@ export function analyzePythonSinks(code: string): PythonSinkFinding[] {
       // Confined when the joined path is checked afterwards (`full = realpath(join(BASE, name))`
       // then `full.startswith(BASE)`), or the name joined was checked before
       const joinConfined = !fnHere ? confined
-        : (target !== undefined && confinedIn.get(fnHere)?.has(target) === true)
+        : (target !== undefined && confinedLater(fnHere, target, si))
           || confinedBefore(confinedIn.get(fnHere), root, tainted.get(fnHere)?.get(root), si);
-      if (expr && INPUT_PATH_NAME.test(joined) && fromInput && !joinConfined) {
+      // A name tool input is traced into needn't sound like a path (`rp`)
+      const traced = !!fnHere && root !== 'self' && tainted.get(fnHere)?.has(root) === true;
+      if (expr && (INPUT_PATH_NAME.test(joined) || traced) && fromInput && !joinConfined) {
         joinLines.add(line);
         if (target) joinedNames.add(`${fnHere?.start ?? -1}:${target}`);
         findings.push({

@@ -353,9 +353,32 @@ describe('analyzePythonSinks — path joins judged by where the name comes from 
       '        os.remove(target)',
     ].join('\n');
     const findings = analyzePythonSinks(code);
-    expect(findings.filter((f) => f.kind === 'file-path').map((f) => [f.line, f.fileOp])).toEqual([[3, 'read'], [15, 'read'], [17, 'write']]);
-    expect(findings[0].toolInput).toBe('p ← p ← p ← p ← name ← names');
+    // the join a five-call chain reaches is traced, though `p` doesn't sound like a path
+    expect(findings.filter((f) => f.kind === 'injection').map((f) => f.line)).toEqual([3]);
+    expect(findings.filter((f) => f.kind === 'file-path').map((f) => [f.line, f.fileOp])).toEqual([[15, 'read'], [17, 'write']]);
     expect(findings.find((f) => f.line === 17)?.description).toMatch(/os\.remove\(\) deletes a path .* the caller can delete any file/);
+  });
+
+  it('a join confined afterwards through a name derived from it is not traversal (mcp-atlassian validate_safe_path)', () => {
+    const code = [
+      'from pathlib import Path',
+      'def validate_safe_path(path, base_dir):',
+      '    resolved_base = Path(base_dir).resolve(strict=False)',
+      '    p = Path(path)',
+      '    if not p.is_absolute():',
+      '        p = resolved_base / p',
+      '    resolved_path = p.resolve(strict=False)',
+      '    if not resolved_path.is_relative_to(resolved_base):',
+      '        raise ValueError("outside")',
+      '    return resolved_path',
+      '@mcp.tool()',
+      'def read(path: str) -> str:',
+      '    return validate_safe_path(path, ROOT).read_text()',
+    ].join('\n');
+    expect(analyzePythonSinks(code).filter((f) => f.kind === 'injection' || f.kind === 'file-path')).toEqual([]);
+    // without the check the traced join is reported
+    const open = code.replace('    if not resolved_path.is_relative_to(resolved_base):\n        raise ValueError("outside")\n', '');
+    expect(analyzePythonSinks(open).filter((f) => f.kind === 'injection').map((f) => f.line)).toEqual([6]);
   });
 
   it('a validate-and-return helper yields a confined path; a fixed name under it is not traversal (mcp-server-git; dt24)', () => {
