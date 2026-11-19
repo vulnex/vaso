@@ -720,12 +720,13 @@ describe('Skill coverage (deep test 2026-10-15)', () => {
     expect((await skl005.run(makeContext(tempDir))).evidence?.map(e => e.line)).toEqual([6, 7]);
   });
 
-  it('reports a file over the size limit as not scanned (info) instead of skipping it silently', async () => {
+  it('reports a file over the size limit as not scanned (a warning: padding must not hide findings)', async () => {
     const big = await put('ev-big/big.js', EXFIL + '/*' + 'A'.repeat(5 * 1024 * 1024 + 10) + '*/\n');
     const result = await skl002.run(makeContext(tempDir));
     expect(result.passed).toBe(false);
-    expect(result.severity).toBe('info');
-    expect(result.evidence).toEqual([expect.objectContaining({ file: big, mitigated: true, detail: expect.stringContaining('not scanned') })]);
+    expect(result.severity).toBe('warning');
+    expect(result.evidence).toEqual([expect.objectContaining({ file: big, detail: expect.stringContaining('not scanned') })]);
+    expect(result.evidence?.[0].mitigated).toBeFalsy();
   });
 
   it('SKL-002 ignores data URIs, integrity digests and long relative paths', async () => {

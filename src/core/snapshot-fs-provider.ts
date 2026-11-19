@@ -541,6 +541,15 @@ export class SnapshotFSProvider implements FSProvider {
         results.push(entry(linkPath, true));
       }
     }
+    // Directories hold no file entry, so the listing has none — except one
+    // the probe could not list: a local walk lists it and skips its contents,
+    // and the skill walk reports it (unlistableSubdirs in core/utils.ts)
+    for (const dirPath of this.keysUnder('directoryModes', prefix)) {
+      // (a link to one is listed as the link, above)
+      if (dirPath === basePath || dirPath in symlinks || !this.unlistable(dirPath) || this.behindUnsearchable(dirPath) || behindLink(dirPath)) continue;
+      const name = posix.basename(dirPath);
+      results.push({ name, isFile: false, isDirectory: true, parentPath: posix.dirname(dirPath) });
+    }
 
     return results;
   }

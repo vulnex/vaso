@@ -3,7 +3,7 @@ import { defineCheck } from '../../core/check-builder.js';
 import { findHighEntropyBlocks } from '../../analyzers/entropy.js';
 import { OBFUSCATION_PATTERNS, analyzeObfuscation, isBenignEncodedData, isBinaryHexEscapes } from '../../analyzers/obfuscation.js';
 import { ScanLimitError } from '../../core/file-limits.js';
-import { readSkillText, skillFilesOf, skillsDirsOf, unreadableSkillFile, unscannedShort, MAX_LISTED_IN_MESSAGE } from './skill-files.js';
+import { readSkillText, skillFilesOf, skillsDirsOf, skillUnlistableDirsOf, unreadableSkillFile, unscannedShort, MAX_LISTED_IN_MESSAGE } from './skill-files.js';
 import { unlistableSkillDirs } from '../../core/utils.js';
 import { markTestCode } from '../../analyzers/test-paths.js';
 import { analysisEvasion } from '../../analyzers/ast-analyzer.js';
@@ -92,7 +92,11 @@ export const skl002 = defineCheck({
       } catch (err) {
         // Padding a file past the size limit hides it from every content
         // check — reported here once (informational) so it stays visible.
-        if (err instanceof ScanLimitError) evidence.push({ file, detail: err.detail, mitigated: true });
+        // A skill file over the size limit is not scanned, like a binary one
+        // (BinarySkillFile): padding a script past the limit must not turn
+        // its findings into an info. What a probe left out for its budget or
+        // as metadata stays informational (the host warning says so).
+        if (err instanceof ScanLimitError) evidence.push({ file, detail: err.detail, ...(err.reason === 'size' ? {} : { mitigated: true }) });
         // So does a file the scan can't read
         const unreadable = unreadableSkillFile(file, err);
         if (unreadable) evidence.push(unreadable);
@@ -121,6 +125,15 @@ export const skl002 = defineCheck({
     // exist at all — but never passed as reviewed.
     // A tree the probe refused or capped may still be in the snapshot in part
     // (another agent's files below it): judged before whether it exists.
+    // A folder inside a skill the walk could not list: the files in it went
+    // unread, so "no obfuscated code" would be a verdict on what wasn't seen
+    for (const dir of await skillUnlistableDirsOf(ctx)) {
+      evidence.push({
+        file: dir,
+        detail: 'not scanned: folder inside a skill can\'t be listed — its files are hidden from review and from these checks (an agent running with more privileges than this scan still loads them)',
+      });
+    }
+
     for (const skillsDir of skillsDirsOf(ctx)) {
       const gap = configTreeGap(ctx.fs, skillsDir);
       if (gap) {

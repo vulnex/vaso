@@ -1014,6 +1014,8 @@ func (c *collector) followFrom(snapshot *ProbeSnapshot, pattern string, matches 
 				c.collectPath(snapshot, sm, globBase(pattern), metadataOnly, false)
 			}
 		}
+		// A folder in the linked tree that can't be listed, as in the tree itself
+		c.recordDeniedUnder(snapshot, pattern, m, []string{"**"})
 		c.followFrom(snapshot, pattern, sub, append(append([]string{}, roots...), real), visited, depth+1, metadataOnly)
 	}
 }
@@ -1779,18 +1781,23 @@ const maxDeniedWalkDirs = 10000
 // while a local scan reported it. Each directory the pattern would list is
 // visited the way the glob visits it (symlinks under a wildcard not followed,
 // wildcard-reached vendor dirs skipped); a denied one gets its mode, which the
-// snapshot answers with EACCES as a local readdir does. A `<root>/**` pattern
-// needs none of this: `**` matches directories, so they are collected as such.
+// snapshot answers with EACCES as a local readdir does. A trailing `**`
+// (`<root>/**`, a skills tree) matches directories, but the glob never yields
+// one it can't read: a chmod-000 folder inside a skill went unrecorded while
+// a local walk reported it, so every directory of such a tree is visited.
 func (c *collector) recordDeniedDirs(snapshot *ProbeSnapshot, pattern string) {
 	slash := filepath.ToSlash(pattern)
-	if strings.HasSuffix(slash, "/**") {
-		return
-	}
 	base, rest := doublestar.SplitPattern(slash)
 	if base == "" || rest == "" {
 		return
 	}
-	segs := strings.Split(rest, "/")
+	c.recordDeniedUnder(snapshot, pattern, filepath.FromSlash(base), strings.Split(rest, "/"))
+}
+
+// recordDeniedUnder is recordDeniedDirs from the literal directory base, for
+// the pattern segments segs below it (also a followed skill link's tree:
+// base the link, segs `**`). Vendor dirs are skipped as `pattern` skips them.
+func (c *collector) recordDeniedUnder(snapshot *ProbeSnapshot, pattern, base string, segs []string) {
 	visited := 0
 	var walk func(dir string, i int)
 	walk = func(dir string, i int) {
@@ -1804,7 +1811,7 @@ func (c *collector) recordDeniedDirs(snapshot *ProbeSnapshot, pattern string) {
 			}
 			return
 		}
-		if i >= len(segs)-1 {
+		if i >= len(segs)-1 && segs[len(segs)-1] != "**" {
 			return // the last segment names files
 		}
 		seg := segs[i]
@@ -1827,7 +1834,7 @@ func (c *collector) recordDeniedDirs(snapshot *ProbeSnapshot, pattern string) {
 			}
 		}
 	}
-	walk(filepath.FromSlash(base), 0)
+	walk(base, 0)
 }
 
 // recordDeniedDir records the mode of a directory that could not be listed —

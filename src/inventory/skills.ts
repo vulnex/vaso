@@ -27,6 +27,9 @@ export interface SkillInventoryResult {
   /** The files skill/IOC checks read, across every skills directory —
    *  undefined when the installation declares none (ScanContext.skillFiles). */
   files: string[] | undefined;
+  /** Folders inside the skill trees that can't be listed (SkillTreeListing.unlistableNested)
+   *  — ScanContext.skillUnlistableDirs. */
+  unlistableDirs: string[];
   inventory: AgentInventory;
 }
 
@@ -60,6 +63,7 @@ export async function collectSkillInventory(installation: AgentInstallation, fs:
   const otherEntries: SkillTreeEntry[] = [];
   const incomplete: string[] = [];
   const allFiles: string[] = [];
+  const unlistableDirs: string[] = [];
 
   // Skills directories the config sets where no scan walks: listed, unverified
   for (const u of installation.unscannedSkillsDirs ?? []) {
@@ -93,6 +97,10 @@ export async function collectSkillInventory(installation: AgentInstallation, fs:
       incomplete.push(`${root}: can't be listed (${listing.error.code ?? listing.error.message})`);
     }
     for (const dir of listing.unlistable) incomplete.push(`${dir}: contents can't be listed`);
+    // A folder inside a skill the walk could not list: its files go unread
+    // (SKL-002 reports it as not scanned)
+    for (const dir of listing.unlistableNested) incomplete.push(`${dir}: contents can't be listed — not scanned`);
+    unlistableDirs.push(...listing.unlistableNested);
     // A skill linked to where no skills tree is walked: the agent loads it,
     // no scan reads it — not scanned, as a skills directory there would be
     // (SKL-002 reports it from unscannedSkillsDirs)
@@ -224,7 +232,7 @@ export async function collectSkillInventory(installation: AgentInstallation, fs:
     otherEntries,
     ...(incomplete.length > 0 ? { incomplete } : {}),
   };
-  return { files: roots.length > 0 ? allFiles : undefined, inventory };
+  return { files: roots.length > 0 ? allFiles : undefined, unlistableDirs, inventory };
 }
 
 /** Attach the skill inventory to each installation (detect). */
