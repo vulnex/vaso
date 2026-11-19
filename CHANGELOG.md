@@ -6,6 +6,29 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Security
+
+- **Padding a skill file past the size limit no longer hides findings.** A skill file over the 5 MiB content-scan limit is now an SKL-002 warning ("not scanned"), not a mitigated info. Padding a malicious script past the limit used to turn its critical findings into a single info. Large legitimate bundles (a skill's `dist/` output) now show this warning too.
+- **Hermes and Atomic Agent flag an MCP command in a world-writable directory** (HM-010, AT-007), as Claude Desktop (CD-009) already did; the three checks share one rule and agree on local and remote scans.
+
+### Added
+
+- **`vaso detect --host-inventory`.** With `-f json`, one host's output becomes `{ installations, hostInventory }`: MCP servers no agent owns and servers shared between agents, shaped like `vaso scan`'s. Without the flag the output is unchanged. Multi-host `vaso detect -f json` now includes `hostInventory` for every host (alongside `hostMcp`).
+
+### Fixed
+
+- **MCP source analysis follows tool input into the server's own modules.** A tool handler that passes its input to a helper imported from another file of the server is now traced there. This covers ES and CommonJS imports, re-exports and TypeScript's compiled output. A path read or command run in that helper is reported by MCP-005, and MCP-004 counts it as reached by tool input.
+- **Python MCP servers: path traversal through file calls.** A Python tool that reads, writes, deletes or copies a file at a caller-supplied path (`open(path)`, `Path(path).write_text(...)`, `os.remove`, `shutil.copy`/`rmtree`) is now reported under MCP-005, and one that lists or stats such a path under MCP-009. Servers that confine paths to a base directory are not flagged.
+- **OAuth checks follow constants and request variables.** MCP-011 now catches plaintext OAuth endpoints built from a same-file constant (`AUTH_HOST + "/authorize"`, `new URL("/oauth/token", AUTH_HOST)`, f-strings, `urljoin`). MCP-016 now catches redirects to an unchecked request value held in a variable, and wildcard redirect allowlists such as `allowedRedirect: "*"`.
+- **Unreadable folders inside a skill are reported.** A folder the scan can't list inside a skill (for example mode 000) used to be skipped silently, so SKL-002 passed and the inventory looked complete. Local and remote scans (probe 1.4.2 or newer) now report it as not scanned, and the inventory is marked incomplete.
+- **`vaso mcp` sees NanoClaw and IronClaw servers.** Agent-group `container.json` files and IronClaw extension manifests are now listed and scanned.
+- **Shared MCP servers.** A project-scope copy of a server is no longer hidden by its pinned user-scope copy, and OpenClaw profiles and projects are named in every report.
+- **Remote scans say when VS Code settings went unread.** Servers in VS Code's `settings.json` are not collected remotely, and the report now says so.
+- **`vaso mcp scan -p` on an empty server table.** A config such as `{"mcpServers":{}}` is now reported as declaring no servers, instead of as matching no known config dialect.
+- **HTML report links attack-surface findings to their rows.**
+- **Rule evidence shows the match in long or minified lines,** with credentials still masked.
+- **Report snippets stay within the length limit after masking.**
+
 ## [1.4.1] - 2026-11-17
 
 ### Security

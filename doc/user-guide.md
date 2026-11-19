@@ -162,6 +162,7 @@ vaso detect [options]
 | `--parallel <n>` | Max hosts to detect concurrently (default 5) |
 | `--snapshot <path>` | Detect from a pre-collected probe snapshot file |
 | `--save-snapshot <dir>` | When detecting over SSH, write each host's snapshot to `<dir>/<hostname>.json` |
+| `--host-inventory` | With `-f json` on one host, output `{ installations, hostInventory }` instead of the bare installation array, adding MCP servers no agent owns and servers shared between agents (multi-host JSON always includes `hostInventory` per host) |
 | `--no-color` | Disable colored terminal output |
 
 Examples:
@@ -180,7 +181,7 @@ vaso detect --format json
 vaso detect --verbose
 ```
 
-Terminal output shows each agent's type, version, install directory, config file count, skills directory, and gateway info. JSON output returns the full `AgentInstallation` array.
+Terminal output shows each agent's type, version, install directory, config file count, skills directory, and gateway info. JSON output returns the full `AgentInstallation` array; with `--host-inventory` it returns `{ installations, hostInventory }`, where `hostInventory` has the same shape as in `vaso scan` JSON. Multi-host JSON gives each host `{ host, label, installations, hostMcp, hostInventory }`.
 
 ### `vaso skill audit`
 
