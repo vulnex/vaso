@@ -7,7 +7,7 @@ import { ScanEngine } from '../core/engine.js';
 import { adapterRegistry } from '../adapters/registry.js';
 import { checkRegistry } from '../core/check-registry.js';
 import { getReporter } from '../reporting/index.js';
-import { getSkillFiles } from '../core/utils.js';
+import { listSkillTree } from '../core/utils.js';
 import { LocalFSProvider } from '../core/local-fs-provider.js';
 import { logError } from '../core/debug.js';
 import { EXIT_FINDINGS, EXIT_USAGE, parseFailOn, shouldFailScan } from '../core/exit-criteria.js';
@@ -54,7 +54,8 @@ export async function runSkillAudit(skillPath: string, options: SkillAuditComman
   }
 
   // Discover code files
-  const skillFiles = await getSkillFiles(resolved, undefined, { uncapped: true });
+  const listing = await listSkillTree(resolved, undefined, { uncapped: true });
+  const skillFiles = listing.files;
 
   // Even a directory with no code files is worth auditing: an instructions-only
   // skill (SKILL.md) is what SKL-007 checks for prompt injection, the
@@ -79,7 +80,7 @@ export async function runSkillAudit(skillPath: string, options: SkillAuditComman
     const engine = new ScanEngine(adapterRegistry, checkRegistry);
     const result = await engine.scanSkill(resolved, skillFiles, {
       format: options.format as 'terminal' | 'json' | 'sarif' | 'markdown' | 'html',
-    });
+    }, listing.unlistableNested);
 
     const reporter = getReporter((options.format ?? 'terminal') as 'terminal' | 'json' | 'sarif' | 'markdown' | 'html');
     const output = reporter.render(result);

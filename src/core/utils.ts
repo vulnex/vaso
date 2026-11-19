@@ -132,6 +132,10 @@ export interface SkillTreeListing {
   files: string[];
   /** Skill directories that exist but can't be listed (see unlistableSkillDirs). */
   unlistable: string[];
+  /** Folders deeper in the tree (inside a skill) that exist but can't be
+   *  listed: the walk skips them, so their files go unread (see
+   *  unlistableSubdirs). The skill directories in `unlistable` aren't repeated. */
+  unlistableNested: string[];
   /** Why `dir` itself couldn't be listed (ENOENT when it doesn't exist). */
   error?: NodeJS.ErrnoException;
   /** Links in the tree the walk did not follow for where they lead (an OS
@@ -185,7 +189,8 @@ export async function listSkillTree(dir: string, fs?: FSProvider, opts: { uncapp
     const skillMd = join(skillDir, 'SKILL.md');
     if (!files.includes(skillMd) && await provider.access(skillMd)) files.push(skillMd);
   }
-  return { entries, files, unlistable, refusedLinks, overLimitLinks, overTotalLinks, unrecordedLinks, ...(error ? { error } : {}) };
+  const unlistableNested = (await unlistableSubdirs(provider, dir, entries)).filter(d => !unlistable.includes(d));
+  return { entries, files, unlistable, unlistableNested, refusedLinks, overLimitLinks, overTotalLinks, unrecordedLinks, ...(error ? { error } : {}) };
 }
 
 /**
@@ -210,6 +215,31 @@ export async function unlistableSkillDirs(skillsDir: string, fs?: FSProvider): P
     } catch (err) {
       const code = (err as NodeJS.ErrnoException | null)?.code;
       if (code === 'EACCES' || code === 'EPERM') out.push(dir);
+    }
+  }
+  return out;
+}
+
+/**
+ * Folders anywhere in a walked skill tree that exist but can't be listed
+ * (EACCES — a chmod-000 `locked/` inside a skill): the recursive walk skips
+ * them without a word, so the files in them would pass as reviewed. Only a
+ * folder the walk listed nothing under is asked (an empty one lists fine);
+ * vendor dirs are skipped as the walk's file list skips them. A snapshot's
+ * recursive listing carries the folders its probe could not list for this.
+ */
+async function unlistableSubdirs(fs: FSProvider, root: string, entries: DirentInfo[]): Promise<string[]> {
+  const listed = new Set(entries.map(e => e.parentPath ?? root));
+  const out: string[] = [];
+  for (const entry of entries) {
+    if (!entry.isDirectory || entry.isSymbolicLink) continue;
+    const path = join(entry.parentPath ?? root, entry.name);
+    if (listed.has(path) || isExcludedPath(root, path, { keepBuildOutput: true })) continue;
+    try {
+      await fs.readdirEntries(path);
+    } catch (err) {
+      const code = (err as NodeJS.ErrnoException | null)?.code;
+      if ((code === 'EACCES' || code === 'EPERM') && !out.includes(path)) out.push(path);
     }
   }
   return out;

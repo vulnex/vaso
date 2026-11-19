@@ -2,7 +2,7 @@ import { extname } from 'node:path';
 import type { CheckModule, CheckResult, Evidence, ScanContext, UnscannedSkillsDir } from '../../core/types.js';
 import type { CheckHelpers } from '../../core/check-builder.js';
 import type { FSProvider } from '../../core/fs-provider.js';
-import { BINARY_EXTENSIONS, getAllSkillsDirs, getSkillFiles } from '../../core/utils.js';
+import { BINARY_EXTENSIONS, getAllSkillsDirs, getSkillFiles, listSkillTree } from '../../core/utils.js';
 import { readCappedFile } from '../../core/file-limits.js';
 import { unscannedShortReason } from '../../core/skill-root-scope.js';
 import { binaryFileFormat, sourceText } from '../../analyzers/binary-text.js';
@@ -79,6 +79,18 @@ export function unscannedRootsNote(ctx: ScanContext): string {
 export async function skillFilesOf(ctx: ScanContext): Promise<string[]> {
   if (ctx.skillFiles) return ctx.skillFiles;
   const lists = await Promise.all(skillsDirsOf(ctx).map(d => getSkillFiles(d, ctx.fs)));
+  return [...new Set(lists.flat())];
+}
+
+/**
+ * Folders inside the skill trees that can't be listed (a chmod-000 folder in
+ * a skill): the engine's walk, else a walk of every skills directory. The
+ * skill directories directly under a root aren't among them (SKL-002 reports
+ * those from unlistableSkillDirs).
+ */
+export async function skillUnlistableDirsOf(ctx: ScanContext): Promise<string[]> {
+  if (ctx.skillFiles) return ctx.skillUnlistableDirs ?? [];
+  const lists = await Promise.all(skillsDirsOf(ctx).map(async d => (await listSkillTree(d, ctx.fs)).unlistableNested));
   return [...new Set(lists.flat())];
 }
 

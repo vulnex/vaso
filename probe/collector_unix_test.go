@@ -342,3 +342,63 @@ func TestGlobRecordsDeniedDirectories(t *testing.T) {
 		t.Error("a readable directory recorded as denied")
 	}
 }
+
+// A folder inside a skill that can't be listed is recorded: a trailing `**`
+// matches directories, but the glob never yields one it can't read, so a
+// chmod-000 `locked/` in a skill looked empty remotely while a local walk
+// reported it. The same inside a skill tree reached through a followed link.
+func TestSkillGlobRecordsDeniedSubdirectories(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root lists any directory")
+	}
+	home := t.TempDir()
+	mk := func(rel string) string {
+		p := filepath.Join(home, rel)
+		if err := os.MkdirAll(p, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		return p
+	}
+	lock := func(p string) {
+		if err := os.Chmod(p, 0); err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { os.Chmod(p, 0o755) })
+	}
+	skills := mk(".claude/skills")
+	locked := mk(".claude/skills/s2/locked")
+	inner := mk(".claude/skills/s2/locked/deeper")
+	empty := mk(".claude/skills/s2/empty")
+	vendor := mk(".claude/skills/s2/node_modules/x")
+	if err := os.WriteFile(filepath.Join(locked, "a.js"), []byte("eval(x)\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// a skill linked in from a checkout elsewhere in the home
+	linkedLocked := mk("src/ext-skill/locked")
+	if err := os.WriteFile(filepath.Join(home, "src/ext-skill/SKILL.md"), []byte("# ext\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join(home, "src/ext-skill"), filepath.Join(skills, "ext")); err != nil {
+		t.Fatal(err)
+	}
+	lock(inner)
+	lock(locked)
+	lock(vendor)
+	lock(linkedLocked)
+
+	snap := Collect(ProbeManifest{GlobPatterns: []string{filepath.Join(home, ".claude/skills/**")}}, false)
+	for _, d := range []string{locked, filepath.Join(skills, "ext", "locked")} {
+		if mode, ok := snap.DirectoryModes[d]; !ok || mode != 0 {
+			t.Errorf("denied directory %s not recorded: %v", d, snap.DirectoryModes)
+		}
+	}
+	if _, ok := snap.DirectoryModes[vendor]; ok {
+		t.Error("a vendor dir the glob skips was walked")
+	}
+	if _, ok := snap.DirectoryModes[inner]; ok {
+		t.Error("a directory behind a denied one can't be stat'd")
+	}
+	if mode := snap.DirectoryModes[empty]; mode == 0 {
+		t.Errorf("a readable directory recorded as denied: %v", snap.DirectoryModes)
+	}
+}

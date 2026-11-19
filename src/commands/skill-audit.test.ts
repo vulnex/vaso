@@ -11,10 +11,10 @@ vi.mock('node:fs/promises', () => ({
   writeFile: vi.fn(),
 }));
 
-// Mock getSkillFiles
+// Mock the skill-tree walk (its file list)
 const mockGetSkillFiles = vi.fn();
 vi.mock('../core/utils.js', () => ({
-  getSkillFiles: (...args: unknown[]) => mockGetSkillFiles(...args),
+  listSkillTree: async (...args: unknown[]) => ({ files: await mockGetSkillFiles(...args), unlistableNested: [] }),
 }));
 
 // Mock the directory walk (symlinks / documentation files)
@@ -149,7 +149,7 @@ describe('runSkillAudit', () => {
 
     await runSkillAudit('/tmp/md-skill', { format: 'json' });
 
-    expect(mockScanSkill).toHaveBeenCalledWith(expect.stringContaining('md-skill'), [], expect.anything());
+    expect(mockScanSkill).toHaveBeenCalledWith(expect.stringContaining('md-skill'), [], expect.anything(), []);
     expect(consoleErrorLogs.join('\n')).toContain('(no code files)');
   });
 
@@ -195,6 +195,7 @@ describe('runSkillAudit', () => {
       expect.stringContaining('skill'),
       ['/tmp/skill/index.js', '/tmp/skill/helper.ts'],
       expect.objectContaining({ format: 'json' }),
+      [],
     );
     expect(consoleLogs.join('\n')).toContain('rendered output');
     expect(process.exitCode).toBeUndefined();

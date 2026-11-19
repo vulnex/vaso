@@ -318,6 +318,10 @@ export interface ScanContext {
   platform: Platform;
   fs: import('./fs-provider.js').FSProvider;
   skillFiles?: string[];
+  /** Folders inside the skill trees the walk behind `skillFiles` could not
+   *  list (their files are missing from it); SKL-002 reports them. Set
+   *  whenever `skillFiles` is. */
+  skillUnlistableDirs?: string[];
   /** Files the adapter has declared as security-sensitive (credentials, auth
    *  state, etc.). Used by permission checks to avoid flagging benign config
    *  files. Pre-computed by the engine from `adapter.getCredentialPaths()` —

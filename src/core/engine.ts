@@ -326,7 +326,7 @@ export class ScanEngine {
   private async scanAgent(installation: AgentInstallation, mcpServers?: McpServerItem[]): Promise<AgentScanResult> {
     // One walk per skills directory: the files the checks read, and the
     // inventory reports carry
-    const { files: skillFiles, inventory } = await collectSkillInventory(installation, this.fs);
+    const { files: skillFiles, unlistableDirs: skillUnlistableDirs, inventory } = await collectSkillInventory(installation, this.fs);
     installation.inventory = mcpServers ? { ...inventory, mcpServers } : inventory;
 
     const adapter = this.adapters.getAdapter(installation.agent);
@@ -338,6 +338,7 @@ export class ScanEngine {
       platform: this.fs.platform,
       fs: this.fs,
       skillFiles,
+      skillUnlistableDirs,
       credentialPaths,
     };
 
@@ -523,6 +524,8 @@ export class ScanEngine {
     skillPath: string,
     skillFiles: string[],
     options: ScanOptions,
+    /** Folders in the tree the walk behind `skillFiles` could not list. */
+    skillUnlistableDirs?: string[],
   ): Promise<ScanResult> {
     const context: ScanContext = {
       installation: {
@@ -535,6 +538,7 @@ export class ScanEngine {
       platform: this.fs.platform,
       fs: this.fs,
       skillFiles,
+      ...(skillUnlistableDirs ? { skillUnlistableDirs } : {}),
     };
 
     // Run skill + IOC checks only
