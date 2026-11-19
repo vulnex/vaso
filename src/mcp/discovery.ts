@@ -782,11 +782,23 @@ export async function ironclawExtensionConfigs(rebornHome: string, fs: FSProvide
     }
     // Each extension is a directory (or a link to one); a stray file
     // (.DS_Store) is not an extension. An entry a snapshot knows only by
-    // what was collected under it is looked into, like a directory.
+    // what was collected under it is looked into, like a directory. A link
+    // into a folder the scan can't enter hides its manifest: reported, like
+    // an unreadable one; a link to nothing, a loop or a file is skipped.
     const ids: string[] = [];
     for (const e of entries) {
       if (e.isFile) continue;
-      if (e.isSymbolicLink && !await Promise.resolve().then(() => fs.stat(join(extDir, e.name))).then(st => st.isDirectory(), () => false)) continue;
+      if (e.isSymbolicLink) {
+        const link = join(extDir, e.name);
+        let dir = false;
+        try {
+          dir = (await fs.stat(link)).isDirectory();
+        } catch (err) {
+          const code = (err as NodeJS.ErrnoException | null)?.code;
+          if (code === 'EACCES' || code === 'EPERM') recordConfigLoadFailure(link, 'read', err);
+        }
+        if (!dir) continue;
+      }
       ids.push(e.name);
     }
     for (const id of ids.sort()) {

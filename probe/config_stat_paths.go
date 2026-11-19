@@ -8,6 +8,8 @@ import (
 	"regexp"
 	"runtime"
 	"strings"
+
+	"github.com/bmatcuk/doublestar/v4"
 )
 
 // homeRef is a ${HOME} reference (Hermes also reads ${env:HOME}) in a config
@@ -240,4 +242,34 @@ func (c *collector) followableLink(snapshot *ProbeSnapshot, p string, hops int) 
 	snapshot.Symlinks[p] = target
 	recordLinkOwner(snapshot, p, info)
 	return target, true
+}
+
+// recordDeniedLink records a link a wildcard segment (seg, not the last of
+// its pattern) matches in dir whose target can't be stat'd for lack of
+// permission (`extensions/evil -> ~/locked/evil`, ~/locked mode 000): its
+// target, and a denied entry — the CLI reports what it hides as a read
+// failure, as a local stat of it fails, instead of finding nothing there.
+// Skills trees are left as their walk records them.
+func (c *collector) recordDeniedLink(snapshot *ProbeSnapshot, dir string, e fs.DirEntry, seg string) {
+	if c.inSkillTree || seg == "**" || e.Type()&os.ModeSymlink == 0 {
+		return
+	}
+	if ok, _ := doublestar.Match(seg, e.Name()); !ok {
+		return
+	}
+	p := filepath.Join(dir, e.Name())
+	if _, err := os.Stat(p); err == nil || !os.IsPermission(err) {
+		return
+	}
+	if _, done := snapshot.Files[p]; done {
+		return
+	}
+	if snapshot.Symlinks == nil {
+		snapshot.Symlinks = make(map[string]string)
+	}
+	recordSymlink(snapshot.Symlinks, p)
+	if info, err := os.Lstat(p); err == nil {
+		recordLinkOwner(snapshot, p, info)
+	}
+	snapshot.Files[p] = FileEntry{Exists: false, Denied: true}
 }

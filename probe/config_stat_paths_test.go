@@ -128,6 +128,45 @@ func TestDotDotAfterLinkStatsWhereItLeads(t *testing.T) {
 	}
 }
 
+// A wildcard-matched link into a folder the probe can't enter (IronClaw
+// `extensions/evil -> ~/locked/evil`) is recorded with a denied entry, so the
+// CLI reports it as a local stat fails; a dangling link is not.
+func TestDeniedLinkUnderWildcardIsRecorded(t *testing.T) {
+	if os.Getuid() == 0 {
+		t.Skip("root enters any folder")
+	}
+	home := setupHome(t)
+	exts := filepath.Join(home, ".ironclaw", "reborn", "local-dev", "system", "extensions")
+	locked := filepath.Join(home, "locked")
+	if err := os.MkdirAll(filepath.Join(locked, "evil"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	write(t, filepath.Join(locked, "evil", "manifest.toml"), "id = \"evil\"\n", 0o644)
+	write(t, filepath.Join(exts, "notion", "manifest.toml"), "id = \"notion\"\n", 0o644)
+	evil := filepath.Join(exts, "evil")
+	dangle := filepath.Join(exts, "dangle")
+	if err := os.Symlink(filepath.Join(locked, "evil"), evil); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join(home, "nowhere"), dangle); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(locked, 0); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(locked, 0o755) })
+	snap := Collect(ProbeManifest{GlobPatterns: []string{"~/.ironclaw/reborn/local-dev/system/extensions/*/manifest.toml"}}, false)
+	if e, ok := snap.Files[evil]; !ok || e.Exists || !e.Denied {
+		t.Fatalf("denied link not recorded: %+v (%v)", e, ok)
+	}
+	if snap.Symlinks[evil] != filepath.Join(locked, "evil") {
+		t.Fatalf("link target not recorded: %v", snap.Symlinks)
+	}
+	if _, ok := snap.Files[dangle]; ok {
+		t.Fatal("a dangling link is not a denied one")
+	}
+}
+
 // The paths a value names besides itself, as the CLI judges them.
 func TestConfigPathsWithin(t *testing.T) {
 	cases := map[string][]string{
