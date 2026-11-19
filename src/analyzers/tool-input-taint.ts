@@ -173,6 +173,13 @@ const cache = new Map<string, TaintedSink[]>();
  * followed (see taintCoverage); each side is still traced with its other links.
  */
 export const MAX_GROUP_SOURCE = 512 * 1024;
+/**
+ * A module already in one handler group that another handler group imports
+ * (a shared helper) is traced in both up to this size; the copies together up
+ * to MAX_SHARED_TOTAL. Past either, the link is recorded as not followed.
+ */
+export const MAX_SHARED_MODULE = 64 * 1024;
+const MAX_SHARED_TOTAL = 2 * MAX_GROUP_SOURCE;
 
 export function findTaintedSinks(code: string, filename = 'unknown.js'): TaintedSink[] {
   return traced(code, filename).filter((s) => !s.unverified).map((s) => ({ ...s }));
@@ -195,9 +202,24 @@ function traced(code: string, filename: string): TaintedSink[] {
   const chunks = sourceChunks(code);
   const plan = planModules(chunks);
   const untraced = new Set(plan.untraced.map((m) => chunks[m.index].path!));
-  const results = plan.groups
-    .flatMap((group) => analyze(group.map((i) => chunks[i]), untraced))
-    .sort((a, b) => a.line - b.line);
+  // A module shared by overlapping groups is reported once per sink: the first
+  // report, unless a later group traces tool input where it was only unverified
+  const sinkKey = (s: TaintedSink): string => `${s.line}\0${s.kind}\0${s.sink}`;
+  const verified = new Map<string, boolean>();
+  let results: TaintedSink[] = [];
+  for (const group of plan.groups) {
+    const found = analyze(group.map((i) => chunks[i]), untraced);
+    const fresh = found.filter((s) => {
+      const had = verified.get(sinkKey(s));
+      return had === undefined || (!had && !s.unverified);
+    });
+    for (const s of fresh) {
+      if (!s.unverified && verified.get(sinkKey(s)) === false) results = results.filter((r) => sinkKey(r) !== sinkKey(s) || !r.unverified);
+    }
+    for (const s of fresh) verified.set(sinkKey(s), verified.get(sinkKey(s)) === true || !s.unverified);
+    results.push(...fresh);
+  }
+  results.sort((a, b) => a.line - b.line);
   if (cache.size >= MAX_CACHED) cache.delete(cache.keys().next().value!);
   cache.set(key, results);
   return results;
@@ -273,9 +295,74 @@ interface ModulePlan {
 /**
  * Text that suggests a sink the tracer reports — process or code execution,
  * the filesystem, SQL, the network. Only orders which modules join a handler's
- * group first; it decides no finding.
+ * group first; it decides no finding. Tested on hintText (comments and string
+ * contents blanked): a `// exec(` comment or an `"exec("` string must not
+ * promote a module.
  */
-const SINK_HINT = /\bchild_|\b(?:exec|execSync|execFile|execFileSync|spawn|spawnSync|fork|eval|Function|fetch|promisify)\s*\(|\bvm\b|\bfs\b|fs\/promises|fs-extra|\b(?:readFile|writeFile|appendFile|unlink|rm|rmdir|mkdir|createReadStream|createWriteStream|readdir|copyFile|rename|open)(?:Sync)?\s*\(|\.(?:query|execute|raw|prepare|exec|run)\s*\(|\brequire\s*\(\s*[^'"`\s)]|\bimport\s*\(/;
+const SINK_HINT =/\bchild_|\b(?:exec|execSync|execFile|execFileSync|spawn|spawnSync|fork|eval|Function|fetch|promisify)\s*\(|\bvm\b|\bfs\b|fs\/promises|fs-extra|\b(?:readFile|writeFile|appendFile|unlink|rm|rmdir|mkdir|createReadStream|createWriteStream|readdir|copyFile|rename|open)(?:Sync)?\s*\(|\.(?:query|execute|raw|prepare|exec|run)\s*\(|\brequire\s*\(\s*[^'"`\s)]|\bimport\s*\(/;
+
+/** A string literal hintText keeps: a module that names a sink (`from 'node:child_process'`). */
+const SINK_MODULE_NAME = /^(?:node:)?(?:child_process|fs(?:\/promises)?|vm)$|^(?:fs-extra|graceful-fs)$/;
+
+/**
+ * `code` with comments removed and string contents blanked (a string that is
+ * a sink module's name is kept), for SINK_HINT. Template interpolations stay
+ * code. One pass; regex literals are not recognized — this only orders a
+ * group, so a misread costs ordering, not a finding.
+ */
+export function hintText(code: string): string {
+  let out = '';
+  let from = 0;
+  // open template literals, by the brace depth their `${` opened at
+  const templates: number[] = [];
+  let depth = 0;
+  const cut = (start: number, end: number, keep: boolean): void => {
+    out += code.slice(from, keep ? end : start);
+    from = end;
+  };
+  /** Blanks template text from `start` to the closing backtick or the next `${`; the index to resume after. */
+  const templateTail = (start: number): number => {
+    let j = start;
+    while (j < code.length && code[j] !== '`' && !(code[j] === '$' && code[j + 1] === '{')) j += code[j] === '\\' ? 2 : 1;
+    cut(start, Math.min(j, code.length), false);
+    if (code[j] === '$') {
+      templates.push(depth);
+      return j + 1; // the `{`: skipped, so the depth stays the template's
+    }
+    return j;
+  };
+  for (let i = 0; i < code.length; i++) {
+    const c = code[i];
+    if (c === '/' && code[i + 1] === '/') {
+      const end = code.indexOf('\n', i);
+      if (end === -1) { cut(i, code.length, false); break; }
+      cut(i, end, false);
+      i = end;
+    } else if (c === '/' && code[i + 1] === '*') {
+      const end = code.indexOf('*/', i + 2);
+      if (end === -1) { cut(i, code.length, false); break; }
+      cut(i, end + 2, false);
+      out += ' ';
+      i = end + 1;
+    } else if (c === '{') {
+      depth++;
+    } else if (c === '}') {
+      if (templates.length && templates[templates.length - 1] === depth) {
+        templates.pop();
+        i = templateTail(i + 1);
+      } else depth--;
+    } else if (c === "'" || c === '"') {
+      let j = i + 1;
+      while (j < code.length && code[j] !== c && code[j] !== '\n') j += code[j] === '\\' ? 2 : 1;
+      j = Math.min(j, code.length);
+      cut(i + 1, j, SINK_MODULE_NAME.test(code.slice(i + 1, j)));
+      i = j;
+    } else if (c === '`') {
+      i = templateTail(i + 1);
+    }
+  }
+  return out + code.slice(from);
+}
 
 /**
  * What a module costs a group's budget. Its significant length — except a
@@ -347,7 +434,10 @@ export function moduleWeight(code: string): number {
  * or lead to a sink (SINK_HINT), then the rest, so sink-free modules can't
  * crowd the code tool input reaches out of the group; data modules count at
  * their literal cost (moduleWeight). A module that doesn't fit is skipped
- * and recorded, the rest still join. The other files are grouped by their
+ * and recorded, the rest still join. A module an earlier handler group holds
+ * joins this one too when small (MAX_SHARED_MODULE, MAX_SHARED_TOTAL in all),
+ * else its link is recorded; groups may overlap, and traced() keeps one
+ * report per sink. The other files are grouped by their
  * links as before (a link that would join two groups past the cap is
  * dropped). One scan of each file's text for specifiers — linear in the source.
  */
@@ -368,33 +458,44 @@ function planModules(chunks: SourceChunk[]): ModulePlan {
   if (n === 1 || byPath.size <= 1) return { groups: chunks.map((_, i) => [i]), untraced: [] };
   const size = chunks.map((c) => moduleWeight(c.code));
   // Modules that hold a sink or import (directly or not) one that does
-  const toSink = chunks.map((c) => SINK_HINT.test(c.code));
+  const toSink = chunks.map((c) => SINK_HINT.test(hintText(c.code)));
   const importers: number[][] = chunks.map(() => []);
   links.forEach((targets, i) => { for (const t of targets) importers[t].push(i); });
   const back = toSink.flatMap((s, i) => (s ? [i] : []));
   for (let q = 0; q < back.length; q++) {
     for (const i of importers[back[q]]) if (!toSink[i]) { toSink[i] = true; back.push(i); }
   }
+  const isHandler = chunks.map((c) => !!c.path && HANDLER_REGISTRATION.test(c.code));
+  // the group a module was first placed in; `members` also holds shared copies
   const groupOf = new Array<number>(n).fill(-1);
   const groups: number[][] = [];
+  const members: Set<number>[] = [];
   const total: number[] = [];
   const dropped = new Map<number, number>();
-  const join = (i: number, g: number): void => {
-    groupOf[i] = g;
+  // links into a module another group holds that could not be shared
+  const crossed = new Map<number, number>();
+  let shared = 0;
+  const add = (i: number, g: number): void => {
+    members[g].add(i);
     groups[g].push(i);
     total[g] += size[i];
+  };
+  const join = (i: number, g: number): void => {
+    groupOf[i] = g;
+    add(i, g);
   };
 
   // Handler files and what they import, breadth first
   let current = -1;
   const handlerFiles: number[] = [];
   for (let h = 0; h < n; h++) {
-    if (!chunks[h].path || !HANDLER_REGISTRATION.test(chunks[h].code)) continue;
+    if (!isHandler[h]) continue;
     handlerFiles.push(h);
     if (groupOf[h] !== -1) continue;
     if (current === -1 || total[current] + size[h] > MAX_GROUP_SOURCE) {
       current = groups.length;
       groups.push([]);
+      members.push(new Set());
       total.push(0);
     }
     join(h, current);
@@ -403,12 +504,27 @@ function planModules(chunks: SourceChunk[]): ModulePlan {
     for (const sinkward of [true, false]) {
       for (let q = 0; q < queue.length; q++) {
         for (const t of links[queue[q]]) {
-          if (groupOf[t] === current || (sinkward && !toSink[t])) continue;
-          if (groupOf[t] !== -1 || total[current] + size[t] > MAX_GROUP_SOURCE) {
-            if (!dropped.has(t)) dropped.set(t, queue[q]);
-            continue;
+          if (members[current].has(t) || (sinkward && !toSink[t])) continue;
+          const fits = total[current] + size[t] <= MAX_GROUP_SOURCE;
+          if (groupOf[t] === -1) {
+            if (!fits) {
+              if (!dropped.has(t)) dropped.set(t, queue[q]);
+              continue;
+            }
+            join(t, current);
+          } else {
+            // Held by another group. A handler file is traced there from its
+            // own handlers. A helper the handlers here call (a shared `run()`,
+            // a re-export) is traced here too while small — groups overlap,
+            // within a budget; past it, the link is recorded as not followed.
+            if (isHandler[t]) continue;
+            if (!fits || size[t] > MAX_SHARED_MODULE || shared + size[t] > MAX_SHARED_TOTAL) {
+              if (!crossed.has(t)) crossed.set(t, queue[q]);
+              continue;
+            }
+            shared += size[t];
+            add(t, current);
           }
-          join(t, current);
           queue.push(t);
         }
       }
@@ -426,6 +542,9 @@ function planModules(chunks: SourceChunk[]): ModulePlan {
       if (groupOf[t] === -1) untraced.push({ index: t, from: dropped.get(t) ?? queue[q] });
     }
   }
+  // and the shared helpers some group could not take in
+  const listed = new Set(untraced.map((u) => u.index));
+  for (const [index, from] of crossed) if (!listed.has(index)) untraced.push({ index, from });
 
   // The rest: linked files together, as far as the cap allows
   const parent = chunks.map((_, i) => i);
@@ -453,6 +572,7 @@ function planModules(chunks: SourceChunk[]): ModulePlan {
     if (g === undefined) {
       byRoot.set(root, (g = groups.length));
       groups.push([]);
+      members.push(new Set());
       total.push(0);
     }
     join(i, g);

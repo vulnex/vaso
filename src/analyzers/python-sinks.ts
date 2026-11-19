@@ -860,6 +860,16 @@ function functionsOf(stmts: Array<CodeLine & { last: number }>): PyFunction[] {
     const positional = parts.map((p) => /^\s*([A-Za-z_]\w*)/.exec(p)?.[1] ?? '').filter((p) => p !== 'self' && p !== 'cls');
     fns.push({ name: def[2], params, start: i, end, tool, positional });
   }
+  // Registered without a decorator: `mcp.add_tool(read)`, `mcp.tool()(read)`, `Tool.from_function(read)`
+  const registered = new Set<string>();
+  for (const st of stmts) {
+    const code = blankStrings(st.text);
+    if (!/\b(?:add_tool|from_function|tool)\s*\(/.test(code)) continue;
+    for (const m of code.matchAll(/\.\s*(?:add_tool|from_function)\s*\(\s*(?:(?:self|cls)\.)?([A-Za-z_]\w*)\s*[,)]|\.\s*tool\s*\([^()]*\)\s*\(\s*(?:(?:self|cls)\.)?([A-Za-z_]\w*)\s*[,)]/g)) {
+      registered.add(m[1] ?? m[2]);
+    }
+  }
+  if (registered.size > 0) for (const f of fns) if (registered.has(f.name)) f.tool = true;
   return fns;
 }
 
@@ -910,9 +920,12 @@ const PASSTHROUGH_CALLS = /^(?:str|f|format|join|replace|strip|lstrip|rstrip|low
  * The parts of an assigned expression whose value flows into the variable:
  * a condition (`a if flag else b`, `not x`) only picks between values, and an
  * arbitrary call (`LanguageConfigLoader.load(language)`) returns its own
- * value — string building and container calls pass their arguments through.
+ * value — string building and container calls pass their arguments through,
+ * and so does a same-file helper that returns what it is given (`returners`:
+ * `clean(query)` with `def clean(p): return p.strip()`), for the arguments it
+ * returns only — per call site.
  */
-function dataPart(expr: string): string {
+function dataPart(expr: string, returners?: ReadonlyMap<string, ReturnedArgs>): string {
   let out = expr.replace(/\bif\b[\s\S]*?\belse\b/g, ' else ').replace(/\bnot\s+[\w.]+/g, '');
   for (let guard = 0; guard < 20; guard++) {
     const m = /([A-Za-z_][\w.]*)\s*\(/.exec(out);
@@ -928,9 +941,98 @@ function dataPart(expr: string): string {
     // keeps only what passes the filter — not the argument's text
     const filtered = method === 'join' && /\bfor\b[\s\S]*\bin\b[\s\S]*\bif\b/.test(args);
     const keep = !filtered && (PASSTHROUGH_CALLS.test(m[1]) || PASSTHROUGH_CALLS.test(method));
-    out = out.slice(0, m.index) + ` ${receiver} ${keep ? args : ''} ` + out.slice(open + args.length + 2);
+    const helper = returners && (dot === -1 || receiver === 'self' || receiver === 'cls') ? returners.get(method) : undefined;
+    const kept = keep ? args : helper ? returnedArgs(args, helper) : '';
+    out = out.slice(0, m.index) + ` ${receiver} ${kept} ` + out.slice(open + args.length + 2);
   }
   return out;
+}
+
+/** The parameters a same-file helper returns (derived or as is), by position and by name. */
+interface ReturnedArgs {
+  at: Set<number>;
+  names: Set<string>;
+}
+
+/** The arguments of one call a helper returns: positional by index, keyword by parameter name. */
+function returnedArgs(args: string, helper: ReturnedArgs): string {
+  const parts = topLevelParts(args);
+  let index = 0;
+  const kept: string[] = [];
+  for (const part of parts) {
+    const kw = /^\s*([A-Za-z_]\w*)\s*=(?!=)([\s\S]*)$/.exec(part);
+    if (kw) {
+      if (helper.names.has(kw[1])) kept.push(kw[2]);
+    } else if (/^\s*\*/.test(part)) {
+      kept.push(part.replace(/^\s*\*+/, ''));
+    } else if (helper.at.has(index++)) {
+      kept.push(part);
+    }
+  }
+  return kept.join(' , ');
+}
+
+/** Rounds of the returners fixpoint (a helper returning another helper's result). */
+const MAX_RETURNER_ROUNDS = 8;
+
+/**
+ * Same-file functions whose return value carries a parameter (`return p.strip()`,
+ * `q = os.path.join(BASE, p)` then `return q`): by name, which parameters.
+ * What a call returns then carries those arguments of that call only.
+ */
+function passingReturners(stmts: Array<CodeLine & { last: number }>, fns: PyFunction[],
+  rewrite: (t: string, line?: number) => string, fnAt: (i: number) => PyFunction | undefined): Map<string, ReturnedArgs> {
+  const out = new Map<string, ReturnedArgs>();
+  const texts: Array<string | undefined> = new Array(stmts.length);
+  const textAt = (i: number): string => (texts[i] ??= rewrite(stmts[i].text, stmts[i].line));
+  let changed = true;
+  for (let round = 0; changed && round < MAX_RETURNER_ROUNDS; round++) {
+    changed = false;
+    for (const fn of fns) {
+      const from = new Map<string, Set<string>>(fn.positional.filter(Boolean).map((p) => [p, new Set([p])]));
+      if (from.size === 0) continue;
+      const returned = new Set<string>();
+      for (let i = fn.start + 1; i < fn.end; i++) {
+        if (fnAt(i) !== fn) continue;
+        const text = textAt(i);
+        const ret = /^\s*return\s+([\s\S]+)$/.exec(text);
+        if (ret) {
+          // A tuple (`return path, title or key, False`): its parts are
+          // unpacked one by one, which the caller's taint doesn't follow
+          const inner = /^\s*\(([\s\S]*)\)\s*$/.exec(ret[1])?.[1] ?? ret[1];
+          if (topLevelParts(inner).length > 1) continue;
+          const data = dataPart(ret[1], out);
+          for (const [n, roots] of from) if (mentions(data, n)) for (const r of roots) returned.add(r);
+          continue;
+        }
+        const assign = /^\s*([A-Za-z_]\w*)\s*(?::[^=]+)?=(?!=)\s*([\s\S]+)$/.exec(text);
+        if (!assign) continue;
+        const data = dataPart(assign[2], out);
+        const roots = new Set<string>();
+        for (const [n, r] of from) if (mentions(data, n)) for (const x of r) roots.add(x);
+        if (roots.size > 0) from.set(assign[1], roots);
+        else from.delete(assign[1]);
+      }
+      if (returned.size === 0) continue;
+      const prev = out.get(fn.name);
+      if (prev && [...returned].every((p) => prev.names.has(p))) continue;
+      const names = new Set([...(prev?.names ?? []), ...returned]);
+      const at = new Set<number>();
+      fn.positional.forEach((p, idx) => { if (names.has(p)) at.add(idx); });
+      out.set(fn.name, { at, names });
+      changed = true;
+    }
+  }
+  return out;
+}
+
+/** The helper (of `returners`) whose returned arguments carry `name` in `expr`, if any. */
+function returnerCarrying(expr: string, name: string, returners: ReadonlyMap<string, ReturnedArgs>): string | undefined {
+  for (const m of expr.matchAll(/(?<![\w.])(?:(?:self|cls)\.)?([A-Za-z_]\w*)\s*\(/g)) {
+    const helper = returners.get(m[1]);
+    if (helper && mentions(returnedArgs(callArgs(expr, m.index + m[0].length - 1), helper), name)) return m[1];
+  }
+  return undefined;
 }
 
 const mentions = (text: string, name: string): boolean => new RegExp(String.raw`(?<![\w.])${name}\b`).test(text);
@@ -944,11 +1046,30 @@ const TOOL_DISPATCHER = /^_*(?:handle_?)?(?:tools?_?call|call_?tools?)$/i;
 /** Rounds of the taint fixpoint: each adds a name or ends it; bounds a pathological file. */
 const MAX_TAINT_ROUNDS = 32;
 
-/** The names a `for` loop, `with … as` or a walrus binds from an expression: `[names, expression]` pairs. */
+/**
+ * The names a `for` loop, a comprehension (`[open(p) for p in paths]`),
+ * `with … as` or a walrus binds from an expression: `[names, expression]` pairs.
+ */
 function otherBindings(text: string): Array<[string[], string]> {
   const out: Array<[string[], string]> = [];
   const loop = /^\s*(?:async\s+)?for\s+([\w\s,()[\]]+?)\s+in\s+([\s\S]+?):\s*$/.exec(text);
   if (loop) out.push([identifiersOf(loop[1]), loop[2]]);
+  else if (/\bfor\b/.test(text)) {
+    // a comprehension's iterable: up to its `if`, the next `for`, or its closing bracket
+    const clean = mapStringLiterals(text, (m) => '_'.repeat(m.length));
+    for (const m of clean.matchAll(/(?<![\w.])for\s+([\w\s,()]+?)\s+in\s+/g)) {
+      const start = m.index + m[0].length;
+      let depth = 0;
+      let end = start;
+      for (; end < clean.length; end++) {
+        const c = clean[end];
+        if (c === '(' || c === '[' || c === '{') depth++;
+        else if (c === ')' || c === ']' || c === '}') { if (--depth < 0) break; }
+        else if (depth === 0 && /^(?:if|for|async)\b/.test(clean.slice(end, end + 6)) && /\s/.test(clean[end - 1] ?? '')) break;
+      }
+      out.push([identifiersOf(m[1]), text.slice(start, end)]);
+    }
+  }
   const withAs = /^\s*(?:async\s+)?with\s+([\s\S]+?)\s+as\s+([A-Za-z_]\w*)\s*:/.exec(text);
   if (withAs) out.push([[withAs[2]], withAs[1]]);
   for (const m of text.matchAll(/(?<![\w.])([A-Za-z_]\w*)\s*:=\s*([^,()]+(?:\([^()]*\)[^,()]*)*)/g)) out.push([[m[1]], m[2]]);
@@ -963,10 +1084,16 @@ function otherBindings(text: string): Array<[string[], string]> {
  * tool → helper → helper chains of any length taint, in any order of
  * declaration. `blank` hides the arguments a confining helper takes
  * (`open_repo(repo_path)` validates and returns): its result is not the
- * caller's raw input.
+ * caller's raw input. What a helper in `returners` returns carries the
+ * arguments it returns (`q = clean(query)`: `q ← clean() ← query`).
  */
 function taintedNames(stmts: Array<CodeLine & { last: number }>, fns: PyFunction[], rewrite: (t: string, line?: number) => string,
-  blank: (text: string) => string = (t) => t): Map<PyFunction, Map<string, string>> {
+  blank: (text: string) => string = (t) => t, returners: ReadonlyMap<string, ReturnedArgs> = new Map()): Map<PyFunction, Map<string, string>> {
+  /** `target ← from`, naming the helper the value came back through */
+  const label = (target: string, expr: string, from: string, chain: string): string => {
+    const via = returners.size > 0 && !mentions(dataPart(expr), from) ? returnerCarrying(expr, from, returners) : undefined;
+    return via ? `${target} ← ${via}() ← ${chain}` : `${target} ← ${chain}`;
+  };
   const tainted = new Map<PyFunction, Map<string, string>>();
   for (const fn of fns) {
     const seeded = fn.tool || TOOL_DISPATCHER.test(fn.name);
@@ -988,12 +1115,12 @@ function taintedNames(stmts: Array<CodeLine & { last: number }>, fns: PyFunction
         const assign = /^\s*([A-Za-z_]\w*(?:\s*,\s*[A-Za-z_]\w*)*)\s*(?::[^=]+)?=(?!=)\s*([\s\S]+)$/.exec(data);
         if (assign) {
           const targets = assign[1].split(',').map((t) => t.trim());
-          const rhs = dataPart(assign[2]);
+          const rhs = dataPart(assign[2], returners);
           const from = targets.some((t) => !names.has(t)) ? [...names.keys()].find((n) => mentions(rhs, n)) : undefined;
           if (from) {
             for (const target of targets) {
               if (names.has(target)) continue;
-              names.set(target, `${target} ← ${names.get(from)}`);
+              names.set(target, label(target, assign[2], from, names.get(from)!));
               changed = true;
               // An argv list with the input as one of its arguments.
               if (LIST_BUILDING.test(assign[2]) || argvNames.get(fn)!.has(from)) argvNames.get(fn)!.add(target);
@@ -1002,12 +1129,12 @@ function taintedNames(stmts: Array<CodeLine & { last: number }>, fns: PyFunction
         }
         for (const [targets, expr] of otherBindings(data)) {
           if (targets.every((t) => names.has(t))) continue;
-          const rhs = dataPart(expr);
+          const rhs = dataPart(expr, returners);
           const from = [...names.keys()].find((n) => mentions(rhs, n));
           if (!from) continue;
           for (const target of targets) {
             if (names.has(target)) continue;
-            names.set(target, `${target} ← ${names.get(from)}`);
+            names.set(target, label(target, expr, from, names.get(from)!));
             changed = true;
           }
         }
@@ -1127,13 +1254,45 @@ function confinedByCheck(text: string, resolved: ReadonlySet<string>): string[] 
     for (const n of identifiersOf(region)) if (resolved.has(n)) out.push(n);
     out.push(...resolvedInside(region));
   };
+  // A test whose result is thrown away (`full.startswith(BASE)` on its own
+  // line) confines nothing; `relative_to` raises, so it checks even there
+  const discarded = expressionStatement(code);
+  const depth = discarded ? bracketDepths(code) : undefined;
+  const used = (at: number): boolean => !depth || depth[at] > 0;
   for (const m of code.matchAll(/\.(startswith|is_relative_to|relative_to)\s*\(\s*/g)) {
     if (m[1] === 'startswith' && /^[rRbBuUfF]{0,2}["']/.test(code.slice(m.index + m[0].length))) continue;
+    if (m[1] !== 'relative_to' && !used(m.index)) continue;
     const start = receiverStart(code, m.index);
     if (start !== undefined) take(code.slice(start, m.index));
   }
-  for (const m of code.matchAll(/\bcommon(?:path|prefix)\s*\(/g)) take(callArgs(code, m.index + m[0].length - 1));
-  if (RESOLVED_COMPARE.test(code)) take(code);
+  for (const m of code.matchAll(/\bcommon(?:path|prefix)\s*\(/g)) if (used(m.index)) take(callArgs(code, m.index + m[0].length - 1));
+  if (RESOLVED_COMPARE.test(code) && !(discarded && [...code.matchAll(/[=!]=/g)].some((m) => depth![m.index] === 0))) take(code);
+  return out;
+}
+
+/** A statement that is only an expression: no assignment, condition, assert, return… — its value is discarded. */
+function expressionStatement(code: string): boolean {
+  if (/^\s*(?:if|elif|while|assert|return|yield|raise|with|for|async|await|del|lambda|print)\b/.test(code)) return false;
+  const depth = bracketDepths(code);
+  for (let i = 0; i < code.length; i++) {
+    if (code[i] !== '=' || depth[i] !== 0) continue;
+    if (code[i + 1] === '=' || /[=!<>]/.test(code[i - 1] ?? '')) continue;
+    return false; // an assignment (`ok = …`, `x += …`, `:=`)
+  }
+  return true;
+}
+
+/** Bracket depth before each character of string-blanked code. */
+function bracketDepths(code: string): Int32Array {
+  const out = new Int32Array(code.length + 1);
+  let d = 0;
+  for (let i = 0; i < code.length; i++) {
+    out[i] = d;
+    const c = code[i];
+    if (c === '(' || c === '[' || c === '{') d++;
+    else if (c === ')' || c === ']' || c === '}') d = Math.max(0, d - 1);
+  }
+  out[code.length] = d;
   return out;
 }
 
@@ -1315,7 +1474,19 @@ export function analyzePythonSinks(code: string): PythonSinkFinding[] {
     ? confinedNamesByFunction(stmts, fns, rewrite) : new Map<PyFunction, Map<string, number>>();
   // What a validate-and-return helper gives back is confined, not raw input
   const returners = confiningReturners(stmts, fns, rewrite, confinedIn, fnAt);
-  const tainted = taintedNames(stmts, fns, rewrite, returners.size > 0 ? (t) => blankConfinedArgs(t, returners) : undefined);
+  // What a helper returns of its arguments, those it confines left out
+  const passing = passingReturners(stmts, fns, rewrite, fnAt);
+  for (const [name, positions] of returners) {
+    const helper = passing.get(name);
+    if (!helper) continue;
+    const fn = fns.find((f) => f.name === name);
+    for (const at of positions) {
+      helper.at.delete(at);
+      if (fn?.positional[at]) helper.names.delete(fn.positional[at]);
+    }
+    if (helper.at.size === 0 && helper.names.size === 0) passing.delete(name);
+  }
+  const tainted = taintedNames(stmts, fns, rewrite, returners.size > 0 ? (t) => blankConfinedArgs(t, returners) : undefined, passing);
   const touchesFiles = FILE_OPS.test(code);
   const pathNames = new Set<string>();
   if (touchesFiles) for (const m of code.matchAll(PATH_BINDING)) pathNames.add(m[1]);
@@ -1484,6 +1655,19 @@ export function analyzePythonSinks(code: string): PythonSinkFinding[] {
   {
     const pathBound = new Set(pathNames);
     if (!touchesFiles) for (const m of code.matchAll(PATH_BINDING)) pathBound.add(m[1]);
+    // Helpers that return a path already reported at its join: what comes
+    // back through them is that flaw, reported once
+    const joinReturners = new Set<string>();
+    for (const fn of fns) {
+      if (!passing.has(fn.name)) continue;
+      for (let i = fn.start + 1; i < fn.end && !joinReturners.has(fn.name); i++) {
+        if (fnAt(i) !== fn || !/^\s*return\b/.test(stmts[i].text)) continue;
+        let joined = identifiersOf(stmts[i].text).some((n) => joinedNames.has(`${fn.start}:${n}`));
+        for (let l = stmts[i].line; l <= stmts[i].last && !joined; l++) joined = joinLines.has(l);
+        if (joined) joinReturners.add(fn.name);
+      }
+    }
+    const unjoined = new Map([...passing].filter(([name]) => !joinReturners.has(name)));
     stmts.forEach((stmt, i) => {
       const fn = fnAt(i);
       const names = fn ? tainted.get(fn)! : undefined;
@@ -1492,12 +1676,12 @@ export function analyzePythonSinks(code: string): PythonSinkFinding[] {
       const text = rewrite(stmt.text, stmt.line);
       for (const call of pythonFileCalls(text, pathBound)) {
         const confinedHere = confinedIn.get(fn);
-        const from = call.paths.map((p) => dataPart(p)).flatMap((p) => [...names.keys()].filter((n) => mentions(p, n)))
+        const from = call.paths.map((p) => dataPart(p, unjoined)).flatMap((p) => [...names.keys()].filter((n) => mentions(p, n)))
           .find((n) => !confinedBefore(confinedHere, n, names.get(n), i));
         if (from === undefined) continue;
         // Derived from a path already reported at its join
         const chain = names.get(from)!.split(' ← ');
-        if (chain.some((n) => joinedNames.has(`${fn.start}:${n}`))) continue;
+        if (chain.some((n) => joinedNames.has(`${fn.start}:${n}`) || (n.endsWith('()') && joinReturners.has(n.slice(0, -2))))) continue;
         // unlink/remove/rmdir/rmtree delete what they are given
         const deletes = call.op === 'write' && DELETE_CALL.test(call.sink);
         const verb = call.op === 'read' ? 'reads' : deletes ? 'deletes' : call.op === 'write' ? 'writes' : 'lists or stats';

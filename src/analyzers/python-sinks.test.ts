@@ -562,3 +562,68 @@ describe('analyzePythonSinks — file paths taken from tool input', () => {
     expect(findings.filter((f) => f.kind === 'file-path')).toHaveLength(0);
   });
 });
+
+describe('analyzePythonSinks — tool input through comprehensions, helper returns, add_tool (dt24)', () => {
+  const sinks = (lines: string[]) => analyzePythonSinks(lines.join('\n')).filter((f) => f.kind === 'file-path' || f.kind === 'injection');
+  const head = ['import os', 'from mcp.server.fastmcp import FastMCP', 'mcp = FastMCP("x")', 'BASE = "/srv/data"'];
+
+  it('follows tool input into a list comprehension or generator', () => {
+    expect(sinks([...head, '@mcp.tool()', 'def read_many(paths: list[str]) -> str:', '    return "".join([open(p).read() for p in paths])']))
+      .toEqual([expect.objectContaining({ kind: 'file-path', toolInput: 'p ← paths' })]);
+    expect(sinks([...head, '@mcp.tool()', 'def read_many(paths: list[str]) -> str:', '    return "".join(open(p).read() for p in paths if p)'])).toHaveLength(1);
+    // the iterable is a constant: nothing the caller chose
+    expect(sinks([...head, '@mcp.tool()', 'def read_many(n: str) -> str:', '    return "".join([open(p).read() for p in FILES if n in p])'])).toHaveLength(0);
+  });
+
+  it('follows tool input through a helper\'s return value, per call site', () => {
+    const clean = ['def clean(p):', '    return p.strip()'];
+    expect(sinks([...head, ...clean, '@mcp.tool()', 'def read(query: str) -> str:', '    return open(clean(query)).read()']))
+      .toEqual([expect.objectContaining({ kind: 'file-path', toolInput: 'query' })]);
+    expect(sinks([...head, ...clean, '@mcp.tool()', 'def read(query: str) -> str:', '    q = clean(query)', '    return open(q).read()']))
+      .toEqual([expect.objectContaining({ kind: 'file-path', toolInput: 'q ← clean() ← query' })]);
+    // the same helper called with a constant elsewhere returns no input
+    expect(sinks([...head, ...clean, '@mcp.tool()', 'def read(query: str) -> str:', '    log(clean(query))', '    return open(clean("/etc/motd")).read()'])).toHaveLength(0);
+    // a helper that returns something else
+    expect(sinks([...head, 'def lookup(p):', '    return TABLE_PATH', '@mcp.tool()', 'def read(query: str) -> str:', '    return open(lookup(query)).read()'])).toHaveLength(0);
+    // helpers of helpers, and keyword arguments
+    expect(sinks([...head, 'def inner(p):', '    return p.lower()', 'def outer(x, y=None):', '    v = inner(x)', '    return v',
+      '@mcp.tool()', 'def read(query: str) -> str:', '    return open(outer(y=1, x=query)).read()'])).toHaveLength(1);
+    // a tuple return is not followed into its unpacked parts
+    expect(sinks([...head, 'def fetch(key):', '    return path_of(key), key, False', '@mcp.tool()', 'def read(key: str) -> str:',
+      '    p, title, tmp = fetch(key)', '    return open(p).read()'])).toHaveLength(0);
+  });
+
+  it('reports a path joined in a helper once, at the join', () => {
+    const norm = ['def norm(p):', '    return os.path.join(BASE, p)'];
+    for (const body of [['    return open(norm(path)).read()'], ['    full = norm(path)', '    return open(full).read()']]) {
+      const found = sinks([...head, ...norm, '@mcp.tool()', 'def read(path: str) -> str:', ...body]);
+      expect(found).toEqual([expect.objectContaining({ kind: 'injection', description: expect.stringMatching(/^Path joined from caller input/) })]);
+    }
+  });
+
+  it('does not trace through a helper that confines and returns', () => {
+    expect(sinks([...head, 'def safe(p):', '    full = os.path.realpath(os.path.join(BASE, p))', '    if not full.startswith(BASE + os.sep):',
+      '        raise ValueError("outside")', '    return full', '@mcp.tool()', 'def read(path: str) -> str:', '    return open(safe(path)).read()'])).toHaveLength(0);
+  });
+
+  it('treats a function registered with add_tool as a tool', () => {
+    expect(sinks([...head, 'def read(query: str) -> str:', '    with open(query) as f:', '        return f.read()', 'mcp.add_tool(read)']))
+      .toEqual([expect.objectContaining({ kind: 'file-path', toolInput: 'query' })]);
+    expect(sinks([...head, 'def read(query: str) -> str:', '    return open(query).read()', 'mcp.add_tool(read, name="read_file")'])).toHaveLength(1);
+    expect(sinks([...head, 'def read(query: str) -> str:', '    return open(query).read()', 'mcp.tool(name="r")(read)'])).toHaveLength(1);
+    expect(sinks([...head, 'def read(query: str) -> str:', '    return open(query).read()'])).toHaveLength(0);
+  });
+
+  it('does not count a containment test whose result is never checked', () => {
+    const read = (...check: string[]) => sinks([...head, '@mcp.tool()', 'def read(path: str) -> str:',
+      '    full = os.path.realpath(os.path.join(BASE, path))', ...check.map((c) => `    ${c}`), '    with open(full) as f:', '        return f.read()']);
+    expect(read('full.startswith(BASE)')).toEqual([expect.objectContaining({ kind: 'injection', description: expect.stringMatching(/^Path joined from caller input \(path\)/) })]);
+    expect(read('os.path.commonpath([full, BASE]) == BASE')).toHaveLength(1);
+    expect(read('full == os.path.realpath(BASE)')).toHaveLength(1);
+    // checked: a condition, an assert, a stored result, a call that raises
+    expect(read('if not full.startswith(BASE + os.sep):', '    raise ValueError("outside")')).toHaveLength(0);
+    expect(read('assert full.startswith(BASE + os.sep)')).toHaveLength(0);
+    expect(read('ok = full.startswith(BASE + os.sep)', 'if not ok:', '    raise ValueError("outside")')).toHaveLength(0);
+    expect(read('ensure(full.startswith(BASE + os.sep))')).toHaveLength(0);
+  });
+});

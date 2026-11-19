@@ -319,6 +319,79 @@ describe('module groups grow from the tool handlers', () => {
     expect(r5.evidence?.[0]?.detail).toMatch(/not verified/);
   });
 
+  describe('a helper shared by handler files in different groups', () => {
+    const INDEX = `export const server = new McpServer({ name: "x", version: "1" });\nimport "./a.js";\nimport "./b.js";`;
+    const LIB = `import { exec } from "node:child_process";\nexport function run(c) { exec(c); }`;
+    const A = `import { server } from "./index.js";\nimport { run } from "./lib.js";\nimport { f0 } from "./pad.js";\nserver.tool("status", {}, async () => { run("git status"); return { content: [{ type: "text", text: f0("x") }] }; });`;
+    const B = `import { server } from "./index.js";\nimport { run } from "./lib.js";\nserver.tool("exec", { cmd: z.string() }, async (args) => { run(args.cmd); return { content: [] }; });`;
+    /** Lines of `line(i)` weighing at least `target`. */
+    const padTo = (target: number, line: (i: number) => string, head: string[] = []): string => {
+      const lines = [...head];
+      for (let i = 0, w = 0; w < target; i++) {
+        lines.push(line(i));
+        w += significantLength(line(i));
+      }
+      return lines.join('\n');
+    };
+    /** Code holding real sinks (fills a.js's group). */
+    const sinkPadTo = (target: number): string => padTo(target, (i) => `export function k${i}() { return x('ls'); }`, [`import { execSync as x } from 'node:child_process';`]);
+    /** Code, no sink. */
+    const codePadTo = (target: number): string => padTo(target, (i) => `export function m${i}(a) { return a + ${i}; }`);
+
+    it('a decoy `exec(` comment or string does not promote a padding module over a handler file (dt24 e5)', async () => {
+      // small functions, no sink, filling a.js's group to just under the cap: b.js fits only if it joins before
+      const room = MAX_GROUP_SOURCE - [INDEX, A, LIB].reduce((w, c) => w + moduleWeight(c), 0) - 110;
+      const fnPad = (decoy: string): string => padTo(room, (i) => `export function f${i}(a) { return a + "${'q'.repeat(30)}"; }`, [decoy]);
+      expect(moduleWeight(B)).toBeGreaterThan(100);
+      for (const decoy of ['// exec( decoy', 'const d = "exec(";', '/* spawn( */ const t = `fs ${1} exec(`;']) {
+        const code = joined({ 'index.js': INDEX, 'a.js': A, 'b.js': B, 'lib.js': LIB, 'pad.js': fnPad(decoy) });
+        expect(findTaintedSinks(code, `e5-${decoy}.js`), decoy).toEqual([expect.objectContaining({ sink: 'exec', origin: 'c ← caller' })]);
+        const r4 = await mcp004.run(ctx({ sourceCode: code, sourceRoot: '/srv/app' }));
+        expect(r4.severity, decoy).toBe('critical');
+        const r5 = await mcp005.run(ctx({ sourceCode: code, sourceRoot: '/srv/app' }));
+        expect(r5.severity, decoy).toBe('critical');
+      }
+    }, 60_000);
+
+    it('traces a small helper in both groups when real sink code fills the first', async () => {
+      const pad = sinkPadTo(MAX_GROUP_SOURCE - 20_000);
+      const b = `${B}\n${codePadTo(30_000)}`;
+      const code = joined({ 'index.js': INDEX, 'a.js': A, 'b.js': b, 'lib.js': LIB, 'pad.js': pad });
+      expect(findTaintedSinks(code, 'shared-helper.js')).toEqual([expect.objectContaining({ sink: 'exec', origin: 'c ← caller' })]);
+      expect(taintCoverage(code).untraced).toEqual([]);
+      const r5 = await mcp005.run(ctx({ sourceCode: code, sourceRoot: '/srv/app' }));
+      expect(r5.severity).toBe('critical');
+      expect(r5.evidence).toHaveLength(1);
+    }, 60_000);
+
+    it('traces a shared helper reached through a re-export', () => {
+      const pad = sinkPadTo(MAX_GROUP_SOURCE - 20_000);
+      const index = `${INDEX}\nexport { run } from "./lib.js";`;
+      const b = `import { server, run } from "./index.js";\nserver.tool("exec", { cmd: z.string() }, async (args) => { run(args.cmd); return { content: [] }; });\n${codePadTo(30_000)}`;
+      const code = joined({ 'index.js': index, 'a.js': A, 'b.js': b, 'lib.js': LIB, 'pad.js': pad });
+      expect(findTaintedSinks(code, 'shared-reexport.js')).toEqual([expect.objectContaining({ sink: 'exec' })]);
+    }, 60_000);
+
+    it('two handler files sharing a helper, no padding: critical', async () => {
+      const code = joined({ 'index.js': INDEX, 'a.js': A.replace(/\nimport \{ f0 \}.*\n/, '\n').replace('f0("x")', '"x"'), 'b.js': B, 'lib.js': LIB });
+      expect(findTaintedSinks(code, 'shared-nopad.js')).toEqual([expect.objectContaining({ sink: 'exec' })]);
+      const r4 = await mcp004.run(ctx({ sourceCode: code, sourceRoot: '/srv/app' }));
+      expect(r4.severity).toBe('critical');
+    });
+
+    it('records a link into a helper too big to share as not followed (not verified, never clean)', async () => {
+      const pad = sinkPadTo(MAX_GROUP_SOURCE - 100_000);
+      const lib = `${LIB}\n${codePadTo(80_000)}`;
+      const b = `${B}\n${codePadTo(30_000)}`;
+      const code = joined({ 'index.js': INDEX, 'a.js': A, 'b.js': b, 'lib.js': lib, 'pad.js': pad });
+      expect(taintCoverage(code).untraced).toEqual([expect.objectContaining({ path: 'lib.js', from: 'b.js' })]);
+      expect(findUnverifiedSinks(code, 'shared-big.js')).toEqual([expect.objectContaining({ sink: 'exec', unverified: true })]);
+      const r4 = await mcp004.run(ctx({ sourceCode: code, sourceRoot: '/srv/app' }));
+      expect(r4.severity).toBe('warning');
+      expect(r4.message).not.toMatch(/none reached by tool input/);
+    }, 60_000);
+  });
+
   it('leaves MCP-001 passing when every module was followed', async () => {
     const r1 = await mcp001.run(ctx({ sourceCode: joined({ 'server.js': TOOL, 'h.js': RUN }), sourceRoot: '/srv/app' }));
     expect(r1.passed).toBe(true);

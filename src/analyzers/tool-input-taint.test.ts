@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { confinesPaths, findTaintedSinks } from './tool-input-taint.js';
+import { confinesPaths, findTaintedSinks, hintText } from './tool-input-taint.js';
 import { sourceChunks } from './js-parse.js';
 
 describe('findTaintedSinks', () => {
@@ -216,5 +216,14 @@ function resolveIt(p) { return path.join('/srv/data', p); }`;
 const fs = require('fs');
 server.tool("read", "d", {}, async ({ actions }) => fs.readFileSync(actions[0].name));`;
     expect(findTaintedSinks(direct, 'direct.js')).toHaveLength(1);
+  });
+});
+
+describe('hintText (what SINK_HINT reads when ordering module groups)', () => {
+  it('drops comments and string contents, keeps sink module names and template interpolations', () => {
+    expect(hintText('// exec(\nconst a = "exec(" + \'spawn(\'; /* fs */ f();')).toBe('\nconst a = "" + \'\';   f();');
+    expect(hintText(`import { exec } from 'node:child_process';`)).toBe(`import { exec } from 'node:child_process';`);
+    expect(hintText('const t = `run exec( ${exec(cmd)} and ${ {a: 1}.a } `; x("fx");')).toBe('const t = `${exec(cmd)}${ {a: 1}.a }`; x("");');
+    expect(hintText('const s = "a\\"exec(b";')).toBe('const s = "";');
   });
 });
