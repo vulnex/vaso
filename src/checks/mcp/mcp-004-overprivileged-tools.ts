@@ -76,7 +76,7 @@ export const mcp004 = defineCheck({
         const findings = analyzePythonSinks(source.sourceCode);
         const injected = new Set(findings.filter((f) => f.kind === 'injection').map((f) => f.line));
         for (const finding of findings) {
-          if (finding.kind === 'injection') continue;
+          if (finding.kind === 'injection' || finding.kind === 'file-path') continue;
           if (finding.kind === 'fs-access') {
             severity = 'critical';
             evidence.push({

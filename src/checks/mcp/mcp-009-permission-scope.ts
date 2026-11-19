@@ -2,6 +2,7 @@ import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
 import { sourceSegments } from '../../mcp/source-segments.js';
 import { confinesPaths, findTaintedSinks } from '../../analyzers/tool-input-taint.js';
+import { analyzePythonSinks } from '../../analyzers/python-sinks.js';
 import { findingSnippet, sourceSnippet } from '../../mcp/source-snippet.js';
 
 // Patterns indicating disproportionate resource access in server names/packages
@@ -72,7 +73,13 @@ export const mcp009 = defineCheck({
 
       // A tool that lists, stats or probes whatever path the caller names
       // reaches the whole host (reads and writes of such paths are MCP-005's).
-      if (source.language !== 'python' && !confinesPaths(source.sourceCode)) {
+      if (source.language === 'python') {
+        const file = source.localPath ?? source.serverName;
+        for (const finding of analyzePythonSinks(source.sourceCode)) {
+          if (finding.kind !== 'file-path' || finding.fileOp !== 'meta') continue;
+          evidence.push({ file, line: finding.line, snippet: findingSnippet(source, finding), detail: finding.description });
+        }
+      } else if (!confinesPaths(source.sourceCode)) {
         const file = source.localPath ?? source.serverName;
         const seen = new Set<number>();
         for (const sink of findTaintedSinks(source.sourceCode, file)) {

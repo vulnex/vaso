@@ -92,8 +92,11 @@ export const mcp005 = defineCheck({
       const reported = new Set<number>();
 
       if (source.language === 'python') {
+        // Injection, and file reads/writes at a path tool input names
+        // (listing/stat-only paths are MCP-009's)
         for (const finding of analyzePythonSinks(source.sourceCode)) {
-          if (finding.kind !== 'injection' || reported.has(finding.line)) continue;
+          const fileSink = finding.kind === 'file-path' && finding.fileOp !== 'meta';
+          if ((finding.kind !== 'injection' && !fileSink) || reported.has(finding.line)) continue;
           reported.add(finding.line);
           evidence.push({ file, line: finding.line, snippet: findingSnippet(source, finding), detail: finding.description });
         }
