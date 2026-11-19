@@ -1314,10 +1314,23 @@ function confinedNamesByFunction(stmts: Array<CodeLine & { last: number }>, fns:
     const confined = new Map<string, number>();
     const resolved = new Set<string>();
     const from = new Map<string, Set<string>>(fn.positional.filter(Boolean).map((p) => [p, new Set([p])]));
+    // stored test results (`ok = full.startswith(BASE)`): the names they confine once tested
+    const flags = new Map<string, string[]>();
     for (let i = fn.start + 1; i < fn.end; i++) {
       const text = textAt(i);
-      for (const n of confinedByCheck(text, resolved)) if (!confined.has(n)) confined.set(n, i);
       const assign = /^\s*([A-Za-z_]\w*)\s*(?::[^=]+)?=(?!=)\s*([\s\S]+)$/.exec(text);
+      let checked = confinedByCheck(text, resolved);
+      const code = blankStrings(text);
+      if (CONDITION.test(code)) {
+        const test = conditionTest(code);
+        for (const [flag, names] of flags) if (mentions(test, flag)) checked = [...checked, ...names];
+        if (checked.length > 0 && !guardsSink(textAt, fn, i, test, checked)) checked = [];
+      } else if (assign && checked.length > 0 && !/\.relative_to\s*\(/.test(code) && !TERNARY.test(dataPart(assign[2]))) {
+        // a result stored, not acted on: it confines once an `if` tests it
+        flags.set(assign[1], checked);
+        checked = [];
+      }
+      for (const n of checked) if (!confined.has(n)) confined.set(n, i);
       if (!assign) continue;
       const [, name, rhs] = assign;
       if (RESOLVED_VALUE.test(blankStrings(rhs))) resolved.add(name);
@@ -1358,6 +1371,55 @@ function confinedNamesByFunction(stmts: Array<CodeLine & { last: number }>, fns:
     }
   }
   return direct;
+}
+
+const CONDITION = /^\s*(?:(?:el)?if|while)\b/;
+const TERNARY = /\bif\b[\s\S]*\belse\b/;
+/** A statement that leaves the function or the loop (or the process). */
+const EXITS = /^\s*(?:raise|return|continue|break)\b|\b(?:sys\.exit|os\._exit|exit|abort)\s*\(/;
+const indentOf = (text: string): number => text.search(/\S/);
+
+/** The test of an `if`/`elif`/`while` statement (string-blanked): up to its top-level colon. */
+function conditionTest(code: string): string {
+  const depth = bracketDepths(code);
+  for (let i = 0; i < code.length; i++) if (code[i] === ':' && depth[i] === 0 && code[i + 1] !== '=') return code.slice(0, i);
+  return code;
+}
+
+/**
+ * Whether the containment test of the `if`/`while` at statement `at` acts
+ * on the sink: a failed test leaves (`if not full.startswith(BASE): raise`,
+ * or an `else:` that raises), or the names it checks are used only inside
+ * the branch where it passed. A test whose branch does nothing about it
+ * (`if full.startswith(BASE): print("ok")`, then `open(full)`) confines nothing.
+ */
+function guardsSink(textAt: (i: number) => string, fn: PyFunction,
+  at: number, test: string, names: string[]): boolean {
+  const code = blankStrings(textAt(at));
+  const indent = indentOf(code);
+  const inline = code.slice(test.length + 1);
+  let end = at + 1;
+  while (end < fn.end && indentOf(textAt(end)) > indent) end++;
+  const exits = (from: number, to: number, first?: string): boolean => {
+    if (first !== undefined && EXITS.test(first)) return true;
+    for (let j = from; j < to; j++) if (EXITS.test(blankStrings(textAt(j)))) return true;
+    return false;
+  };
+  const failed = /^\s*(?:(?:el)?if|while)\s+not\b/.test(test) || /!=|\bis\s+False\b|==\s*False\b/.test(test);
+  if (failed) return exits(at + 1, end, inline);
+  // `if ok_test: … else: raise`
+  if (end < fn.end && indentOf(textAt(end)) === indent && /^\s*else\s*:/.test(textAt(end))) {
+    const elseCode = blankStrings(textAt(end));
+    let elseEnd = end + 1;
+    while (elseEnd < fn.end && indentOf(textAt(elseEnd)) > indent) elseEnd++;
+    if (exits(end + 1, elseEnd, elseCode.slice(elseCode.indexOf(':') + 1))) return true;
+  }
+  // used only inside the passing branch
+  for (let j = end; j < fn.end; j++) {
+    const later = blankStrings(textAt(j));
+    if (names.some((n) => mentions(later, n))) return false;
+  }
+  return true;
 }
 
 /** Whether a name (derived as `chain`, e.g. `full ← path`) was confined before statement `at`. */

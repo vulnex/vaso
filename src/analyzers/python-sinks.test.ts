@@ -626,4 +626,23 @@ describe('analyzePythonSinks — tool input through comprehensions, helper retur
     expect(read('ok = full.startswith(BASE + os.sep)', 'if not ok:', '    raise ValueError("outside")')).toHaveLength(0);
     expect(read('ensure(full.startswith(BASE + os.sep))')).toHaveLength(0);
   });
+
+  it('counts a containment test only when it guards the sink', () => {
+    const read = (...check: string[]) => sinks([...head, '@mcp.tool()', 'def read(path: str) -> str:',
+      '    full = os.path.realpath(os.path.join(BASE, path))', ...check.map((c) => `    ${c}`)]);
+    const opened = '    return open(full).read()';
+    // a test whose branch does nothing, a stored result never tested
+    expect(read('if full.startswith(BASE):', '    print("ok")', opened.trim())).toHaveLength(1);
+    expect(read('ok = full.startswith(BASE)', opened.trim())).toHaveLength(1);
+    expect(read('ok = full.startswith(BASE)', 'if ok:', '    print("ok")', opened.trim())).toHaveLength(1);
+    expect(read('if not full.startswith(BASE):', '    print("outside")', opened.trim())).toHaveLength(1);
+    // the sink after the passing branch, not in it
+    expect(read('if full.startswith(BASE):', '    data = open(full).read()', opened.trim())).toHaveLength(1);
+    // guards: leaves when the test fails, the sink inside the passing branch, an else that raises
+    expect(read('if not full.startswith(BASE): raise ValueError("outside")', opened.trim())).toHaveLength(0);
+    expect(read('if full.startswith(BASE):', `    ${opened.trim()}`, 'return ""')).toHaveLength(0);
+    expect(read('if full.startswith(BASE):', '    pass', 'else:', '    raise ValueError("outside")', opened.trim())).toHaveLength(0);
+    expect(read('ok = full.startswith(BASE)', 'if ok:', `    ${opened.trim()}`, 'return ""')).toHaveLength(0);
+    expect(read('rel = full.relative_to(BASE)', opened.trim())).toHaveLength(0);
+  });
 });
