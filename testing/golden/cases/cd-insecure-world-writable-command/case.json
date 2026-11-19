@@ -8,6 +8,7 @@
   "fail": {
     "CD-009": "warning"
   },
+  "reachable": true,
   "modes": {
     "tools/mcp-bin": "777",
     "shared-bin": "777",
