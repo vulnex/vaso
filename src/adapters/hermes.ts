@@ -334,13 +334,13 @@ export const hermesAdapter: AgentAdapter = {
         '/usr/bin/hermes',
       ],
       systemDirListings: [HERMES_MANAGED_DEFAULT_DIR],
-      // What config.yaml launches or runs (HM-010 MCP commands, HM-009
-      // tirith_path): mode and owner only
+      // What config.yaml launches or runs (HM-010 MCP commands and absolute
+      // paths in their args, HM-009 tirith_path): mode and owner only
       configRoots: [{
         configs: HERMES_YAML_CONFIGS,
         format: 'yaml',
         kind: 'stat',
-        keys: [['mcp_servers', '*', 'command'], ['security', 'tirith_path']],
+        keys: [['mcp_servers', '*', 'command'], ['mcp_servers', '*', 'args', '*'], ['security', 'tirith_path']],
       }],
     };
   },

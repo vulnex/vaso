@@ -3,7 +3,7 @@ import { defineCheck } from '../../core/check-builder.js';
 import { runnerPackage, isPinnedOrLocal, pinProblem } from '../../mcp/package-pin.js';
 import { shellCommandWrapper, shellInvocation } from '../../mcp/shell-wrapper.js';
 import { notCollectedNote } from '../../core/probe-coverage.js';
-import { worldWritableCommandPath } from '../../mcp/writable-command.js';
+import { writableLaunchPaths, writableLaunchText } from '../../mcp/writable-command.js';
 import { managedOverride, markManagedOverride } from '../../adapters/hermes-managed.js';
 import { isDisabledServerConfig } from '../../mcp/disabled.js';
 
@@ -50,24 +50,16 @@ export const hm010 = defineCheck({
           });
         }
 
-        // World-writable command path, or one in a world-writable directory
-        if (command.startsWith('/')) {
-          const writable = await worldWritableCommandPath(ctx.fs, command);
-          // Absent — or, on a snapshot, outside the probe's paths: unknown, not safe
-          if (writable === 'uncollected') unverified.push(command);
-          else if (writable?.kind === 'binary') {
-            push({
-              file: config.filePath,
-              snippet: `mcp_servers.${name}.command = ${command} (mode 0${writable.octal})`,
-              detail: `MCP server command is world-writable — any local user can replace it before launch`,
-            });
-          } else if (writable?.kind === 'directory') {
-            push({
-              file: config.filePath,
-              snippet: `mcp_servers.${name}.command = ${command}: ${writable.path} (mode 0${writable.octal})`,
-              detail: `MCP server command's directory ${writable.path} is world-writable — any local user can swap ${command} before launch`,
-            });
-          }
+        // A command (or the script an interpreter runs) any local user can
+        // replace: world-writable, or swappable through a directory above it.
+        // On a snapshot, a path the probe didn't record: unknown, not safe
+        for (const w of await writableLaunchPaths(ctx.fs, command, argList, unverified, { config: config.filePath })) {
+          const { where, detail } = writableLaunchText(w);
+          push({
+            file: config.filePath,
+            snippet: `mcp_servers.${name}.${w.role === 'command' ? 'command' : 'args'} = ${w.path}${where}`,
+            detail,
+          });
         }
 
         // Unpinned package runner

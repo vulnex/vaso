@@ -367,9 +367,15 @@ describe('config-set paths a newer probe recorded', () => {
 
   it('a command path the probe recorded is judged, found or absent', async () => {
     const c: ParsedConfig = { raw: '', format: 'yaml', filePath: `${HOME}/.hermes/config.yaml`, data: { mcp_servers: { s: { command: cmd } } } };
-    const absent = await hm010.run(ctx(inst('hermes', `${HOME}/.hermes`, [c]), snapshot({ [cmd]: { content: '', mode: 0, exists: false } })));
+    // Absent, under directories the snapshot recorded as closed: nobody can plant it
+    const closed = { '/': 0o755, '/opt': 0o755, '/opt/bin': 0o755 };
+    const absent = await hm010.run(ctx(inst('hermes', `${HOME}/.hermes`, [c]), snapshot({ [cmd]: { content: '', mode: 0, exists: false } }, { directoryModes: closed })));
     expect(absent.passed).toBe(true);
     expect(absent.message).not.toMatch(/not verified/);
+    // …whose directory's mode the probe didn't record: whether anyone can plant it is unknown
+    const unknown = await hm010.run(ctx(inst('hermes', `${HOME}/.hermes`, [c]), snapshot({ [cmd]: { content: '', mode: 0, exists: false } })));
+    expect(unknown.passed).toBe(true);
+    expect(unknown.message).toMatch(/not verified/);
     const ww = snapshot({ [cmd]: { content: '', mode: 0o100777, exists: true, contentOmitted: true, omitted: 'metadata' } });
     expect((await hm010.run(ctx(inst('hermes', `${HOME}/.hermes`, [c]), ww))).passed).toBe(false);
   });
@@ -381,7 +387,7 @@ describe('config-set paths a newer probe recorded', () => {
     };
     const fs = snapshot(
       { [cmd]: { content: '', mode: 0o100755, exists: true, contentOmitted: true, omitted: 'metadata' } },
-      { directoryModes: { '/opt/bin': 0o777 } },
+      { directoryModes: { '/opt/bin': 0o777 }, specialModeBits: true },
     );
     const r = await cd009.run(ctx(inst('claude-desktop', `${HOME}/.config/Claude`, [c]), fs));
     expect(r.passed).toBe(false);

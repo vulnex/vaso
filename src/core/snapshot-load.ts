@@ -123,6 +123,9 @@ export function validateSnapshot(value: unknown): string[] {
     && (!isRecord(s.directoryModes) || !Object.values(s.directoryModes).every(isMode))) {
     errors.push('Invalid directoryModes field (permission numbers expected)');
   }
+  if (s.specialModeBits !== undefined && typeof s.specialModeBits !== 'boolean') {
+    errors.push('Invalid specialModeBits field (a boolean expected)');
+  }
   if (s.owners !== undefined && (!isRecord(s.owners) || !Object.values(s.owners).every(o =>
     Array.isArray(o) && o.length === 2 && o.every(id => Number.isInteger(id) && id >= 0)))) {
     errors.push('Invalid owners field ([uid, gid] pairs expected)');

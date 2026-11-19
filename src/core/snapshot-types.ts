@@ -111,6 +111,11 @@ export interface ProbeSnapshot {
   env: Record<string, string>;
   /** Permission bits of listed directories and user homes (probe ≥ 1.0.0). */
   directoryModes?: Record<string, number>;
+  /** `directoryModes` carry the setuid/setgid/sticky bits (0o7000) too, so a
+   *  0o777 directory is known not to be sticky. Older probes record the
+   *  permission bits only: whether a world-writable directory is sticky is
+   *  unknown there. */
+  specialModeBits?: boolean;
   /** The probe's content budget ran out; later files carry metadata only. */
   truncated?: boolean;
   /** Symlinks seen in listings and glob matches, path → link target (probe ≥ 1.1.0). */
