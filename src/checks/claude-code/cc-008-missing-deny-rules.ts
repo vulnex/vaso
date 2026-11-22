@@ -1,6 +1,7 @@
 import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
 import { getNestedValue } from '../../core/utils.js';
+import { claudeManagedLocks } from './managed-locks.js';
 
 const RECOMMENDED_DENY_PATTERNS = [
   'Bash(rm:*)',
@@ -28,8 +29,11 @@ export const cc008 = defineCheck({
 
   async run(ctx, h) {
     const evidence: Evidence[] = [];
+    const locks = await claudeManagedLocks(ctx);
 
     for (const config of ctx.configs) {
+      // allowManagedPermissionRulesOnly: this file's allow list doesn't apply
+      if (locks.permissionRulesOnly && !locks.managedFiles.has(config.filePath)) continue;
       const allow = getNestedValue(config.data, 'permissions.allow') as unknown;
       const deny = getNestedValue(config.data, 'permissions.deny') as unknown;
 

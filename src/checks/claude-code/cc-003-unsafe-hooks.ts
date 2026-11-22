@@ -4,6 +4,8 @@ import { truncateSnippet } from '../../core/patterns.js';
 import { shellCommandWrapper } from '../../mcp/shell-wrapper.js';
 import { hookCommandRisks, hookExpansion, httpHookRisks, topTier, hookSnippet } from '../../analyzers/hook-commands.js';
 import { customCommandRuns } from './custom-commands.js';
+import { readSubagents } from './subagents.js';
+import { claudeManagedLocks } from './managed-locks.js';
 
 // ${CLAUDE_PROJECT_DIR} / ${CLAUDE_PLUGIN_ROOT} / ${CLAUDE_PLUGIN_DATA} are
 // path placeholders the hooks docs use unquoted in their own examples
@@ -44,6 +46,64 @@ function shellScript(hook: HookSpec): string | undefined {
   return at >= 0 ? args[at + 1] : undefined;
 }
 
+/** Unsafe commands and HTTP targets in one `hooks` object (settings file or frontmatter). */
+function hookObjectEvidence(hooksRaw: unknown, file: string, label = 'Hook'): { evidence: Evidence[]; critical: boolean } {
+  const evidence: Evidence[] = [];
+  let critical = false;
+  if (!hooksRaw || typeof hooksRaw !== 'object' || Array.isArray(hooksRaw)) return { evidence, critical };
+  const hooks = hooksRaw as Record<string, unknown>;
+
+  for (const [event, entries] of Object.entries(hooks)) {
+    if (!Array.isArray(entries)) continue;
+    for (const entry of entries as HookEntry[]) {
+      const hookList = Array.isArray(entry?.hooks) ? entry.hooks : [];
+      for (const hook of hookList) {
+        if (!hook || typeof hook !== 'object') continue;
+        // HTTP hooks POST the event JSON (prompts, tool input) to `url`
+        if (hook.type === 'http' && typeof hook.url === 'string') {
+          const risks = httpHookRisks(hook.url);
+          const tier = topTier(risks);
+          if (!tier) continue;
+          evidence.push({
+            file,
+            snippet: hookSnippet(event, `http ${truncateSnippet(hook.url, 120)}`, entry.matcher ? `(${entry.matcher})` : ''),
+            detail: `${label === 'Hook' ? 'HTTP hook' : `${label} (http)`} ${risks.map(r => r.reason).join('; ')}`,
+            ...(tier === 'info' ? { mitigated: true } : {}),
+          });
+          continue;
+        }
+        const cmd = shellScript(hook);
+        if (typeof cmd !== 'string') continue;
+
+        // The download/exfiltration/eval tiers are shared with CUR-015
+        // and WS-009 (same model: a shell runs `command` with the event
+        // JSON on stdin), so one command gets one tier on every agent;
+        // the quoting reasons below are Claude Code's own (warning).
+        const risks = hookCommandRisks(cmd, { expansion: DYNAMIC_EXPANSION });
+        const reasons = risks.map(r => r.reason);
+        let tier = topTier(risks);
+        if (UNQUOTED_VAR_PATTERN.test(cmd)) {
+          reasons.push('uses unquoted $-variables that could expand into a shell injection');
+          if (tier !== 'critical') tier = 'warning';
+        }
+        if (COMMAND_SUBSTITUTION_PATTERN.test(cmd)) {
+          reasons.push('embeds variables inside command substitution');
+          if (tier !== 'critical') tier = 'warning';
+        }
+        if (!tier) continue;
+        if (tier === 'critical') critical = true;
+        evidence.push({
+          file,
+          snippet: hookSnippet(event, cmd.slice(0, 120), entry.matcher ? `(${entry.matcher})` : ''),
+          detail: `${label} command ${reasons.join('; ')}`,
+          ...(tier === 'info' ? { mitigated: true } : {}),
+        });
+      }
+    }
+  }
+  return { evidence, critical };
+}
+
 export const cc003 = defineCheck({
   id: 'CC-003',
   name: 'Unsafe Hook Commands',
@@ -56,58 +116,44 @@ export const cc003 = defineCheck({
     const evidence: Evidence[] = [];
     let critical = false;
 
+    // Managed locks: allowManagedHooksOnly blocks user, project and local
+    // hooks; a managed disableAllHooks stops every hook; disableAllHooks in
+    // a user/project/local file stops the hooks of those scopes only
+    const locks = await claudeManagedLocks(ctx);
+    const scopedOff = ctx.configs.find(c => !locks.managedFiles.has(c.filePath) && (c.data as Record<string, unknown> | undefined)?.disableAllHooks === true);
+    const offReason = (file: string): string | undefined => {
+      if (locks.allHooksOff) return `${locks.allHooksOff} sets disableAllHooks`;
+      if (locks.managedFiles.has(file)) return undefined;
+      if (locks.hooksOnly) return `${locks.hooksOnly} sets allowManagedHooksOnly`;
+      return scopedOff ? `${scopedOff.filePath} sets disableAllHooks` : undefined;
+    };
     for (const config of ctx.configs) {
-      const hooks = config.data.hooks as Record<string, unknown> | undefined;
-      if (!hooks || typeof hooks !== 'object') continue;
-
-      for (const [event, entries] of Object.entries(hooks)) {
-        if (!Array.isArray(entries)) continue;
-        for (const entry of entries as HookEntry[]) {
-          const hookList = Array.isArray(entry?.hooks) ? entry.hooks : [];
-          for (const hook of hookList) {
-            if (!hook || typeof hook !== 'object') continue;
-            // HTTP hooks POST the event JSON (prompts, tool input) to `url`
-            if (hook.type === 'http' && typeof hook.url === 'string') {
-              const risks = httpHookRisks(hook.url);
-              const tier = topTier(risks);
-              if (!tier) continue;
-              evidence.push({
-                file: config.filePath,
-                snippet: hookSnippet(event, `http ${truncateSnippet(hook.url, 120)}`, entry.matcher ? `(${entry.matcher})` : ''),
-                detail: `HTTP hook ${risks.map(r => r.reason).join('; ')}`,
-                ...(tier === 'info' ? { mitigated: true } : {}),
-              });
-              continue;
-            }
-            const cmd = shellScript(hook);
-            if (typeof cmd !== 'string') continue;
-
-            // The download/exfiltration/eval tiers are shared with CUR-015
-            // and WS-009 (same model: a shell runs `command` with the event
-            // JSON on stdin), so one command gets one tier on every agent;
-            // the quoting reasons below are Claude Code's own (warning).
-            const risks = hookCommandRisks(cmd, { expansion: DYNAMIC_EXPANSION });
-            const reasons = risks.map(r => r.reason);
-            let tier = topTier(risks);
-            if (UNQUOTED_VAR_PATTERN.test(cmd)) {
-              reasons.push('uses unquoted $-variables that could expand into a shell injection');
-              if (tier !== 'critical') tier = 'warning';
-            }
-            if (COMMAND_SUBSTITUTION_PATTERN.test(cmd)) {
-              reasons.push('embeds variables inside command substitution');
-              if (tier !== 'critical') tier = 'warning';
-            }
-            if (!tier) continue;
-            if (tier === 'critical') critical = true;
-            evidence.push({
-              file: config.filePath,
-              snippet: hookSnippet(event, cmd.slice(0, 120), entry.matcher ? `(${entry.matcher})` : ''),
-              detail: `Hook command ${reasons.join('; ')}`,
-              ...(tier === 'info' ? { mitigated: true } : {}),
-            });
-          }
+      const found = hookObjectEvidence(config.data.hooks, config.filePath);
+      const off = offReason(config.filePath);
+      if (off) {
+        for (const e of found.evidence) {
+          e.mitigated = true;
+          e.detail = `${e.detail} (mitigated: not run — ${off})`;
         }
+      } else if (found.critical) {
+        critical = true;
       }
+      evidence.push(...found.evidence);
+    }
+
+    // Sub-agent frontmatter `hooks` (same format as settings hooks): they
+    // run while that sub-agent runs (code.claude.com/docs/en/hooks)
+    for (const agent of await readSubagents(ctx)) {
+      const found = hookObjectEvidence(agent.frontmatter.hooks, agent.file, 'Sub-agent hook');
+      if (locks.allHooksOff) {
+        for (const e of found.evidence) {
+          e.mitigated = true;
+          e.detail = `${e.detail} (mitigated: not run — ${locks.allHooksOff} sets disableAllHooks)`;
+        }
+      } else if (found.critical) {
+        critical = true;
+      }
+      evidence.push(...found.evidence);
     }
 
     // Custom slash commands: their `!`cmd`` lines and ```! blocks run in a
