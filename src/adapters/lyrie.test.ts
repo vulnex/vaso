@@ -3,6 +3,8 @@ import type { FSProvider } from '../core/fs-provider.js';
 import type { ProbeSnapshot } from '../core/snapshot-types.js';
 import { SnapshotFSProvider } from '../core/snapshot-fs-provider.js';
 import { lyrieAdapter, findLyrieCheckouts, isLyrieCheckout, lyrieShieldBinaryPaths } from './lyrie.js';
+import { captureConfigLoadErrors } from '../core/config-loader.js';
+import { registerAllAdapters } from './index.js';
 
 const HOME = '/home/test';
 const STATE = `${HOME}/.lyrie`;
@@ -162,6 +164,22 @@ describe('Lyrie adapter', () => {
     const [inst] = await lyrieAdapter.detect({ fs });
     const env = inst.configFiles.find(c => c.filePath.endsWith('/.env'))!;
     expect((env.data as Record<string, unknown>).LYRIE_FS_ROOT).toBe(HOME);
+  });
+
+  it('a snapshot names a service-unit checkout the probe did not collect as CONFIG-LOAD, not "no Lyrie"', async () => {
+    registerAllAdapters();
+    const unit = `${HOME}/.config/systemd/user/lyrie.service`;
+    const fs = new SnapshotFSProvider({
+      version: 1, hostname: 'remote', platform: 'linux', homedir: HOME, timestamp: '2026-01-01T00:00:00Z',
+      privilege: { uid: 1000, username: 'test', isRoot: false, sudoAvailable: false, escalated: false, scannedUsers: ['test'], skippedPaths: [] },
+      files: { [unit]: { content: `[Service]\nWorkingDirectory=${HOME}/apps/lyrie-prod\n`, mode: 0o644, exists: true } },
+      directories: {}, commandOutputs: {}, env: {},
+    });
+    const { result, loadErrors } = await captureConfigLoadErrors(() => lyrieAdapter.detect({ fs }));
+    expect(result[0].installDir).toBe(`${HOME}/apps/lyrie-prod`);
+    expect(result[0].configFiles).toEqual([]);
+    expect(loadErrors.map(e => e.filePath)).toEqual([`${HOME}/apps/lyrie-prod/.env`]);
+    expect(loadErrors[0].message).toContain('not collected by the remote probe');
   });
 
   it('detects state-only installs (pairing.json / migrations)', async () => {

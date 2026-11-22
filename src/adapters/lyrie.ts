@@ -5,6 +5,8 @@ import type { ProbeManifest } from '../core/snapshot-types.js';
 import type { FSProvider } from '../core/fs-provider.js';
 import { LocalFSProvider } from '../core/local-fs-provider.js';
 import { loadConfigIfPresent } from './load-if-present.js';
+import { recordLoadError } from '../core/config-loader.js';
+import { probeCoversFile } from '../core/probe-coverage.js';
 import { expandBunDotenvLayers, parseBunDotenvRaw } from './dotenv-bun.js';
 
 /**
@@ -111,6 +113,10 @@ export interface LyrieCheckout {
   version?: string;
   /** Referenced by an installed service unit. */
   service: boolean;
+  /** A snapshot scan: a service unit names this checkout, but the probe
+   *  doesn't collect it (only the standard checkout locations are in the
+   *  manifest), so it can't be confirmed or read. */
+  uncollected?: boolean;
 }
 
 /** Every Lyrie checkout on the host, service-referenced ones first. */
@@ -127,7 +133,13 @@ export async function findLyrieCheckouts(fs: FSProvider): Promise<LyrieCheckout[
   const out: LyrieCheckout[] = [];
   for (const dir of candidates) {
     const pkg = await readCheckoutPackage(dir, fs);
-    if (!pkg) continue;
+    if (!pkg) {
+      if (serviceDirs.includes(dir) && !seen.has(dir) && !probeCoversFile(fs, join(dir, 'package.json'))) {
+        seen.add(dir);
+        out.push({ dir, service: true, uncollected: true });
+      }
+      continue;
+    }
     let key = dir;
     try { key = await fs.realpath(dir); } catch {}
     if (seen.has(key)) continue;
@@ -209,13 +221,21 @@ export const lyrieAdapter: AgentAdapter = {
     // (a configured deployment), else the first found.
     const withEnv: LyrieCheckout[] = [];
     for (const c of checkouts) {
-      if (await fs.access(join(c.dir, '.env'))) withEnv.push(c);
+      if (!c.uncollected && (await fs.access(join(c.dir, '.env')))) withEnv.push(c);
     }
     const primary = checkouts.find(c => c.service) ?? withEnv[0] ?? checkouts[0];
 
     const configFiles: ParsedConfig[] = [];
     const ordered = primary ? [primary, ...checkouts.filter(c => c !== primary)] : [];
     for (const c of ordered) {
+      if (c.uncollected) {
+        recordLoadError({
+          filePath: join(c.dir, '.env'),
+          stage: 'read',
+          message: 'Lyrie checkout named by its service unit is not collected by the remote probe (it collects the standard checkout locations only) — scan the host locally to check it',
+        });
+        continue;
+      }
       const layers: ParsedConfig[] = [];
       for (const name of ['.env', ...lyrieEnvLayers(undefined)]) {
         const layer = await tryLoad(join(c.dir, name), fs);
