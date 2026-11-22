@@ -281,6 +281,23 @@ describe('ABA-005 provider API keys', () => {
   });
 });
 
+describe('ABA-005 dummy keys for local servers', () => {
+  it('ignores word-only dummy keys on loopback and placeholders, keeps them on remote hosts', async () => {
+    const r = await check('ABA-005').run(userCtx([cfg(USER_CFG, { providers: {
+      lms: { options: { baseURL: 'http://localhost:1234/v1', apiKey: 'lm-studio' } },
+      llama: { options: { baseURL: 'http://127.0.0.1:8080/v1', apiKey: 'sk-no-key-required' } },
+      vllm: { options: { baseURL: 'http://[::1]:8000/v1', api_key: 'not-needed' } },
+      doc: { options: { baseURL: 'https://api.example.com/v1', apiKey: 'your-api-key-here' } },
+      real: { options: { baseURL: 'http://localhost:1234/v1', apiKey: 'q8Zr2LmW7xVb4NcTk3Yd' } },
+      remote: { options: { baseURL: 'https://gw.example.com/v1', apiKey: 'not-needed-here' } },
+    } })]));
+    expect(r.evidence?.map(e => e.snippet?.split(':')[0])).toEqual([
+      'providers.real.options.apiKey',
+      'providers.remote.options.apiKey',
+    ]);
+  });
+});
+
 describe('ABA-005 provider request headers', () => {
   it('flags a literal Authorization header and ignores env references', async () => {
     const r = await check('ABA-005').run(userCtx([cfg(USER_CFG, { providers: {
