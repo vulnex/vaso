@@ -30,17 +30,23 @@ export const cc008 = defineCheck({
   async run(ctx, h) {
     const evidence: Evidence[] = [];
     const locks = await claudeManagedLocks(ctx);
+    // Deny rules merge across every settings scope (lists merge, deny wins),
+    // so a deny list in one file covers the allow list in another
+    const applies = (file: string) => !locks.permissionRulesOnly || locks.managedFiles.has(file);
+    const mergedDeny = ctx.configs.filter(c => applies(c.filePath)).flatMap(c => {
+      const d = getNestedValue(c.data, 'permissions.deny') as unknown;
+      return Array.isArray(d) ? d.filter((x): x is string => typeof x === 'string') : [];
+    });
 
     for (const config of ctx.configs) {
       // allowManagedPermissionRulesOnly: this file's allow list doesn't apply
       if (locks.permissionRulesOnly && !locks.managedFiles.has(config.filePath)) continue;
       const allow = getNestedValue(config.data, 'permissions.allow') as unknown;
-      const deny = getNestedValue(config.data, 'permissions.deny') as unknown;
 
       // Only flag when an allow list is configured (i.e. user is actively managing perms)
       if (!Array.isArray(allow) || allow.length === 0) continue;
 
-      const denyList = Array.isArray(deny) ? deny.filter((d): d is string => typeof d === 'string') : [];
+      const denyList = mergedDeny;
       const missing = RECOMMENDED_DENY_PATTERNS.filter(p => !denyList.some(rule => denies(rule, p)));
 
       if (missing.length === RECOMMENDED_DENY_PATTERNS.length) {
