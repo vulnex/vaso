@@ -271,6 +271,15 @@ describe('HM-006 plaintext http endpoint', () => {
     const result = await check.run(makeCtx([cfg]));
     expect(result.passed).toBe(true);
   });
+  it('judges loopback by the parsed hostname, not a prefix', async () => {
+    const run = async (url: string) => check.run(makeCtx([makeYaml('/h/.hermes/config.yaml', { mcp_servers: { s: { url } } })]));
+    for (const url of ['http://localhost.evil-example.net/v1', 'http://127.0.0.1.nip.io:8080', 'http://localhost@mcp.evil-example.net/mcp']) {
+      expect((await run(url)).passed, url).toBe(false);
+    }
+    for (const url of ['http://127.0.0.2:8080', 'http://[::1]:9000/sse', 'http://localhost/v1']) {
+      expect((await run(url)).passed, url).toBe(true);
+    }
+  });
   it('passes for https', async () => {
     const cfg = makeYaml('/h/.hermes/cli-config.yaml', {
       model: { base_url: 'https://api.openai.com/v1' },

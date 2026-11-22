@@ -1,8 +1,18 @@
 import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
 import { managedOverride, markManagedOverride } from '../../adapters/hermes-managed.js';
+import { isLoopbackAddress } from '../../core/listen-address.js';
 
-const LOOPBACK_HTTP = /^http:\/\/(localhost|127\.0\.0\.1|\[::1\])(?::\d+)?\b/i;
+/** An http:// URL whose host is loopback (127.0.0.0/8, ::1, localhost) — by
+ *  the parsed hostname, so `localhost.evil.example`, `127.0.0.1.nip.io` and
+ *  `localhost@evil.example` (userinfo) are not. */
+function loopbackHttp(url: string): boolean {
+  try {
+    return isLoopbackAddress(new URL(url).hostname);
+  } catch {
+    return false;
+  }
+}
 
 interface Found {
   path: string;
@@ -17,7 +27,7 @@ function walk(obj: unknown, path: string, found: Found[]): void {
       // Match base_url (any depth) and mcp_servers.<n>.url. URL schemes are
       // case-insensitive (HTTP:// is plaintext too).
       if ((key === 'base_url' || key === 'url' || key === 'http_url' || key === 'sse_url')
-          && /^http:\/\//i.test(value.trim()) && !LOOPBACK_HTTP.test(value.trim())) {
+          && /^http:\/\//i.test(value.trim()) && !loopbackHttp(value.trim())) {
         found.push({ path: here, url: value });
       }
     } else if (value && typeof value === 'object') {

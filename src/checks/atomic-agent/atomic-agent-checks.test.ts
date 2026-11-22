@@ -345,7 +345,8 @@ describe('AT-009 subscription CLI safety override', () => {
   });
 
   it('flags claude flags that re-arm tools', async () => {
-    for (const args of [['--tools', 'Bash'], ['--dangerously-skip-permissions'], ['--mcp-config=/x.json'], ['--permission-mode', 'bypassPermissions']]) {
+    for (const args of [['--tools', 'Bash'], ['--dangerously-skip-permissions'], ['--mcp-config=/x.json'], ['--permission-mode', 'bypassPermissions'],
+      ['--plugin-dir', '/opt/p'], ['--plugin-url=https://plugins.example.com/p.zip'], ['--allow-dangerously-skip-permissions']]) {
       const r = await check('AT-009').run(makeCtx([provider('claude', args)]));
       expect(r.passed, args.join(' ')).toBe(false);
     }
