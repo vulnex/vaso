@@ -9,7 +9,9 @@ export const pol001 = defineCheck({
   category: 'policy',
   severity: 'warning',
   description: 'Verify tool execution requires user approval and is not auto-approved',
-  excludedAgents: CODING_AGENTS,
+  // OpenClaw's exec policy is tools.exec.mode (CFG-005); none of these keys
+  // exist in its schema, which rejects unknown keys
+  excludedAgents: [...CODING_AGENTS, 'openclaw'],
 
   async run(ctx, h) {
     const evidence: Evidence[] = [];
@@ -40,13 +42,8 @@ export const pol001 = defineCheck({
       }
     }
 
-    const envAutoApprove = ctx.fs.getEnv('AGENT_AUTO_APPROVE_TOOLS');
-    if (envAutoApprove === 'true' || envAutoApprove === '1' || envAutoApprove === 'all') {
-      evidence.push({
-        file: 'environment',
-        detail: `AGENT_AUTO_APPROVE_TOOLS=${envAutoApprove}`,
-      });
-    }
+    // AGENT_AUTO_APPROVE_TOOLS is IronClaw 0.x's own variable (IC-007 reads it
+    // from the agent's .env); VASO's environment says nothing about another agent
 
     return h.fromEvidence(evidence, {
       passed: 'Tool execution approval is properly configured',

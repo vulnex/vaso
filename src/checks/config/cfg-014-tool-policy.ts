@@ -8,7 +8,9 @@ export const cfg014 = defineCheck({
   category: 'config',
   severity: 'warning',
   description: 'Check if the tool execution policy is too permissive',
-  excludedAgents: CODING_AGENTS,
+  // OpenClaw has no tools.policy: its tool policy is tools.profile/allow/deny
+  // and tools.exec.mode (CFG-005)
+  excludedAgents: [...CODING_AGENTS, 'openclaw'],
 
   async run(ctx, h) {
     for (const config of ctx.configs) {
