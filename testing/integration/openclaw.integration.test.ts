@@ -39,9 +39,8 @@ describe('OpenClaw Insecure', () => {
     expect(check.severity).toBe('warning');
   });
 
-  it('should detect webhook without auth (CFG-007)', () => {
-    const check = expectCheckFailed(result, 'CFG-007');
-    expect(check.severity).toBe('warning');
+  it('does not run CFG-007 on OpenClaw (its webhooks are hooks.*, not webhooks[])', () => {
+    expect(getAgentResult(result, 'openclaw')?.results.find(r => r.id === 'CFG-007')).toBeUndefined();
   });
 
   it('should detect sandbox disabled (CFG-008)', () => {
@@ -69,9 +68,8 @@ describe('OpenClaw Insecure', () => {
     expect(check.severity).toBe('warning');
   });
 
-  it('should detect permissive tool policy (CFG-014)', () => {
-    const check = expectCheckFailed(result, 'CFG-014');
-    expect(check.severity).toBe('warning');
+  it('does not run CFG-014 on OpenClaw (its tool policy is tools.profile/allow/deny)', () => {
+    expect(getAgentResult(result, 'openclaw')?.results.find(r => r.id === 'CFG-014')).toBeUndefined();
   });
 
   it('should detect mDNS broadcast (CFG-015)', () => {
@@ -171,8 +169,8 @@ describe('OpenClaw Secure', () => {
     expectCheckPassed(result, 'CFG-013');
   });
 
-  it('should pass tool policy check (CFG-014)', () => {
-    expectCheckPassed(result, 'CFG-014');
+  it('does not run CFG-014 on OpenClaw', () => {
+    expect(getAgentResult(result, 'openclaw')?.results.find(r => r.id === 'CFG-014')).toBeUndefined();
   });
 
   it('should produce a high security score', () => {
