@@ -197,6 +197,14 @@ const GLOBAL_REDIRECT = new RegExp([
   String.raw`\bObject\s*\.\s*assign\s*\(\s*process\s*\.\s*env\b[^;]{0,200}?(?:PROXY|NODE_TLS_REJECT_UNAUTHORIZED|NODE_EXTRA_CA_CERTS)`,
 ].join('|'), 'i');
 
+/** `process.stdout` / `process.stderr` (also `process['stdout']`): the process's own output. */
+function isStdStream(object: Node): boolean {
+  if (object.type !== 'MemberExpression' || object.object.type !== 'Identifier' || object.object.name !== 'process') return false;
+  const p = object.property;
+  const name = !object.computed && p.type === 'Identifier' ? p.name : p.type === 'StringLiteral' ? p.value : undefined;
+  return name === 'stdout' || name === 'stderr';
+}
+
 function isFetchCallee(callee: Node): boolean {
   if (callee.type === 'Identifier') return callee.name === 'fetch';
   return callee.type === 'MemberExpression' && !callee.computed && callee.property.type === 'Identifier' && callee.property.name === 'fetch';
@@ -868,8 +876,10 @@ function analyzeUncached(code: string): DataFlowResult[] {
             }
           }
 
-          // Sink detection: fetch(), http.request(), ws.send()
-          if (SINKS.has(propName) || networkImports.has(propName)) {
+          // Sink detection: fetch(), http.request(), ws.send() — not the
+          // process's own output (`process.stdout.write(readFileSync(p))`
+          // prints a file; it sends nothing anywhere)
+          if ((SINKS.has(propName) || networkImports.has(propName)) && !isStdStream(node.callee.object)) {
             // Check if any source variables flow into this call
             const argStr = code.slice(node.arguments[0]?.start ?? 0, node.arguments[node.arguments.length - 1]?.end ?? 0);
             const receiver = node.callee.object;
@@ -1066,7 +1076,10 @@ function analyzeUncached(code: string): DataFlowResult[] {
 
         const initText = code.slice(init.start ?? 0, init.end ?? 0);
         // Assigned, spread, or copied/serialized whole (not passed to some other call)
-        const copies = init.type !== 'CallExpression'
+        // (a function that uses the environment is no copy of it:
+        // `const git = (args, env = process.env) => spawnSync('git', args, { env })`)
+        const copies = (init.type !== 'CallExpression' && init.type !== 'ArrowFunctionExpression'
+          && init.type !== 'FunctionExpression' && init.type !== 'ClassExpression')
           || /^(?:JSON\.stringify|Object\.assign|Object\.entries|structuredClone)\s*\(/.test(initText);
         if (copies && /(?<![\w$])(?<!(?:^|[^.])\.)process\.env(?![\w$]|\s*(?:\.|\[|\?\.))/.test(initText)) {
           sourceVars.set(id.name, 'env');
@@ -1482,6 +1495,15 @@ function isNothing(path: NodePath): boolean {
     || (path.isUnaryExpression() && path.node.operator === 'void');
 }
 
+/** A value that is always a number: a numeric literal, `+x`, `Number(x)`, `parseInt(x)`, `Math.floor(x)`… */
+function numericValue(n: Node): boolean {
+  if (n.type === 'NumericLiteral') return true;
+  if (n.type === 'UnaryExpression') return n.operator === '+' || n.operator === '-';
+  if (n.type !== 'CallExpression') return false;
+  const callee = calleeText(n.callee);
+  return /^(?:Number|parseInt|parseFloat|Number\.parseInt|Number\.parseFloat|Math\.(?:floor|ceil|round|trunc|abs|max|min))$/.test(callee);
+}
+
 function commandText(args: ArgNode[]): Pick<DataFlowResult, 'command' | 'dynamic' | 'decoded'> {
   let dynamic = false;
   let decoded = false;
@@ -1492,7 +1514,9 @@ function commandText(args: ArgNode[]): Pick<DataFlowResult, 'command' | 'dynamic
       case 'StringLiteral':
         return n.value;
       case 'TemplateLiteral':
-        return n.quasis.map((q, i) => (q.value.cooked ?? '') + (i < n.expressions.length ? (dynamic = true, '${…}') : '')).join('');
+        // (a number — `${Number(pid)}` — can't change what runs)
+        return n.quasis.map((q, i) => (q.value.cooked ?? '') + (i < n.expressions.length
+          ? (numericValue(n.expressions[i] as Node) ? '${…}' : (dynamic = true, '${…}')) : '')).join('');
       case 'ArrayExpression':
         return n.elements.map((e) => text(e as ArgNode, depth + 1)).join(' ');
       case 'BinaryExpression':

