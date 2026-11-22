@@ -836,15 +836,25 @@ interface PyFunction {
   tool: boolean;
   /** Every parameter by position (`self`/`cls` dropped), for matching call arguments. */
   positional: string[];
+  /** The class a method is defined directly in. */
+  className?: string;
 }
 
 const TOOL_DECORATOR = /^\s*@\s*[\w.]*\b(?:tool|call_tool)\b/;
 
 function functionsOf(stmts: Array<CodeLine & { last: number }>): PyFunction[] {
   const fns: PyFunction[] = [];
+  // the enclosing `class`/`def` blocks, innermost last: a def directly in a class is its method
+  const blocks: Array<{ indent: number; className?: string }> = [];
   for (let i = 0; i < stmts.length; i++) {
+    const at = stmts[i].text.search(/\S/);
+    if (at >= 0) while (blocks.length > 0 && blocks[blocks.length - 1].indent >= at) blocks.pop();
+    const cls = /^\s*class\s+([A-Za-z_]\w*)/.exec(stmts[i].text);
+    if (cls) { blocks.push({ indent: at, className: cls[1] }); continue; }
     const def = /^(\s*)(?:async\s+)?def\s+(\w+)\s*\(/.exec(stmts[i].text);
     if (!def) continue;
+    const className = blocks[blocks.length - 1]?.className;
+    blocks.push({ indent: def[1].length });
     const paramText = callArgs(stmts[i].text, def[0].length - 1);
     const indent = def[1].length;
     let end = i + 1;
@@ -858,7 +868,7 @@ function functionsOf(stmts: Array<CodeLine & { last: number }>): PyFunction[] {
       .map((p) => /^\s*\**([A-Za-z_]\w*)/.exec(p)?.[1])
       .filter((p): p is string => !!p && p !== 'self' && p !== 'cls' && p !== 'ctx');
     const positional = parts.map((p) => /^\s*([A-Za-z_]\w*)/.exec(p)?.[1] ?? '').filter((p) => p !== 'self' && p !== 'cls');
-    fns.push({ name: def[2], params, start: i, end, tool, positional });
+    fns.push({ name: def[2], params, start: i, end, tool, positional, ...(className ? { className } : {}) });
   }
   // Registered without a decorator: `mcp.add_tool(read)`, `mcp.tool()(read)`, `Tool.from_function(read)`
   const registered = new Set<string>();
@@ -1035,7 +1045,7 @@ function returnerCarrying(expr: string, name: string, returners: ReadonlyMap<str
   return undefined;
 }
 
-const mentions = (text: string, name: string): boolean => new RegExp(String.raw`(?<![\w.])${name}\b`).test(text);
+const mentions = (text: string, name: string): boolean => new RegExp(String.raw`(?<![\w.])${name.replace(/\./g, '\\.')}\b`).test(text);
 
 /**
  * A tools/call dispatcher a low-level server writes itself
@@ -1076,11 +1086,17 @@ function otherBindings(text: string): Array<[string[], string]> {
   return out;
 }
 
+/** `obj.attr = …` / `self.attr: T = …`: an attribute assignment (group 1: `obj.attr`, group 2: the value). */
+const ATTRIBUTE_ASSIGN = /^\s*([A-Za-z_]\w*\.[A-Za-z_]\w*)\s*(?::[^=]+)?=(?!=)\s*([\s\S]+)$/;
+
 /**
  * Names in each function that carry tool input: a tool function's (or a
  * tools/call dispatcher's) parameters, helper parameters passed tainted
- * values at a call site, and variables assigned from them (also tuple
- * unpacking, `for` targets, `with … as`, walrus). Iterated to a fixpoint, so
+ * values at a call site (a class's `__init__` through `Cls(…)`), and
+ * variables assigned from them (also tuple unpacking, `for` targets,
+ * `with … as`, walrus, attributes: `holder.path = query`). An instance
+ * attribute (`self.path = path`) carries the input into every method of its
+ * class. Iterated to a fixpoint, so
  * tool → helper → helper chains of any length taint, in any order of
  * declaration. `blank` hides the arguments a confining helper takes
  * (`open_repo(repo_path)` validates and returns): its result is not the
@@ -1101,8 +1117,28 @@ function taintedNames(stmts: Array<CodeLine & { last: number }>, fns: PyFunction
     argvNames.set(fn, new Set());
   }
   const byName = new Map(fns.map((f) => [f.name, f]));
+  // `Cls(…)` calls the class's `__init__`
+  for (const f of fns) if (f.name === '__init__' && f.className && !byName.has(f.className)) byName.set(f.className, f);
+  const methodsOf = new Map<string, PyFunction[]>();
+  for (const f of fns) if (f.className) methodsOf.set(f.className, [...(methodsOf.get(f.className) ?? []), f]);
   const texts: Array<string | undefined> = new Array(stmts.length);
   const textAt = (i: number): string => (texts[i] ??= rewrite(stmts[i].text, stmts[i].line));
+  // instances of this file's classes bound by name (`tools = Tools()`): their method calls reach the class's methods
+  const instances = new Map<string, string>();
+  for (const st of stmts) {
+    const m = /^\s*([A-Za-z_]\w*)\s*(?::[^=\n]+)?=\s*([A-Za-z_]\w*)\s*\(/.exec(st.text);
+    if (!m || !methodsOf.has(m[2])) continue;
+    // one class per name, or which class a call reaches is unknown
+    instances.set(m[1], instances.has(m[1]) && instances.get(m[1]) !== m[2] ? '' : m[2]);
+  }
+  /** `self.attr` tainted in one method is tainted in all of its class's methods */
+  const spread = (fn: PyFunction, target: string, chain: string): void => {
+    if (!fn.className || !target.startsWith('self.')) return;
+    for (const m of methodsOf.get(fn.className) ?? []) {
+      const theirs = tainted.get(m)!;
+      if (!theirs.has(target)) theirs.set(target, chain);
+    }
+  };
   let changed = true;
   for (let round = 0; changed && round < MAX_TAINT_ROUNDS; round++) {
     changed = false;
@@ -1127,6 +1163,17 @@ function taintedNames(stmts: Array<CodeLine & { last: number }>, fns: PyFunction
             }
           }
         }
+        const attr = assign ? undefined : ATTRIBUTE_ASSIGN.exec(data);
+        if (attr && !names.has(attr[1])) {
+          const rhs = dataPart(attr[2], returners);
+          const from = [...names.keys()].find((n) => mentions(rhs, n));
+          if (from) {
+            const chain = label(attr[1], attr[2], from, names.get(from)!);
+            names.set(attr[1], chain);
+            spread(fn, attr[1], chain);
+            changed = true;
+          }
+        }
         for (const [targets, expr] of otherBindings(data)) {
           if (targets.every((t) => names.has(t))) continue;
           const rhs = dataPart(expr, returners);
@@ -1138,15 +1185,22 @@ function taintedNames(stmts: Array<CodeLine & { last: number }>, fns: PyFunction
             changed = true;
           }
         }
-        for (const call of text.matchAll(/(?<![\w.])(?:self\.)?(\w+)\s*\(/g)) {
-          const callee = byName.get(call[1]);
+        for (const call of text.matchAll(/(?<![\w.])(?:(self|[A-Za-z_]\w*)\.)?(\w+)\s*\(/g)) {
+          // a bare or `self.` call by name; `obj.method(…)` on an instance of a class of this file
+          const receiver = call[1];
+          const cls = receiver && receiver !== 'self' ? instances.get(receiver) : undefined;
+          const callee = cls ? (methodsOf.get(cls) ?? []).find((m) => m.name === call[2])
+            : receiver && receiver !== 'self' ? undefined : byName.get(call[2]);
           if (!callee || callee === fn) continue;
           const args = callArgs(text, call.index + call[0].length - 1).split(',');
           const calleeNames = tainted.get(callee)!;
           args.forEach((arg, idx) => {
-            const param = callee.params[idx];
-            if (!param || calleeNames.has(param)) return;
-            const plain = blank(arg);
+            // a keyword argument by its name; a positional one by position (a
+            // bool/int parameter before it, not in `params`, still takes a slot)
+            const keyword = /^\s*([A-Za-z_]\w*)\s*=(?!=)([\s\S]*)$/.exec(arg);
+            const param = keyword ? keyword[1] : callee.positional[idx];
+            if (!param || !callee.params.includes(param) || calleeNames.has(param)) return;
+            const plain = blank(keyword ? keyword[2] : arg);
             const from = [...names.keys()].find((n) => mentions(plain, n));
             if (!from) return;
             calleeNames.set(param, `${param} ← ${names.get(from)}`);
@@ -1453,6 +1507,9 @@ const AMBIGUOUS_METHODS = new Set(['open', 'glob', 'stat', 'lstat', 'rename', 'm
 const PATH_METHOD = /\.(read_text|read_bytes|open|write_text|write_bytes|unlink|rmdir|mkdir|touch|rename|symlink_to|iterdir|glob|rglob|stat|lstat)\s*\(/g;
 const PATH_CALL_RECEIVER = /^\(|^(?:pathlib\.)?(?:Pure|Posix|Windows)?Path\s*\(/;
 
+/** A function whose job is checking its input (`validate_file_path`, `_check_path`, `ensure_safe`). */
+const VALIDATOR_NAME = /^_*(?:validate|check|verify|ensure|sanitize|is_safe|is_allowed)/i;
+
 /** File calls that delete their path (reported as writes, described as deletes). */
 const DELETE_CALL = /(?:^|\.)(?:unlink|remove|removedirs|rmdir|rmtree)$/;
 
@@ -1737,6 +1794,8 @@ export function analyzePythonSinks(code: string): PythonSinkFinding[] {
       for (let l = stmt.line; l <= stmt.last; l++) if (joinLines.has(l)) return;
       const text = rewrite(stmt.text, stmt.line);
       for (const call of pythonFileCalls(text, pathBound)) {
+        // A validator stat-ing the path it is checking (`validate_file_path`: exists, size, then containment)
+        if (call.op === 'meta' && /(?:^|\.)l?stat$/.test(call.sink) && VALIDATOR_NAME.test(fn.name)) continue;
         const confinedHere = confinedIn.get(fn);
         const from = call.paths.map((p) => dataPart(p, unjoined)).flatMap((p) => [...names.keys()].filter((n) => mentions(p, n)))
           .find((n) => !confinedBefore(confinedHere, n, names.get(n), i));

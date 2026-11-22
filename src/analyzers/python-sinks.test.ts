@@ -645,4 +645,36 @@ describe('analyzePythonSinks — tool input through comprehensions, helper retur
     expect(read('ok = full.startswith(BASE)', 'if ok:', `    ${opened.trim()}`, 'return ""')).toHaveLength(0);
     expect(read('rel = full.relative_to(BASE)', opened.trim())).toHaveLength(0);
   });
+
+  it('follows tool input through attributes, instances and keyword arguments', () => {
+    const run = (...body: string[]) => sinks([...head, ...body]).map((f) => f.line);
+    // stored on an object, then opened
+    expect(run('@mcp.tool()', 'def read(query: str) -> str:', '    h = Holder()', '    h.path = query', '    return open(h.path).read()')).toEqual([9]);
+    // another attribute of the same object holds the input: the opened path is fixed
+    expect(run('@mcp.tool()', 'def read(query: str) -> str:', '    h = Holder()', '    h.path = "/etc/hostname"', '    h.name = query', '    return open(h.path).read()')).toEqual([]);
+    // the constructor stores it, another method opens it
+    expect(run('class Reader:', '    def __init__(self, path):', '        self.path = path', '    def read(self):', '        return open(self.path).read()',
+      '@mcp.tool()', 'def read_file(path: str) -> str:', '    return Reader(path).read()')).toEqual([9]);
+    // built with a constant: nothing the caller chose
+    expect(run('class Reader:', '    def __init__(self, path):', '        self.path = path', '    def read(self):', '        return open(self.path).read()',
+      '@mcp.tool()', 'def read_file(path: str) -> str:', '    return Reader("/etc/hostname").read()')).toEqual([]);
+    // a method called on an instance bound by name
+    expect(run('class Tools:', '    def load(self, path):', '        return open(path).read()', 'tools = Tools()',
+      '@mcp.tool()', 'def read_file(path: str) -> str:', '    return tools.load(path)')).toEqual([7]);
+    // keyword arguments reach the parameter they name, positions count bool/int parameters
+    expect(run('def helper(flag: bool, name: str, target: str):', '    return open(target).read()',
+      '@mcp.tool()', 'def read_file(path: str) -> str:', '    return helper(True, name="x", target=path)')).toEqual([6]);
+    expect(run('def helper(flag: bool, name: str, target: str):', '    return open(target).read()',
+      '@mcp.tool()', 'def read_file(path: str) -> str:', '    return helper(True, path, target="/etc/hostname")')).toEqual([]);
+    expect(run('def helper(flag: bool, target: str):', '    return open(target).read()',
+      '@mcp.tool()', 'def read_file(path: str) -> str:', '    return helper(True, path)')).toEqual([6]);
+  });
+
+  it('leaves a validator stat-ing the path it checks alone', () => {
+    const run = (name: string) => sinks([...head, 'from pathlib import Path', `def ${name}(file_path):`, '    p = Path(file_path)', '    size = p.stat().st_size',
+      '    if not p.resolve().is_relative_to(BASE):', '        raise ValueError("outside")', '    return size',
+      '@mcp.tool()', 'def size(file_path: str) -> int:', `    return ${name}(file_path)`]).map((f) => f.line);
+    expect(run('validate_file_path')).toEqual([]);
+    expect(run('file_size')).toEqual([8]);
+  });
 });
