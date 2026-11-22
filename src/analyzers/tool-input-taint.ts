@@ -669,6 +669,7 @@ export function memberName(m: Node): string | undefined {
 /** Module specifier a binding was imported/required from, if any. */
 export function bindingModule(binding: Binding | undefined, depth = 0): string | undefined {
   if (!binding) return undefined;
+  if (binding.kind === 'param') return thenModule(binding);
   const parent = binding.path.parentPath?.node;
   if (parent?.type === 'ImportDeclaration') return parent.source.value;
   const node = binding.path.node;
@@ -680,6 +681,23 @@ export function bindingModule(binding: Binding | undefined, depth = 0): string |
     return bindingModule(binding.scope.getBinding(node.init.name), depth + 1);
   }
   return undefined;
+}
+
+/**
+ * The module a callback's first parameter receives from a dynamic import:
+ * `m` in `import('child_process').then(m => m.execSync(x))`.
+ */
+function thenModule(binding: Binding): string | undefined {
+  const fn = binding.scope.path;
+  const call = fn.parentPath;
+  if (!fn.isFunction() || !call?.isCallExpression() || call.node.arguments[0] !== fn.node) return undefined;
+  const first = fn.node.params[0];
+  if (first?.type !== 'Identifier' || first.name !== binding.identifier.name) return undefined;
+  const callee = call.node.callee;
+  if (callee.type !== 'MemberExpression' || memberName(callee) !== 'then') return undefined;
+  const object = callee.object;
+  return object.type === 'ImportExpression' || (object.type === 'CallExpression' && object.callee.type === 'Import')
+    ? moduleOfInit(object, call.scope) : undefined;
 }
 
 /**
@@ -752,6 +770,11 @@ export function sinkCallee(path: NodePath): SinkCallee | undefined {
       const target = memberSink(binding.path as NodePath, decl.init);
       return target ? { ...target, display: `${name} (${target.display})` } : undefined;
     }
+    // `const e = eval; e(code)`: the global eval or Function under another name
+    if (binding?.constant && decl?.type === 'VariableDeclarator' && decl.init?.type === 'Identifier'
+      && CODE_SINKS.has(decl.init.name) && !binding.path.scope.getBinding(decl.init.name)) {
+      return { display: `${name} (${decl.init.name})`, kind: 'code', fn: decl.init.name };
+    }
     if (CODE_SINKS.has(name) && !binding) return { display: name, kind: 'code', fn: name };
     if (PROCESS_SINKS.has(name) && path.isCallExpression()) return { display: name, kind: 'process', fn: name };
     return undefined;
@@ -768,9 +791,22 @@ export function sinkCallee(path: NodePath): SinkCallee | undefined {
  * any function's `constructor` (`[].constructor.constructor`).
  */
 function memberSink(path: NodePath, callee: Node & { type: 'MemberExpression' }): SinkCallee | undefined {
-  const prop = memberName(callee);
+  // (a computed name may be assembled from constants: `globalThis['ev' + 'al']`)
+  const prop = memberName(callee) ?? (callee.computed ? staticString(callee.property as Node, path.scope) : undefined);
   if (prop === undefined) return undefined;
   const object = callee.object;
+  // `Reflect.apply(eval, null, [code])`, `eval.call(null, code)`: eval or
+  // Function invoked through the function-call helpers
+  const args = (path.node as { arguments?: Node[] }).arguments ?? [];
+  const unboundCodeSink = (n: Node | undefined): n is Node & { type: 'Identifier'; name: string } =>
+    n?.type === 'Identifier' && CODE_SINKS.has(n.name) && !path.scope.getBinding(n.name);
+  if ((prop === 'apply' || prop === 'construct') && object.type === 'Identifier' && object.name === 'Reflect'
+    && !path.scope.getBinding('Reflect') && unboundCodeSink(args[0])) {
+    return { display: `Reflect.${prop}(${args[0].name})`, kind: 'code', fn: args[0].name };
+  }
+  if ((prop === 'call' || prop === 'apply' || prop === 'bind') && unboundCodeSink(object)) {
+    return { display: `${object.name}.${prop}`, kind: 'code', fn: object.name };
+  }
   if (prop === 'eval' && object.type === 'Identifier' && GLOBAL_OBJECTS.has(object.name)) {
     return { display: `${object.name}.eval`, kind: 'code', fn: 'eval' };
   }

@@ -590,7 +590,9 @@ function aliasRewriter(code: string): (text: string, line?: number) => string {
     for (const n of names) assigned.push([n, expr]);
   }
   for (const [name, expr] of assigned) {
-    const mod = /^(?:importlib\.import_module|__import__)\(\s*["'](\w+)["']\s*\)$/.exec(expr)?.[1];
+    // (the name may be split into literals: `import_module("subpro" + "cess")`)
+    const spelled = /^(?:importlib\.import_module|__import__)\(\s*((?:["']\w*["']\s*\+\s*){0,8}["']\w+["'])\s*\)$/.exec(expr)?.[1];
+    const mod = spelled?.replace(/["'\s+]/g, '');
     if (mod && (SINK_MODULES.has(mod) || mod === 'builtins') && name !== mod) {
       modules.set(name, mod);
       addModule(name, mod === 'builtins' ? '' : `${mod}.`);

@@ -253,6 +253,20 @@ export function analyzeFlows(ast: JsAst): FlowAnalysis {
     if (n.type === 'CallExpression') {
       if (n.callee.type === 'MemberExpression' && memberName(n.callee) === 'cwd'
         && n.callee.object.type === 'Identifier' && n.callee.object.name === 'process') return ['<cwd>'];
+      // `[HOME, '.ssh', 'id_rsa'].join('/')`: the parts joined with a known separator
+      if (n.callee.type === 'MemberExpression' && memberName(n.callee) === 'join' && n.callee.object.type === 'ArrayExpression'
+        && n.arguments.length <= 1) {
+        const sep = n.arguments.length === 0 ? ',' : staticString(n.arguments[0] as Node, scope);
+        const parts = n.callee.object.elements;
+        if (sep !== undefined && parts.length <= 16 && parts.every(e => e && e.type !== 'SpreadElement')) {
+          let acc = [''];
+          parts.forEach((e, i) => {
+            const vals = pathValues(e as Node, scope, depth + 1);
+            acc = acc.flatMap(prev => vals.map(v => (i === 0 ? v : `${prev}${sep}${v}`))).slice(0, 8);
+          });
+          return acc;
+        }
+      }
       const fn = isPathCall(n, scope, /^(?:join|resolve|normalize|dirname|fileURLToPath)$/);
       if (fn === 'fileURLToPath') return pathValues(n.arguments[0] as Node, scope, depth + 1);
       if (fn === 'dirname') {
