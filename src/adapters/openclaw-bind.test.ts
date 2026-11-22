@@ -264,3 +264,23 @@ describe('dt20 g4-F4: an unset gateway.bind is "auto" inside a container', () =>
     expect(openclawGatewayExposed(unset, undefined)).toBe(false);
   });
 });
+
+describe('OpenClaw gateway port (resolveGatewayPort, 2026.11.2)', () => {
+  it('takes OPENCLAW_GATEWAY_PORT, then gateway.port, then 18789', async () => {
+    const { openclawGatewayPort } = await import('./openclaw.js');
+    expect(openclawGatewayPort(undefined, undefined, undefined)).toBe(18789);
+    expect(openclawGatewayPort(19000, undefined, undefined)).toBe(19000);
+    expect(openclawGatewayPort(19000, '20001', undefined)).toBe(20001);
+    expect(openclawGatewayPort(19000, '127.0.0.1:20002', undefined)).toBe(20002);
+    expect(openclawGatewayPort(19000, '[::1]:20003', undefined)).toBe(20003);
+    expect(openclawGatewayPort(19000, 'nope', undefined)).toBe(19000);
+  });
+
+  it('derives a --profile gateway\'s default port from the profile name', async () => {
+    const { openclawGatewayPort } = await import('./openclaw.js');
+    const port = openclawGatewayPort(undefined, undefined, 'work');
+    expect(port).toBeGreaterThanOrEqual(20000);
+    expect(port).toBeLessThan(60000);
+    expect(openclawGatewayPort(undefined, undefined, 'default')).toBe(18789);
+  });
+});

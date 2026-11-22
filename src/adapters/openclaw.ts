@@ -263,8 +263,40 @@ export async function openclawMcpServerMaps(home: string, fs: FSProvider): Promi
   return out;
 }
 
+/** OpenClaw's DEFAULT_GATEWAY_PORT (2026.11.2). */
+export const OPENCLAW_DEFAULT_GATEWAY_PORT = 18789;
+
+/** OpenClaw's parseGatewayPortEnvValue: `<port>`, `<host>:<port>` or `[v6]:<port>`. */
+function envGatewayPort(raw: string | undefined): number | undefined {
+  const v = raw?.trim();
+  if (!v) return undefined;
+  const m = /^(?:\d+|\[[^\]]+\]:(\d+)|[^:]+:(\d+))$/.exec(v);
+  if (!m) return undefined;
+  const port = Number(m[1] ?? m[2] ?? v);
+  return Number.isInteger(port) && port > 0 && port <= 65535 ? port : undefined;
+}
+
+/**
+ * The port OpenClaw's resolveGatewayPort picks: OPENCLAW_GATEWAY_PORT, then
+ * gateway.port, then 18789 — or, for a `--profile <name>` gateway, a port
+ * derived from the name (FNV-1a, 20000–59999).
+ */
+export function openclawGatewayPort(configPort: unknown, envPort: string | undefined, profile: string | undefined): number {
+  const fromEnv = envGatewayPort(envPort);
+  if (fromEnv !== undefined) return fromEnv;
+  if (typeof configPort === 'number' && Number.isFinite(configPort) && configPort > 0) return configPort;
+  if (!profile || profile.toLowerCase() === 'default') return OPENCLAW_DEFAULT_GATEWAY_PORT;
+  let hash = 2166136261;
+  for (const byte of Buffer.from(profile, 'utf8')) hash = Math.imul(hash ^ byte, 16777619) >>> 0;
+  return 20000 + (hash % 40000);
+}
+
 /** The gateway listener a merged OpenClaw config describes on this host. */
-function openclawGatewayInfo(config: Record<string, unknown>, inContainer: boolean | undefined): GatewayInfo | undefined {
+function openclawGatewayInfo(
+  config: Record<string, unknown>,
+  inContainer: boolean | undefined,
+  where: { envPort?: string; profile?: string } = {},
+): GatewayInfo | undefined {
   const gw = config.gateway;
   if (!gw || typeof gw !== 'object' || Array.isArray(gw)) return undefined;
   const g = gw as Record<string, unknown>;
@@ -284,7 +316,7 @@ function openclawGatewayInfo(config: Record<string, unknown>, inContainer: boole
 
   return {
     host,
-    port: typeof g.port === 'number' ? g.port : undefined,
+    port: openclawGatewayPort(g.port, where.envPort, where.profile),
     authMode: typeof auth?.mode === 'string' ? auth.mode : undefined,
     tls,
   };
@@ -384,7 +416,12 @@ export const openclawAdapter: AgentAdapter = {
           skillsDir,
           skillsDirs: skillsDirs.length > 1 ? skillsDirs : undefined,
           ...(unscanned.length > 0 ? { unscannedSkillsDirs: unscanned } : {}),
-          gateway: openclawGatewayInfo(merged, inContainer),
+          // The scan's OPENCLAW_GATEWAY_PORT is the default gateway's (a
+          // --profile gateway's service sets its own environment)
+          gateway: openclawGatewayInfo(merged, inContainer, {
+            envPort: home === fs.homedir() && !profile ? fs.getEnv('OPENCLAW_GATEWAY_PORT') : undefined,
+            profile,
+          }),
           models: await this.getModels?.(configFiles),
           profile,
           user: options?.allUsers ? user : undefined,
