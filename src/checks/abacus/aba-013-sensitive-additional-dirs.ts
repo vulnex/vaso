@@ -30,7 +30,7 @@ export const aba013 = defineCheck({
         if (broad && broad.path.endsWith('tmp')) {
           warning.push({ file: config.filePath, snippet, detail: `Agent may read and edit a directory ${broad.reason}` });
         } else if (broad) {
-          critical.push({ file: config.filePath, snippet, detail: `Agent may read and edit everything that ${broad.reason.replace(/^covers /, 'is in ')}` });
+          critical.push({ file: config.filePath, snippet, detail: `Agent may read and edit everything in "${dir.trim()}", which ${broad.reason}` });
         } else if (sinks.length > 0) {
           critical.push({ file: config.filePath, snippet, detail: `Agent may read and edit ${sinks.join(', ')}` });
         }
