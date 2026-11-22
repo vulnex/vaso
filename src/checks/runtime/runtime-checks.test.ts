@@ -250,14 +250,26 @@ describe('RUN-005: Process Ancestry Analysis', () => {
 describe('RUN-003: VS Code Extension Trojans', () => {
   it('flags a known malicious VS Code extension directory', async () => {
     const fs = makeMockedFs({
-      '/home/test/.vscode/extensions': ['clawhavoc.malicious-skill-loader-1.0.0'],
+      '/home/test/.vscode/extensions': ['clawdbot.clawdbot-agent-0.0.1'],
       '/home/test/.vscode-insiders/extensions': [],
-      '/home/test/.cursor/extensions': [],
+      '/home/test/.cursor/extensions': ['anthropic.claude-code-2.1.313-darwin-arm64', 'anthropic.claude-code-2.1.314-darwin-arm64'],
     });
     const result = await run003.run(makeRunCtx(fs));
     expect(result.passed).toBe(false);
     expect(result.severity).toBe('critical');
-    expect(result.evidence![0].detail).toContain('clawhavoc');
+    expect(result.evidence!.map(e => e.file)).toEqual([
+      '/home/test/.vscode/extensions/clawdbot.clawdbot-agent-0.0.1',
+      '/home/test/.cursor/extensions/anthropic.claude-code-2.1.313-darwin-arm64',
+    ]);
+  });
+
+  it('matches the whole extension id, not a prefix and a substring', async () => {
+    const fs = makeMockedFs({
+      '/home/test/.vscode/extensions': ['clawdbot.clawdbot-agent-helper-1.0.0', 'clawdbotx.clawdbot-agent-1.0.0'],
+      '/home/test/.vscode-insiders/extensions': [],
+      '/home/test/.cursor/extensions': [],
+    });
+    expect((await run003.run(makeRunCtx(fs))).passed).toBe(true);
   });
 
   it('passes when no extension directory contains a known malicious ID', async () => {
