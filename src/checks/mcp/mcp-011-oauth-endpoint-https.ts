@@ -15,6 +15,28 @@ const OAUTH_URL_ENV_PATTERNS = /(?:oauth|auth|token|authorize)[_-]?(?:url|endpoi
 const REMOTE_HTTP = String.raw`[hH][tT][tT][pP]:\/\/(?!(?:localhost|127(?:\.\d{1,3}){3}|\[::1\])(?:[:/'"\x60\s]|$))`;
 
 const REMOTE_HTTP_URL = new RegExp('^' + REMOTE_HTTP);
+/** A bare plaintext scheme constant (`const SCHEME = "http"`), folded into `${SCHEME}://host/…`. */
+const PLAINTEXT_SCHEME = /^http(?::\/\/)?$/i;
+
+/**
+ * Whether the URL `pattern` finds in the folded line is only an operand of a
+ * comparison or prefix test (`url.startsWith(HTTP_BASE + "/authorize")`,
+ * `u === HTTP_BASE + "/authorize"`) — a URL the code checks for, typically to
+ * reject it, not an endpoint it uses.
+ */
+function comparedOnly(folded: string, pattern: RegExp): boolean {
+  const m = pattern.exec(folded);
+  if (!m) return false;
+  // the string literal holding the match
+  const open = Math.max(folded.lastIndexOf('"', m.index), folded.lastIndexOf("'", m.index), folded.lastIndexOf('`', m.index));
+  if (open === -1) return false;
+  const close = folded.slice(open + 1).search(/["'`]/);
+  const before = folded.slice(0, open);
+  const after = close === -1 ? '' : folded.slice(open + 2 + close);
+  return /(?:[!=]==?|\.(?:startsWith|endsWith|includes|indexOf|match|test|startswith|endswith)\s*\()\s*\(?\s*$/.test(before)
+    || /^\s*\)?\s*[!=]==?/.test(after)
+    || /\b(?:not\s+)?in\s*$/.test(before);
+}
 
 const SOURCE_HTTP_OAUTH_PATTERNS = [
   { pattern: new RegExp(String.raw`authorization_endpoint['":\s]*['"]?` + REMOTE_HTTP), detail: 'HTTP authorization_endpoint URL' },
@@ -63,7 +85,7 @@ export const mcp011 = defineCheck({
       // A plaintext base URL held in a constant and joined with an OAuth path
       // where it is used (`AUTH_HOST + "/authorize"`, `new URL("/oauth/token", AUTH_HOST)`)
       const constants = stringConstants(source.sourceCode, { python });
-      const remoteConstant = [...constants.values.values()].some((v) => REMOTE_HTTP_URL.test(v));
+      const remoteConstant = [...constants.values.values()].some((v) => REMOTE_HTTP_URL.test(v) || PLAINTEXT_SCHEME.test(v));
 
       for (let i = 0; i < segments.length; i++) {
         const line = segments[i].text;
@@ -74,7 +96,7 @@ export const mcp011 = defineCheck({
         const used = folded !== undefined ? referencedConstants(line, constants).map((v) => `"${v}"`) : [];
         for (const { pattern, detail } of SOURCE_HTTP_OAUTH_PATTERNS) {
           const direct = pattern.test(line);
-          if (direct || (folded !== undefined && pattern.test(folded) && !used.some((v) => pattern.test(v)))) {
+          if (direct || (folded !== undefined && pattern.test(folded) && !used.some((v) => pattern.test(v)) && !comparedOnly(folded, pattern))) {
             evidence.push({
               file: source.localPath ?? source.serverName,
               line: segments[i].line,
