@@ -33,5 +33,12 @@ export function isBroadPath(rawPath: string, broadPaths: BroadPath[], home: stri
   const trimmed = normalized.length > 1 && normalized.endsWith('/')
     ? normalized.slice(0, -1)
     : normalized;
-  return broadPaths.find(b => trimmed === b.path);
+  const exact = broadPaths.find(b => trimmed === b.path);
+  if (exact) return exact;
+  // A directory above the home (`/Users`, `/home`, `~/..`) covers it too —
+  // and every other user's home beside it
+  if (broadPaths.some(b => b.path === home) && trimmed !== home && home.startsWith(trimmed.endsWith('/') ? trimmed : `${trimmed}/`)) {
+    return { path: trimmed, reason: 'contains the home directory and every other user\'s' };
+  }
+  return undefined;
 }
