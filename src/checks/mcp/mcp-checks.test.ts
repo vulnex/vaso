@@ -1318,6 +1318,31 @@ describe('MCP-011/MCP-016 beyond literals', () => {
     expect(await lines('API = "http://api.example.com"\nUSERS = API + "/v1/users"', 'python')).toBeUndefined();
   });
 
+  it('MCP-011 folds alias chains, scheme constants, env defaults, object properties, URL objects and joins', async () => {
+    // a chain of five aliases
+    expect(await flags011('const A = "http://auth.example.com";\nconst B = A;\nconst C = B;\nconst D = C;\nconst E = D;\nconst u = E + "/authorize";')).toBe(true);
+    // declared in reverse order
+    expect(await flags011('const u = E + "/authorize";\nconst E = D;\nconst D = C;\nconst C = B;\nconst B = A;\nconst A = "http://auth.example.com";')).toBe(true);
+    expect(await flags011('const SCHEME = "http";\nconst u = `${SCHEME}://auth.example.com/authorize`;')).toBe(true);
+    expect(await flags011('const SCHEME = "https";\nconst u = `${SCHEME}://auth.example.com/authorize`;')).toBe(false);
+    expect(await flags011('const AUTH = process.env.AUTH_URL ?? "http://auth.example.com";\nconst u = AUTH + "/authorize";')).toBe(true);
+    expect(await flags011('const AUTH = process.env["AUTH_URL"] || "http://auth.example.com";\nconst u = `${AUTH}/oauth/token`;')).toBe(true);
+    expect(await flags011('AUTH = os.environ.get("AUTH_URL", "http://auth.example.com")\nTOKEN = AUTH + "/oauth/token"', 'python')).toBe(true);
+    expect(await flags011('AUTH = os.getenv("AUTH_URL", "https://auth.example.com")\nTOKEN = AUTH + "/oauth/token"', 'python')).toBe(false);
+    expect(await flags011('const CFG = {\n  authHost: "http://auth.example.com",\n  nested: { x: 1 },\n};\nconst u = CFG.authHost + "/authorize";')).toBe(true);
+    expect(await flags011('const CFG = { authHost: "http://auth.example.com" };\nCFG.authHost = "https://auth.example.com";\nconst u = CFG.authHost + "/authorize";')).toBe(false);
+    expect(await flags011('const AUTH = "http://auth.example.com";\nconst u = new URL(AUTH).origin + "/authorize";')).toBe(true);
+    expect(await flags011('const AUTH = "http://auth.example.com";\nconst u = [AUTH, "/oauth/token"].join("");')).toBe(true);
+    expect(await flags011('const AUTH = "https://auth.example.com";\nconst u = [AUTH, "/oauth/token"].join("");')).toBe(false);
+  });
+
+  it('MCP-011 leaves a constant-built URL the code only compares against alone', async () => {
+    expect(await flags011('const HTTP_BASE = "http://auth.example.com";\nif (url.startsWith(HTTP_BASE + "/authorize")) throw new Error("plaintext");')).toBe(false);
+    expect(await flags011('const HTTP_BASE = "http://auth.example.com";\nif (u === HTTP_BASE + "/authorize") throw new Error("plaintext");')).toBe(false);
+    expect(await flags011('const HTTP_BASE = "http://auth.example.com";\nif ((HTTP_BASE + "/authorize") === u) throw new Error("plaintext");')).toBe(false);
+    expect(await flags011('const HTTP_BASE = "http://auth.example.com";\nawait fetch(HTTP_BASE + "/authorize");')).toBe(true);
+  });
+
   it('MCP-016 follows a request value bound to a name into a redirect', async () => {
     expect(await flags016('const r = req.query.redirect_uri;\nres.redirect(r + "?code=" + code);')).toBe(true);
     expect(await flags016('const { next } = req.query;\nres.redirect(302, next);')).toBe(true);
@@ -1363,6 +1388,37 @@ describe('MCP-011/MCP-016 beyond literals', () => {
     expect(await flags016('ALLOWED_REDIRECTS = ["*"]')).toBe(true);
     expect(await flags016('const oauth = { allowedRedirect: "https://app.example.com/cb" };')).toBe(false);
     expect(await flags016('fetch(url, { redirect: "follow" });')).toBe(false);
+  });
+
+  it('MCP-016 catches Python redirects, setHeader Location and wrapped values', async () => {
+    const py = async (code: string) => !(await mcp016.run(makeContext({ mcpServerSources: src(code, 'python') }))).passed;
+    expect(await py('return RedirectResponse(request.query_params["next"])')).toBe(true);
+    expect(await py('return RedirectResponse(url=request.query_params.get("next"))')).toBe(true);
+    expect(await py('return redirect(request.args.get("next"))')).toBe(true);
+    expect(await py('nxt = request.args.get("next")\nreturn redirect(nxt)')).toBe(true);
+    expect(await py('return HttpResponseRedirect(request.GET["next"])')).toBe(true);
+    expect(await py('nxt = request.args.get("next")\nif nxt not in ALLOWED:\n    abort(400)\nreturn redirect(nxt)')).toBe(false);
+    expect(await py('nxt = request.args.get("next")\nif nxt == "/home":\n    return redirect(nxt)')).toBe(false);
+    expect(await py('nxt = request.args.get("next")\nif nxt == "/home":\n    log("home")\nreturn redirect(nxt)')).toBe(true);
+    expect(await py('return redirect(url_for("index"))')).toBe(false);
+    expect(await flags016('res.setHeader("Location", req.query.next);')).toBe(true);
+    expect(await flags016('const r = req.query.next;\nres.setHeader("Location", r);')).toBe(true);
+    expect(await flags016('res.location(req.query.next);')).toBe(true);
+    expect(await flags016('const r = decodeURIComponent(req.query.next);\nres.redirect(r);')).toBe(true);
+    expect(await flags016('const r = String(req.query.next);\nres.redirect(r);')).toBe(true);
+    expect(await flags016('res.redirect(decodeURIComponent(req.query.next));')).toBe(true);
+    expect(await flags016('res.redirect(`${req.query.next}`);')).toBe(true);
+    expect(await flags016('res.redirect(`https://app.example.com/${req.query.next}`);')).toBe(false);
+    expect(await flags016('res.setHeader("Content-Type", req.query.t);')).toBe(false);
+  });
+
+  it('MCP-016 needs a comparison to guard the redirect and a validator to judge the value', async () => {
+    expect(await flags016('const r = req.query.next;\nif (r === "/") console.log("root");\nres.redirect(r);')).toBe(true);
+    expect(await flags016('const r = req.query.next;\nif (r === "/") res.redirect(r);')).toBe(false);
+    expect(await flags016('const r = req.query.next;\nif (r === "/" ) {\n  audit(r);\n  res.redirect(r);\n}')).toBe(false);
+    expect(await flags016('const r = req.query.next;\nif (r !== "/") return res.status(400).end();\nres.redirect(r);')).toBe(false);
+    expect(await flags016('const r = req.query.next;\nlogAllowed(r);\nres.redirect(r);')).toBe(true);
+    expect(await flags016('const r = req.query.next;\nif (!isAllowedRedirect(r)) return res.status(400).end();\nres.redirect(r);')).toBe(false);
   });
 });
 
