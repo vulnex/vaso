@@ -640,7 +640,16 @@ func (c *collector) collectGlob(snapshot *ProbeSnapshot, pattern string) {
 		return
 	}
 	for _, match := range matches {
-		if c.excluded(pattern, match) || c.behindForeignLink(match) {
+		if c.behindForeignLink(match) {
+			continue
+		}
+		if c.excluded(pattern, match) {
+			// A link in a skill's vendor folder (node_modules/, .git/, venv/)
+			// is recorded too, name and target only: a local SKL-013 walk
+			// lists those folders and reports a link out of the tree there
+			if c.inSkillTree {
+				c.recordSkillLink(snapshot, pattern, match)
+			}
 			continue
 		}
 		// A link is recorded (name and target, never what it points to)
@@ -673,6 +682,32 @@ func (c *collector) collectGlob(snapshot *ProbeSnapshot, pattern string) {
 		if !c.configTree {
 			c.collectLinkedSkillBases(snapshot, pattern)
 		}
+	}
+}
+
+// recordSkillLink records a link inside a skills tree's vendor folder — its
+// name and stored target, and for one into a credential store every hop to
+// it — and collects nothing it points to.
+func (c *collector) recordSkillLink(snapshot *ProbeSnapshot, pattern, match string) {
+	if !isSymlink(match) {
+		// …and a hard link there to a credential-store file, as present
+		// with no content (HardLinkOf naming the store file), as SKL-013
+		// reports it locally
+		info, err := os.Lstat(match)
+		if err != nil || !info.Mode().IsRegular() {
+			return
+		}
+		if _, exists := snapshot.Files[match]; exists {
+			return
+		}
+		if sink := c.hardLinkedSink(match, globBase(pattern), info); sink != "" {
+			snapshot.Files[match] = FileEntry{Exists: true, Mode: int(info.Mode().Perm()), ContentOmitted: true, Omitted: "sensitive", HardLinkOf: sink}
+		}
+		return
+	}
+	recordSymlink(snapshot.Symlinks, match)
+	if linkIntoSink(match, sinkSet(globBase(pattern))) {
+		c.recordLinkChain(snapshot, match)
 	}
 }
 

@@ -5,6 +5,7 @@ import { classifySensitivePath } from '../analyzers/sensitive-paths.js';
 import { linkCap, linkScope } from './skill-root-scope.js';
 import type { LinkCapReason } from './skill-root-scope.js';
 import { hardLinkedSink } from './hard-link-sinks.js';
+import { isExcludedPath, vendorNamedSkills } from './utils.js';
 
 /**
  * Skills are often installed as symlinks — `~/.codex/skills/<name>` pointing
@@ -193,7 +194,7 @@ export async function followSkillLinks(fs: FSProvider, root: string, entries: Di
   const prefix = root.endsWith('/') ? root : root + '/';
   const links = entries.filter(e => e.isSymbolicLink && (e.parentPath === root || (e.parentPath ?? '').startsWith(prefix)));
   const rules: WalkRules = { inScope: await linkScope(fs, root), capped: notingCap(await capOf(fs, root, opts), opts) };
-  return (await follow(fs, root, links, [rootReal], visited, 0, new Set(classifySensitivePath(root)), rules)).filter(e => !e.isSymbolicLink || !links.includes(e));
+  return (await follow(fs, root, links, [rootReal], visited, 0, new Set(classifySensitivePath(root)), rules, vendorFolderOf(root, entries))).filter(e => !e.isSymbolicLink || !links.includes(e));
 }
 
 async function walk(
@@ -228,7 +229,19 @@ async function walk(
   }
   entries = entries.filter(e => !inSinkByTarget(dir, roots[roots.length - 1], e, named));
   entries = await withoutHardLinkedSinks(fs, dir, entries, named);
-  return follow(fs, dir, entries, roots, visited, depth, named, rules);
+  return follow(fs, dir, entries, roots, visited, depth, named, rules, vendorFolderOf(dir, entries));
+}
+
+/**
+ * Whether a folder of the tree at `root` is (inside) a vendor folder the
+ * skill walk skips (isExcludedPath). A link there is listed, never followed —
+ * as the probe records it (recordSkillLink in probe/collector.go): what it
+ * leads to would be skipped anyway, and a link refused for where it leads is
+ * no skill left unscanned.
+ */
+function vendorFolderOf(root: string, entries: readonly DirentInfo[]): (parent: string) => boolean {
+  const skills = vendorNamedSkills(root, entries);
+  return parent => isExcludedPath(root, parent, { keepBuildOutput: true, skills });
 }
 
 /**
@@ -295,6 +308,7 @@ async function follow(
   depth: number,
   named: ReadonlySet<string>,
   rules: WalkRules,
+  inVendor: (parent: string) => boolean = () => false,
 ): Promise<DirentInfo[]> {
   const { inScope } = rules;
   const out: DirentInfo[] = [];
@@ -306,7 +320,7 @@ async function follow(
     }
     const parent = entry.parentPath ?? dir;
     const link = join(parent, entry.name);
-    if (depth >= MAX_LINK_DEPTH) {
+    if (depth >= MAX_LINK_DEPTH || inVendor(parent)) {
       out.push(entry);
       continue;
     }

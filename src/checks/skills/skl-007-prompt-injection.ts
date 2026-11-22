@@ -8,7 +8,7 @@ import { readCappedFile } from '../../core/file-limits.js';
 import { walkSkillTree } from '../../core/skill-walk.js';
 import { noSkillsDirResult } from './skill-files.js';
 
-const DOC_EXTENSIONS = new Set(['.md', '.txt', '.rst']);
+const DOC_EXTENSIONS = new Set(['.md', '.mdx', '.markdown', '.txt', '.rst']);
 const PROMPT_INJECTION_RULES = SECURITY_PATTERNS.filter(r => r.category === 'prompt-injection');
 
 /** `uncapped`: follow links whatever the size of their tree (`vaso skill audit`). */
@@ -20,7 +20,7 @@ async function getDocFiles(dir: string, fs: ScanContext['fs'], uncapped: boolean
     for (const entry of entries) {
       // Same vendor/VCS exclusions as the code walk (node_modules READMEs aren't skill docs)
       if (entry.isFile && !isExcludedPath(dir, entry.parentPath, { keepBuildOutput: true, skills })) {
-        const ext = extname(entry.name);
+        const ext = extname(entry.name).toLowerCase();
         const name = entry.name.toUpperCase();
         if (DOC_EXTENSIONS.has(ext) || name === 'SKILL.MD' || name === 'README.MD') {
           const fullPath = entry.parentPath ? join(entry.parentPath, entry.name) : join(dir, entry.name);

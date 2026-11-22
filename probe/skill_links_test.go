@@ -1,9 +1,71 @@
 package main
 
 import (
+	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
+
+// A hard link in a skill's vendor folder to a credential-store file is
+// recorded present, with no content and the store file it is.
+func TestVendorFolderHardLinkToSinkRecorded(t *testing.T) {
+	home := setupHome(t)
+	skills := filepath.Join(home, ".claude", "skills")
+	write(t, filepath.Join(skills, "s", "SKILL.md"), "# s\n", 0o644)
+	key := filepath.Join(home, ".ssh", "id_ed25519")
+	write(t, key, "k\n", 0o600)
+	write(t, filepath.Join(skills, "s", "node_modules", "x", "plain.js"), "x\n", 0o644)
+	link := filepath.Join(skills, "s", "node_modules", "x", "key.txt")
+	if err := os.Link(key, link); err != nil {
+		t.Skip("no hard links here:", err)
+	}
+	snap := Collect(ProbeManifest{GlobPatterns: []string{"~/.claude/skills/**"}}, false)
+	e, ok := snap.Files[link]
+	if !ok || !e.Exists || e.Content != "" || e.HardLinkOf == "" {
+		t.Errorf("vendor hard link entry = %+v, %v", e, ok)
+	}
+	if _, ok := snap.Files[filepath.Join(skills, "s", "node_modules", "x", "plain.js")]; ok {
+		t.Error("vendor file collected")
+	}
+}
+
+// A link in a skill's vendor folder is recorded, name and target only — a
+// local SKL-013 walk lists those folders and reports a link out of the
+// tree there — and nothing behind it is collected.
+func TestVendorFolderLinksRecordedNotFollowed(t *testing.T) {
+	home := setupHome(t)
+	skills := filepath.Join(home, ".claude", "skills")
+	write(t, filepath.Join(skills, "s", "SKILL.md"), "# s\n", 0o644)
+	write(t, filepath.Join(home, ".bashrc"), "export X=1\n", 0o644)
+	write(t, filepath.Join(home, ".ssh", "id_ed25519"), "k\n", 0o600)
+	write(t, filepath.Join(home, "lib", "big.js"), "x\n", 0o644)
+	cfg := filepath.Join(skills, "s", "node_modules", "x", "config.json")
+	keys := filepath.Join(skills, "s", ".git", "cfg")
+	lib := filepath.Join(skills, "s", "venv", "lib")
+	for _, p := range []string{cfg, keys, lib} {
+		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	mustSymlink(t, filepath.Join(home, ".bashrc"), cfg)
+	mustSymlink(t, filepath.Join(home, ".ssh"), keys)
+	mustSymlink(t, filepath.Join(home, "lib"), lib)
+	snap := Collect(ProbeManifest{GlobPatterns: []string{"~/.claude/skills/**"}}, false)
+	for _, l := range []string{cfg, keys, lib} {
+		if _, ok := snap.Symlinks[l]; !ok {
+			t.Errorf("vendor-folder link %s not recorded", l)
+		}
+	}
+	for p, f := range snap.Files {
+		if p == cfg || strings.HasPrefix(p, lib+string(filepath.Separator)) || strings.HasPrefix(p, keys+string(filepath.Separator)) {
+			t.Errorf("collected %s behind a vendor-folder link", p)
+		}
+		if strings.HasPrefix(p, filepath.Join(home, ".ssh")) && f.Content != "" {
+			t.Errorf("credential content collected: %s", p)
+		}
+	}
+}
 
 // A skill linked to where no skills tree is walked is not read, but whether
 // it is a directory is recorded (its mode): the CLI reports a skill there

@@ -26,7 +26,7 @@ const COMPROMISED_VERSIONS: Record<string, readonly string[] | '*'> = {
   'node-ipc': ['9.2.2', '10.1.1', '10.1.2', '10.1.3', '11.0.0', '11.1.0'],
 };
 
-const LOCKFILES = ['package-lock.json', 'yarn.lock', 'pnpm-lock.yaml'];
+const LOCKFILES = ['package-lock.json', 'npm-shrinkwrap.json', 'yarn.lock', 'pnpm-lock.yaml', 'bun.lock', 'bun.lockb'];
 
 export const skl011 = defineCheck({
   id: 'SKL-011',
@@ -106,7 +106,7 @@ export const skl011 = defineCheck({
       if (!hasLockfile) {
         evidence.push({
           file: pkgPath,
-          detail: 'No lockfile found (package-lock.json, yarn.lock, or pnpm-lock.yaml) — dependencies not pinned',
+          detail: 'No lockfile found (package-lock.json, yarn.lock, pnpm-lock.yaml or bun.lock) — dependencies not pinned',
         });
       }
     }

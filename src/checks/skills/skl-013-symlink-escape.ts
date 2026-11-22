@@ -178,6 +178,9 @@ export const skl013 = defineCheck({
       return h.passed('No symlinks escape the scanned workspace directory');
     }
 
+    // One order for local and remote scans (a local recursive listing's
+    // order is the filesystem's)
+    findings.sort((a, b) => (a.linkPath < b.linkPath ? -1 : a.linkPath > b.linkPath ? 1 : 0));
     const anySensitive = findings.some((f) => f.sensitiveLabels.length > 0);
     const evidence: Evidence[] = findings.map((f) => ({
       file: f.linkPath,
