@@ -36,7 +36,7 @@ var sensitiveSinkPatterns = []string{
 	`(^|\/)\.local\/share\/devin\/credentials\.toml$|(^|\/)\.abacusai\/keystore\.enc[^/]*$`,
 	`(^|\/)(\.grokbot|\.cursor\/sand|sand-data)\/(local-exec-daemon-credential|host-token)\.json$|(^|\/)Grok Bot\/(sand|user)-secrets\.json$`,
 	`(^|\/)\.ironclaw\/reborn\/(webui-token|([^/]+\/)?\.reborn-local-dev-secrets-master-key)$|(^|\/)\.?zeroclaw\/\.secret_key$`,
-	`(^|\/)openshell\/(gateway\/credentials|docker-sandbox-tokens|gateways\/[^/]+\/mtls)(\/|$)|(^|\/)openshell\/gateways\/[^/]+\/oidc_token\.json$`,
+	`(^|\/)openshell\/(gateway\/credentials|docker-sandbox-tokens|gateways\/[^/]+\/mtls)(\/|$)|(^|\/)openshell\/gateways\/[^/]+\/(?:oidc_token\.json|edge_token)$`,
 }
 
 var sensitiveSinks = func() []*regexp.Regexp {
