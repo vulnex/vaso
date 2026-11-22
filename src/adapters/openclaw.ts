@@ -536,8 +536,17 @@ export const openclawAdapter: AgentAdapter = {
 
   /** Fixed-name credential files; OC-006 also walks credentials/, the
    *  per-agent auth stores and the state databases. */
-  getCredentialPaths(installDir: string): string[] {
+  getCredentialPaths(installDir: string, fs?: FSProvider): string[] {
+    // The main config holds the gateway token and provider apiKeys
+    // (`openclaw security audit` reports fs.config.perms_world_readable);
+    // CFG-003/POL-003 count it only while it holds a secret. A relocated
+    // OPENCLAW_CONFIG_PATH is the main config of the non-profile location.
+    const configPath = fs && !PROFILE_DIR.test(basename(installDir))
+      ? openclawEnvPaths(fs.homedir(), fs).configPath
+      : undefined;
     return [
+      ...MAIN_CONFIG_NAMES.map(n => join(installDir, n)),
+      ...(configPath ? [configPath] : []),
       join(installDir, '.env'),
       join(installDir, 'credentials.json'),
       join(installDir, 'auth.json'),
