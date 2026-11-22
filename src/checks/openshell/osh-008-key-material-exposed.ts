@@ -5,7 +5,7 @@ import { markUnreachable, readableByOthers } from '../../core/permissions.js';
 import { expandHome } from '../../adapters/openshell.js';
 import {
   databasePaths, facts, fixedDatabasePaths, fixedTlsDirs, gateway, gatewayEnv, listDir, paths, record,
-  redirectedDatabase, redirectedTlsDir, tlsDirs,
+  redirectedDatabase, redirectedTlsDir, root, tlsDirs,
 } from './shared.js';
 
 interface Target {
@@ -52,10 +52,12 @@ async function targets(ctx: ScanContext): Promise<Target[]> {
   const tls = record(gw.tls);
   const jwt = record(gw.gateway_jwt);
   const cs = record(gw.credential_storage);
+  // guest_tls_key belongs to a compute driver ([openshell.drivers.docker])
+  const guestKeys = Object.values(record(root(ctx).drivers) ?? {}).map(d => record(d)?.guest_tls_key);
   for (const [v, critical, detail] of [
     [tls?.key_path, false, 'Gateway server TLS key'],
     [jwt?.signing_key_path, true, 'Gateway JWT signing key'],
-    [gw.guest_tls_key, true, 'Sandbox client TLS key'],
+    ...guestKeys.map(k => [k, true, 'Sandbox client TLS key'] as const),
     [cs?.key_encryption_key_path, true, 'Key-encryption key for stored provider credentials'],
     // Gateway config docs: OPENSHELL_TLS_KEY = server private key path (env beats the TOML)
     [gatewayEnv(ctx)?.data.OPENSHELL_TLS_KEY, false, 'Gateway server TLS key'],

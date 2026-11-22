@@ -15,9 +15,10 @@ export const osh003 = defineCheck({
     const oidc = record(gateway(ctx).oidc);
     const toml = gatewayToml(ctx);
     const env = gatewayEnv(ctx);
-    if (envTruthy(ctx.configs, 'OPENSHELL_OIDC_DANGEROUSLY_ALLOW_INSECURE_HTTP')) {
+    const insecure = envTruthy(ctx.configs, 'OPENSHELL_OIDC_DANGEROUSLY_ALLOW_INSECURE_HTTP');
+    if (insecure === true) {
       evidence.push(settingEvidence(env, 'OPENSHELL_OIDC_DANGEROUSLY_ALLOW_INSECURE_HTTP=true', 'Development-only escape hatch enabled in the gateway environment'));
-    } else if (oidc?.dangerously_allow_insecure_http === true) {
+    } else if (insecure === undefined && oidc?.dangerously_allow_insecure_http === true) {
       evidence.push(settingEvidence(toml, 'dangerously_allow_insecure_http = true', 'Development-only escape hatch enabled in [openshell.gateway.oidc]'));
     }
     const envIssuer = env?.data.OPENSHELL_OIDC_ISSUER;

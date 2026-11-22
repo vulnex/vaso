@@ -99,8 +99,30 @@ describe('gateway settings', () => {
     expect(remote.severity).toBe('critical');
     const viaEnv = await check('OSH-001').run(ctx([{ raw: '', format: 'env', filePath: `${CFG}/gateway.env`, data: { OPENSHELL_DISABLE_TLS: 'true' } }]));
     expect(viaEnv.evidence?.[0].snippet).toBe('OPENSHELL_DISABLE_TLS=true');
-    const upper = await check('OSH-001').run(ctx([{ raw: '', format: 'env', filePath: `${CFG}/gateway.env`, data: { OPENSHELL_DISABLE_TLS: 'TRUE' } }]));
-    expect(upper.evidence?.[0].snippet).toBe('OPENSHELL_DISABLE_TLS=TRUE');
+    // openshell-gateway accepts exactly true/false (it refuses to start on TRUE, 1, yes)
+    const env = (v: string): ParsedConfig => ({ raw: '', format: 'env', filePath: `${CFG}/gateway.env`, data: { OPENSHELL_DISABLE_TLS: v } });
+    expect((await check('OSH-001').run(ctx([env('TRUE')]))).passed).toBe(true);
+    expect((await check('OSH-001').run(ctx([env('1')]))).passed).toBe(true);
+    // the environment file wins over the TOML
+    expect((await check('OSH-001').run(ctx([env('false'), gatewayToml({ disable_tls: true })]))).passed).toBe(true);
+  });
+
+  it('OSH-002 flags a TLS gateway with no client CA, OIDC issuer or gateway JWT', async () => {
+    const tls = { cert_path: `${STATE}/tls/server/tls.crt`, key_path: `${STATE}/tls/server/tls.key` };
+    const none = await check('OSH-002').run(ctx([gatewayToml({ tls, auth: { allow_unauthenticated_users: false } })]));
+    expect(none).toMatchObject({ passed: false, severity: 'warning' });
+    expect(none.fixable).toBeFalsy();
+    expect((await check('OSH-002').run(ctx([gatewayToml({ tls })], makeFs(), { gateway: PUBLIC }))).severity).toBe('critical');
+    for (const ok of [
+      { tls: { ...tls, client_ca_path: `${STATE}/tls/ca.crt` } },
+      { tls, oidc: { issuer: 'https://idp.example.com/realms/x' } },
+      { tls, gateway_jwt: { signing_key_path: `${STATE}/tls/jwt/signing.pem` } },
+      {}, // generated TLS directory: its client CA is there
+    ]) {
+      expect((await check('OSH-002').run(ctx([gatewayToml(ok)]))).passed, JSON.stringify(ok)).toBe(true);
+    }
+    const mtlsOff = { tls: { ...tls, client_ca_path: `${STATE}/tls/ca.crt` }, mtls_auth: { enabled: false } };
+    expect((await check('OSH-002').run(ctx([gatewayToml(mtlsOff)]))).passed).toBe(false);
   });
 
   it('OSH-002 flags unauthenticated users and offers a fix', async () => {
