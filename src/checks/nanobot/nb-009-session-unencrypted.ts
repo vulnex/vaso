@@ -1,5 +1,6 @@
 import { join } from 'node:path';
 import { defineCheck } from '../../core/check-builder.js';
+import { notCollectedNote } from '../../core/probe-coverage.js';
 import type { ScanContext } from '../../core/types.js';
 import { readableByOthersEvidence, workspaceDir } from './shared.js';
 
@@ -42,10 +43,11 @@ export const nb009 = defineCheck({
     files.push(join(workspaceDir(ctx), 'memory', 'history.jsonl'));
     files.push(join(dataDir, 'history', 'cli_history'));
 
-    const evidence = await readableByOthersEvidence(ctx, files.map(path => ({ path, what: 'Chat history' })));
+    const unverified: string[] = [];
+    const evidence = await readableByOthersEvidence(ctx, files.map(path => ({ path, what: 'Chat history' })), unverified);
     return h.fromEvidence(evidence, {
-      passed: 'Chat history files are owner-only (or absent)',
-      failed: (n) => `${n} chat history file(s) readable by other users`,
+      passed: unverified.length > 0 ? `Chat history files are owner-only (or absent); ${notCollectedNote('path(s)', unverified)}` : 'Chat history files are owner-only (or absent)',
+      failed: (n) => `${n} chat history file(s) readable by other users${unverified.length > 0 ? `; ${notCollectedNote('path(s)', unverified)}` : ''}`,
       fixDescription: 'chmod 700 ~/.nanobot/sessions ~/.nanobot/history ~/.nanobot/workspace/memory and chmod 600 the history files',
     });
   },

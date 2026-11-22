@@ -44,7 +44,7 @@ export const ic007 = defineCheck({
           file: config.filePath,
           ...(line ? { line } : {}),
           snippet: `default_approval_policy = "${policy}"`,
-          detail: '[policy].default_approval_policy = "minimal" — the weakest approval posture once enforced; IronClaw 1.4 parses [policy] but does not apply it yet',
+          detail: '[policy].default_approval_policy = "minimal" — the weakest approval posture once enforced; IronClaw 1.4 parses [policy] but does not wire it, and `ironclaw serve` refuses to start while the section is present',
         });
       }
     } else if (!isLegacyUnused(ctx)) {
@@ -63,12 +63,12 @@ export const ic007 = defineCheck({
       passed: 'Tool approval is not bypassed',
       failed: () => isLegacy(ctx)
         ? 'Tool auto-approval is enabled — tool calls bypass user confirmation'
-        : 'Approval policy is set to "minimal" (not enforced by IronClaw 1.4 yet)',
+        : 'Approval policy is set to "minimal" (IronClaw 1.4 does not enforce [policy] and will not serve with it)',
       severity,
       fixable: isLegacy(ctx),
       fixDescription: isLegacy(ctx)
         ? 'Set AGENT_AUTO_APPROVE_TOOLS=false in ~/.ironclaw/.env (or [agent] auto_approve_tools = false)'
-        : 'Set [policy].default_approval_policy = "ask_destructive" (or stricter)',
+        : 'Remove the [policy] section for IronClaw 1.4 (serve refuses it); once a release enforces it, set default_approval_policy = "ask_destructive" (or stricter)',
     });
   },
 

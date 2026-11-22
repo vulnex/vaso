@@ -42,6 +42,16 @@ describe('OSH-008 (dt19)', () => {
     expect(r.message).toBe('OpenShell key material is owner-only');
   });
 
+  it('reads guest_tls_key from the compute driver table', async () => {
+    const toml: ParsedConfig = { raw: '', format: 'toml', filePath: `${CFG}/gateway.toml`, data: { openshell: {
+      gateway: { bind_address: '127.0.0.1:17670' },
+      drivers: { docker: { guest_tls_key: '/srv/certs/guest.key' } },
+    } } };
+    const fs = makeFs({ '/srv/certs/guest.key': 0o100644 });
+    const r = await osh008.run({ installation: { agent: 'openshell', installDir: CFG, configFiles: [toml] }, configs: [toml], platform: 'linux', fs });
+    expect(r.evidence?.map(e => e.file)).toEqual(['/srv/certs/guest.key']);
+  });
+
   it('judges the key normally when the snapshot has it', async () => {
     const r = await osh008.run(ctx(makeFs({ '/srv/certs/gw.key': 0o100644 }, 'snapshot')));
     expect(r.passed).toBe(false);

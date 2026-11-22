@@ -144,3 +144,21 @@ export function isSecretNamedValue(name: string, value: string): boolean {
   if (/^https?:\/\//i.test(v)) return false;
   return isCredentialValueName(name) && looksRandom(v);
 }
+
+/** Key names a `.env` file stores credentials under (provider keys, bot tokens, passwords). */
+const ENV_SECRET_KEY = /(?:_API_KEY|_TOKEN|_SECRET|_KEY|BEARER|PASSWORD)$/i;
+
+/**
+ * Credential-named keys of a parsed `.env` (`parseEnv` in config-loader:
+ * comments and blank lines dropped, last assignment wins) that hold a value:
+ * not empty, not a documentation placeholder (`your-key-here`, `sk-...`) and
+ * not a reference to a value kept elsewhere. A copied `.env.example` with
+ * every key commented out or left empty holds none.
+ */
+export function envSecretKeys(data: Record<string, unknown> | undefined): string[] {
+  if (!data) return [];
+  return Object.entries(data)
+    .filter(([key, value]) => ENV_SECRET_KEY.test(key) && typeof value === 'string'
+      && !isPlaceholderSecret(value) && !isSecretReference(value.trim()))
+    .map(([key]) => key);
+}

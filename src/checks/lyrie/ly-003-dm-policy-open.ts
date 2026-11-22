@@ -1,6 +1,6 @@
 import type { Evidence, ParsedConfig } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
-import { envString, isConfigured, lyrieEnvConfigs } from './env.js';
+import { envFile, envString, isConfigured, lyrieMergedEnvs } from './env.js';
 
 interface ChannelSpec {
   name: string;
@@ -44,7 +44,9 @@ export const ly003 = defineCheck({
 
   async run(ctx, h) {
     const evidence: Evidence[] = [];
-    for (const config of lyrieEnvConfigs(ctx.configs)) {
+    // judged on the merged layers: a policy or allowlist in .env.local
+    // governs a token in .env
+    for (const config of lyrieMergedEnvs(ctx.configs)) {
       for (const ch of CHANNELS) {
         if (!ch.enableKeys.every(k => isConfigured(envString(config, k)))) continue;
 
@@ -62,7 +64,7 @@ export const ly003 = defineCheck({
           ? ` and no ${ch.selfEnforcedAllowlist.join('/')} allowlist`
           : '';
         evidence.push({
-          file: config.filePath,
+          file: envFile(config, raw === undefined ? ch.enableKeys[0] : ch.policyKey),
           snippet: `${ch.policyKey}=${raw ?? ''}`,
           detail: `Channel "${ch.name}" is enabled with ${ch.policyKey} ${state}${allowlistNote} — any sender who reaches the bot can drive the agent`,
         });

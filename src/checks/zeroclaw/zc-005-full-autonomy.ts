@@ -44,7 +44,7 @@ export const zc005 = defineCheck({
     const config = mainConfig(ctx.configs);
     const updates: Array<[KeyPath, unknown]> = config
       ? effectiveProfiles(config.data)
-        .filter(p => isFull(p.profile.level))
+        .filter(p => isFull(p.profile.level) && !hasWildcard(p.profile.always_ask))
         .map(p => [[...p.path, 'level'], 'supervised'])
       : [];
     return writeMainConfig(ctx, 'ZC-005', updates, 'Set level="supervised" on full-autonomy risk profiles');

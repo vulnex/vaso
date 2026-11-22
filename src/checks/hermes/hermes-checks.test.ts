@@ -119,7 +119,7 @@ describe('HM-001 plaintext API keys', () => {
 describe('HM-002 .env permissions', () => {
   const check = hermesChecks.find(c => c.id === 'HM-002')!;
   it('flags .env with secrets at mode 0644', async () => {
-    const cfg = makeEnv('/h/.hermes/.env', { HERMES_API_KEY: 'sk-...' });
+    const cfg = makeEnv('/h/.hermes/.env', { HERMES_API_KEY: 'sk-or-v1-3f9a2c7e1b5d8a4f' });
     const result = await check.run(makeCtx([cfg], {
       fs: makeFs({ modes: { '/h/.hermes/.env': 0o644 } }),
     }));
@@ -129,6 +129,15 @@ describe('HM-002 .env permissions', () => {
     const cfg = makeEnv('/h/.hermes/.env', { HERMES_API_KEY: 'sk-...' });
     const result = await check.run(makeCtx([cfg], {
       fs: makeFs({ modes: { '/h/.hermes/.env': 0o600 } }),
+    }));
+    expect(result.passed).toBe(true);
+  });
+  it('passes a copied .env.example: keys commented out, empty or placeholders', async () => {
+    const raw = '# OPENROUTER_API_KEY=sk-or-v1-3f9a2c7e1b5d8a4f\nOPENAI_API_KEY=\nTELEGRAM_BOT_TOKEN=your-token-here\nANTHROPIC_API_KEY=sk-ant-...\n';
+    const cfg: ParsedConfig = { raw, format: 'env', filePath: '/h/.hermes/.env',
+      data: { OPENAI_API_KEY: '', TELEGRAM_BOT_TOKEN: 'your-token-here', ANTHROPIC_API_KEY: 'sk-ant-...' } };
+    const result = await check.run(makeCtx([cfg], {
+      fs: makeFs({ modes: { '/h/.hermes/.env': 0o644 } }),
     }));
     expect(result.passed).toBe(true);
   });
@@ -261,6 +270,15 @@ describe('HM-006 plaintext http endpoint', () => {
     });
     const result = await check.run(makeCtx([cfg]));
     expect(result.passed).toBe(true);
+  });
+  it('judges loopback by the parsed hostname, not a prefix', async () => {
+    const run = async (url: string) => check.run(makeCtx([makeYaml('/h/.hermes/config.yaml', { mcp_servers: { s: { url } } })]));
+    for (const url of ['http://localhost.evil-example.net/v1', 'http://127.0.0.1.nip.io:8080', 'http://localhost@mcp.evil-example.net/mcp']) {
+      expect((await run(url)).passed, url).toBe(false);
+    }
+    for (const url of ['http://127.0.0.2:8080', 'http://[::1]:9000/sse', 'http://localhost/v1']) {
+      expect((await run(url)).passed, url).toBe(true);
+    }
   });
   it('passes for https', async () => {
     const cfg = makeYaml('/h/.hermes/cli-config.yaml', {

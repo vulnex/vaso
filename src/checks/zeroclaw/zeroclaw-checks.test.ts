@@ -425,6 +425,65 @@ external_peers = ["*"]
     expect((await run('ZC-007', '[channels.wecom_ws.main]\nenabled = true\nallowed_users = ["*"]\n')).passed).toBe(false);
     expect((await run('ZC-007', '[peer_groups.g]\nchannel = "discord"\nexternal_peers = ["*"]\nignore = ["*"]\n')).passed).toBe(true);
   });
+
+  it('flags open chat policies (whatsapp "all", line "open") and skips keys a channel type does not have', async () => {
+    const wa = await run('ZC-007', '[channels.whatsapp.web]\nenabled = true\ndm_policy = "all"\ngroup_policy = "all"\n');
+    expect(wa).toMatchObject({ passed: false, severity: 'critical' });
+    expect(wa.evidence).toHaveLength(2);
+    const line = await run('ZC-007', '[channels.line.main]\nenabled = true\ndm_policy = "open"\n');
+    expect(line.evidence![0].detail).toContain('channels.line.main: dm_policy = "open"');
+    expect((await run('ZC-007', '[channels.whatsapp.web]\nenabled = true\ndm_policy = "allowlist"\n[channels.line.main]\nenabled = true\ndm_policy = "pairing"\ngroup_policy = "mention"\n')).passed).toBe(true);
+    // telegram has no allowed_users (ZeroClaw rejects the key, it is never applied)
+    expect((await run('ZC-007', '[channels.telegram.main]\nenabled = true\nallowed_users = ["*"]\n')).passed).toBe(true);
+  });
+});
+
+describe('ZeroClaw secrets and env overrides', () => {
+  it('ZC-001 finds paired gateway tokens, credential headers and URL passwords', () => {
+    const paths = findPlaintextSecrets(parseTOML(`[gateway]
+paired_tokens = ["zc_4f9a2c7e1b5d8a4f3e2d1c0b"]
+[observability.otel_headers]
+Authorization = "Bearer Q7mX2pL9vB8nW4tR6yU0cE5d"
+X-Service = "zeroclaw"
+[memory]
+db_url = "postgres://zc:hunter2pass@10.0.0.4/zc"
+[providers.models.x]
+db_url = "postgres://10.0.0.4/zc"
+`) as Record<string, unknown>).map(s => s.path);
+    expect(paths).toEqual(['gateway.paired_tokens[0]', 'observability.otel_headers.Authorization', 'memory.db_url']);
+  });
+
+  it('ZC-001 does not call a secret supplied by ZEROCLAW_<path> a plaintext config value', async () => {
+    const raw = '[gateway]\nport = 42617\n';
+    const data = applyEnvOverrides(parseTOML(raw) as Record<string, unknown>, zeroclawEnvSpecs({}),
+      { getEnv: (k: string) => (k === 'ZEROCLAW_gateway__webhook_secret' ? 'whsec_Q7mX2pL9vB8nW4tR6yU0' : undefined) } as unknown as FSProvider);
+    expect((data.gateway as Record<string, unknown>).webhook_secret).toBeDefined();
+    const config: ParsedConfig = { raw, format: 'toml', filePath: CONFIG, data };
+    expect((await check('ZC-001').run(ctx([config]))).passed).toBe(true);
+  });
+
+  it('reads ZC-015/016 settings from the environment; bools only as exactly true/false', () => {
+    const env: Record<string, string> = {
+      ZEROCLAW_gateway__allow_self_upgrade: 'true',
+      ZEROCLAW_gateway__require_pairing: '0',
+      ZEROCLAW_risk_profiles__balanced__auto_approve: '["shell","file_write"]',
+      ZEROCLAW_risk_profiles__balanced__always_ask: 'browser, http_request',
+    };
+    const data = applyEnvOverrides({ gateway: { require_pairing: true } }, zeroclawEnvSpecs({ risk_profiles: { balanced: {} } }),
+      { getEnv: (k: string) => env[k] } as unknown as FSProvider) as any;
+    expect(data.gateway).toEqual({ require_pairing: true, allow_self_upgrade: true });
+    expect(data.risk_profiles.balanced.auto_approve).toEqual(['shell', 'file_write']);
+    expect(data.risk_profiles.balanced.always_ask).toEqual(['browser', 'http_request']);
+  });
+
+  it('the ZC-005 fix leaves a full profile that always asks for everything alone', async () => {
+    vi.mocked(updateConfigValue).mockClear();
+    const raw = '[risk_profiles.yolo]\nlevel = "full"\n[risk_profiles.askall]\nlevel = "full"\nalways_ask = ["*"]\n';
+    const config: ParsedConfig = { raw, format: 'toml', filePath: CONFIG, data: parseTOML(raw) as Record<string, unknown> };
+    await check('ZC-005').fix!(ctx([config]));
+    const written = vi.mocked(updateConfigValue).mock.calls.map(c => pathText(c[1]));
+    expect(written).toEqual(['risk_profiles.yolo.level']);
+  });
 });
 
 describe('ZC-008: Unvetted Skill Sources', () => {

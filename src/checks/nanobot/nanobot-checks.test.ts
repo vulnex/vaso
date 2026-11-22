@@ -1,9 +1,12 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { mkdtemp, mkdir, writeFile, rm, chmod, readFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import type { ScanContext, ParsedConfig, AgentInstallation, CheckModule } from '../../core/types.js';
 import { LocalFSProvider } from '../../core/local-fs-provider.js';
+import { SnapshotFSProvider } from '../../core/snapshot-fs-provider.js';
+import type { ProbeSnapshot } from '../../core/snapshot-types.js';
+import { registerAllAdapters } from '../../adapters/index.js';
 import { nanobotChecks } from './index.js';
 import { riskyWhitelistEntry } from './nb-005-ssrf-webfetch.js';
 import { isCatchAllPattern } from './nb-004-exec-tool-filter.js';
@@ -474,7 +477,7 @@ describe('NB-008: websocket / WebUI authentication', () => {
 
   it('reports an unauthenticated unix-socket channel as info, not a browser-reachable hole (dt20 g5-F5)', async () => {
     const ctx = await makeCtx(merge(onboardConfig(), {
-      channels: { websocket: { unixSocketPath: '/run/nanobot.sock', host: '0.0.0.0', websocketRequiresToken: false } },
+      channels: { websocket: { unixSocketPath: '/run/nanobot.sock', host: '10.0.0.9', websocketRequiresToken: false } },
     }));
     const r = await check('NB-008').run(ctx);
     expect(r.severity).toBe('info');
@@ -582,5 +585,42 @@ describe('NB-012: unpinned MCP server packages', () => {
   it('does not grep free text (skills mentioning npx are not MCP servers)', async () => {
     const ctx = await makeCtx(merge(onboardConfig(), { agents: { defaults: { botName: 'run npx something' } } }));
     expect((await check('NB-012').run(ctx)).passed).toBe(true);
+  });
+});
+
+describe('NB-* on snapshots: shared home groups and a relocated workspace', () => {
+  registerAllAdapters();
+  const snapshotCtx = (platform: 'darwin' | 'linux', home: string, gid: number, privateGroups?: Record<string, number>) => {
+    const ws = `${home}/projects/ws`;
+    const meta = (mode: number) => ({ content: '', mode, exists: true, contentOmitted: true, omitted: 'metadata' as const });
+    const snapFs = new SnapshotFSProvider({
+      version: 1, hostname: 'h', platform, homedir: home, timestamp: 't',
+      privilege: { uid: 501, username: 'u', isRoot: false, sudoAvailable: false, escalated: false, scannedUsers: ['u'], skippedPaths: [] },
+      files: { [`${ws}/HEARTBEAT.md`]: meta(0o666) },
+      directoryModes: { '/': 0o755, [dirname(home)]: 0o755, [home]: 0o750, [`${home}/projects`]: 0o755, [ws]: 0o755 },
+      owners: { '/': [0, 0], [dirname(home)]: [0, 0], [home]: [501, gid], [`${home}/projects`]: [501, gid], [ws]: [501, gid], [`${ws}/HEARTBEAT.md`]: [501, gid] },
+      symlinks: {}, directories: {}, commandOutputs: {}, env: {}, specialModeBits: true,
+      ...(privateGroups ? { privateGroups } : {}),
+    } as ProbeSnapshot);
+    const data = { agents: { defaults: { workspace: '~/projects/ws' } }, gateway: { heartbeat: { enabled: true } } };
+    const config: ParsedConfig = { raw: JSON.stringify(data), format: 'json', filePath: `${home}/.nanobot/config.json`, data };
+    const installation: AgentInstallation = { agent: 'nanobot', installDir: `${home}/.nanobot`, configFiles: [config] };
+    return { installation, configs: [config], platform, fs: snapFs } as ScanContext;
+  };
+
+  it('a 750 home with macOS\'s shared staff group is no barrier; a Linux private group is', async () => {
+    const mac = await check('NB-006').run(snapshotCtx('darwin', '/Users/u', 20));
+    expect(mac.severity).toBe('warning');
+    expect(mac.evidence![0].mitigated).toBeFalsy();
+    const linux = await check('NB-006').run(snapshotCtx('linux', '/home/u', 1000, { 1000: 501 }));
+    expect(linux.severity).toBe('info');
+    expect(linux.evidence![0].mitigated).toBe(true);
+  });
+
+  it('names workspace files the probe does not collect as not verified', async () => {
+    const r = await check('NB-009').run(snapshotCtx('linux', '/home/u', 1000, { 1000: 501 }));
+    expect(r.passed).toBe(true);
+    expect(r.message).toContain('/home/u/projects/ws/memory/history.jsonl');
+    expect(r.message).toContain('not verified');
   });
 });

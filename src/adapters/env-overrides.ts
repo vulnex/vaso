@@ -10,7 +10,13 @@ import { keySegments, type KeyPath } from '../core/utils.js';
  * leaks into a written config.
  */
 
-export type EnvValueType = 'bool' | 'int' | 'string' | 'list';
+/** `bool`: Go strconv.ParseBool (PicoClaw); `rust-bool`: Rust's
+ *  `bool::from_str`, exactly `true`/`false` (ZeroClaw refuses to load on any
+ *  other spelling, so such a value sets nothing); `list`: caarlos0/env slices
+ *  (PicoClaw), split on "," with entries kept as written; `zeroclaw-list`: a
+ *  JSON array of strings or a trimmed comma-separated list (ZeroClaw's
+ *  Vec<String> overrides). */
+export type EnvValueType = 'bool' | 'rust-bool' | 'int' | 'string' | 'list' | 'zeroclaw-list';
 
 export interface EnvOverrideSpec {
   env: string;
@@ -38,6 +44,18 @@ function parseBool(v: string): boolean | undefined {
 
 function parseValue(raw: string, type: EnvValueType): unknown {
   if (type === 'bool') return parseBool(raw);
+  if (type === 'rust-bool') return raw === 'true' ? true : raw === 'false' ? false : undefined;
+  if (type === 'zeroclaw-list') {
+    if (raw.startsWith('[')) {
+      try {
+        const v: unknown = JSON.parse(raw);
+        return Array.isArray(v) && v.every(x => typeof x === 'string') ? v : undefined;
+      } catch {
+        return undefined;
+      }
+    }
+    return raw.split(',').map(s => s.trim()).filter(s => s !== '');
+  }
   if (type === 'int') return /^-?\d+$/.test(raw) ? Number(raw) : undefined;
   // caarlos0/env slices: split on the default "," separator, entries kept as written
   if (type === 'list') return raw.split(',');
@@ -77,6 +95,50 @@ export function applyEnvOverrides(
     applied.push({ env: spec.env, path: spec.path.join('.'), segments: [...spec.path], value });
   }
   if (applied.length > 0) overlays.set(out, applied);
+  return out;
+}
+
+/**
+ * Fill settings the file leaves unset from environment values, the way
+ * pydantic-settings merges `env_prefix` variables under the file's own
+ * values (`Config.model_validate(file)` on a BaseSettings model): a value the
+ * file sets, at any depth, wins. `isSet(record, key)` says whether the file
+ * already holds `key` (in whatever spellings the agent accepts). Recorded like
+ * `applyEnvOverrides`, so `envOverridesOf` / `envNote` see these too.
+ */
+export function applyEnvDefaults(
+  data: Record<string, unknown>,
+  entries: Array<{ env: string; path: string[]; value: unknown }>,
+  isSet: (record: Record<string, unknown>, key: string) => string | undefined,
+): Record<string, unknown> {
+  let out = data;
+  const applied: AppliedEnvOverride[] = [...envOverridesOf(data)];
+  const before = applied.length;
+  for (const entry of entries) {
+    // walk down the file's own tables; stop where the file sets the value
+    let rec: Record<string, unknown> | undefined = out;
+    const segments: string[] = [];
+    let blocked = false;
+    for (let i = 0; i < entry.path.length; i++) {
+      const key = entry.path[i];
+      const existing = rec ? isSet(rec, key) : undefined;
+      if (existing === undefined) {
+        segments.push(key, ...entry.path.slice(i + 1));
+        break;
+      }
+      segments.push(existing);
+      const next: Record<string, unknown> | undefined = asRecord(rec![existing]);
+      if (i === entry.path.length - 1 || !next) {
+        blocked = true;
+        break;
+      }
+      rec = next;
+    }
+    if (blocked) continue;
+    out = setPath(out, segments, entry.value);
+    applied.push({ env: entry.env, path: segments.join('.'), segments, value: entry.value });
+  }
+  if (applied.length > before) overlays.set(out, applied);
   return out;
 }
 

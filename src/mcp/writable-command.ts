@@ -124,6 +124,17 @@ function knownAbsent(fs: FSProvider, path: string): boolean {
  * modes count as traversable.
  */
 async function worldBarrier(fs: FSProvider, path: string, self: boolean, target: PermissionFacts): Promise<string | undefined> {
+  return otherUsersBarrier(fs, path, self, target.groupWrite);
+}
+
+/**
+ * `worldBarrier` for any access: `groupGrants` says whether the path's group
+ * bits give its group's members the access in question (write for a swap,
+ * read for a disclosure). Shared with the checks that judge world-writable
+ * or world-readable agent files (NB-*), so a 750 home with macOS's shared
+ * `staff` group is judged the same everywhere.
+ */
+export async function otherUsersBarrier(fs: FSProvider, path: string, self: boolean, groupGrants: boolean): Promise<string | undefined> {
   let real = path;
   try {
     const r = await fs.realpath(path);
@@ -145,7 +156,7 @@ async function worldBarrier(fs: FSProvider, path: string, self: boolean, target:
     if (dirname(dir) === dir) break;
   }
   if (!world) return undefined;
-  return !target.groupWrite || group ? world : undefined;
+  return !groupGrants || group ? world : undefined;
 }
 
 type Level = Omit<Extract<WritableCommandPath, { kind: 'directory' }>, 'kind' | 'via'>;

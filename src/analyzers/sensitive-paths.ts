@@ -41,7 +41,7 @@ export const SENSITIVE_SINKS: SensitiveSink[] = [
   { re: /(^|\/)\.local\/share\/devin\/credentials\.toml$|(^|\/)\.abacusai\/keystore\.enc[^/]*$/iu, label: 'agent credentials (Devin CLI credentials.toml, Abacus.AI keystore)' },
   { re: /(^|\/)(\.grokbot|\.cursor\/sand|sand-data)\/(local-exec-daemon-credential|host-token)\.json$|(^|\/)Grok Bot\/(sand|user)-secrets\.json$/iu, label: 'Grok Bot credentials (local exec credential, secret stores)' },
   { re: /(^|\/)\.ironclaw\/reborn\/(webui-token|([^/]+\/)?\.reborn-local-dev-secrets-master-key)$|(^|\/)\.?zeroclaw\/\.secret_key$/iu, label: 'agent credentials (IronClaw WebUI token / master key, ZeroClaw secret key)' },
-  { re: /(^|\/)openshell\/(gateway\/credentials|docker-sandbox-tokens|gateways\/[^/]+\/mtls)(\/|$)|(^|\/)openshell\/gateways\/[^/]+\/oidc_token\.json$/iu, label: 'OpenShell credentials (key-encryption key, sandbox tokens, mTLS keys)' },
+  { re: /(^|\/)openshell\/(gateway\/credentials|docker-sandbox-tokens|gateways\/[^/]+\/mtls)(\/|$)|(^|\/)openshell\/gateways\/[^/]+\/(?:oidc_token\.json|edge_token)$/iu, label: 'OpenShell credentials (key-encryption key, sandbox tokens, mTLS keys)' },
   // Other tools' credential files, keyring and typed-command history: a
   // config or skill path linked to one is neither read nor shipped.
   { re: /(^|\/)\.(vault-token|my\.cnf|mylogin\.cnf|s3cfg|boto)$|(^|\/)\.cargo\/credentials(\.toml)?$|(^|\/)\.config\/rclone\/rclone\.conf$|(^|\/)\.terraform\.d\/credentials\.tfrc\.json$/iu, label: 'credentials file (.vault-token, .my.cnf, .s3cfg, .boto, cargo, rclone, terraform)' },

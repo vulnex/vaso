@@ -3,6 +3,8 @@ import { parseTomlSafe } from '../../core/toml-safe.js';
 import type { ParsedConfig, ScanContext } from '../../core/types.js';
 import { asRecord } from './zc-config.js';
 import { isEnvReference, isPlaceholderSecret } from '../../core/patterns.js';
+import { isKnownSecretValue } from '../../analyzers/secret-values.js';
+import { envOverridesOf } from '../../adapters/env-overrides.js';
 
 /**
  * Secret-bearing field names across ZeroClaw's config (`#[secret]` fields in
@@ -19,9 +21,21 @@ const SECRET_KEYS = new Set([
   'password', 'app_password', 'smtp_password', 'sasl_password', 'server_password',
   'nickserv_password', 'private_key', 'recovery_key', 'encrypt_key', 'webhook_key',
   'auth_header', 'embedding_api_key',
+  // gateway.paired_tokens: the live `zc_…` bearer tokens of paired clients;
+  // TLS client keys
+  'paired_tokens', 'client_key',
 ]);
 /** Tables whose every string value is a secret (`[http_request.secrets]`). */
 const SECRET_MAPS = new Set(['secrets']);
+/** Header tables ZeroClaw stores as secrets (observability.otel_headers,
+ *  provider extra_headers): a header naming a credential, or a value with a
+ *  known token format, is one; `Content-Type` and the like are not. */
+const SECRET_HEADER_MAPS = new Set(['otel_headers', 'extra_headers']);
+const CREDENTIAL_HEADER = /auth|token|key|secret|cookie|passw/i;
+/** Connection URLs ZeroClaw stores as secrets (memory db_url, amqp_url):
+ *  a secret when they carry a password (`scheme://user:pass@host`). */
+const SECRET_URL_KEYS = new Set(['db_url', 'amqp_url']);
+const URL_PASSWORD = /^[a-z][a-z0-9+.-]*:\/\/[^/@\s:]*:[^/@\s]+@/i;
 
 function normaliseKey(k: string): string {
   return k.replace(/([a-z0-9])([A-Z])/g, '$1_$2').replace(/-/g, '_').toLowerCase();
@@ -61,6 +75,20 @@ export function findPlaintextSecrets(data: unknown): PlaintextSecret[] {
     if (!rec) return;
     for (const [k, v] of Object.entries(rec)) {
       const p = path ? `${path}.${k}` : k;
+      const n = normaliseKey(k);
+      if (SECRET_HEADER_MAPS.has(n) && asRecord(v)) {
+        for (const [header, value] of Object.entries(asRecord(v)!)) {
+          if (typeof value !== 'string') continue;
+          const val = value.trim();
+          if (val === '' || isProtectedSecret(val) || isPlaceholderSecret(val) || isEnvReference(val)) continue;
+          if (CREDENTIAL_HEADER.test(header) || isKnownSecretValue(val)) out.push({ path: `${p}.${header}` });
+        }
+        continue;
+      }
+      if (SECRET_URL_KEYS.has(n) && typeof v === 'string') {
+        if (URL_PASSWORD.test(v.trim()) && !isProtectedSecret(v.trim())) out.push({ path: p });
+        continue;
+      }
       const secret = secretCtx || isSecretKey(k) || (SECRET_MAPS.has(k) && asRecord(v) !== undefined);
       visit(v, p, secret, depth + 1);
     }
@@ -87,7 +115,7 @@ export async function secretSources(ctx: ScanContext): Promise<SecretSource[]> {
   const out: SecretSource[] = [];
   for (const c of ctx.configs) {
     if (c.format !== 'toml' && c.format !== 'json') continue;
-    out.push({ filePath: c.filePath, raw: c.raw, data: c.data, main: isMain(c) });
+    out.push({ filePath: c.filePath, raw: c.raw, data: fileData(c), main: isMain(c) });
   }
   const backup = join(ctx.installation.installDir, 'config.toml.backup');
   try {
@@ -101,6 +129,21 @@ export async function secretSources(ctx: ScanContext): Promise<SecretSource[]> {
     }
   } catch {}
   return out;
+}
+
+/**
+ * The values the file itself holds: config.toml data carries the
+ * ZEROCLAW_<path> overlay (env-overrides.ts), and a secret the environment
+ * supplies is not stored in the file — the environment is the safe place for
+ * it. The file's own text is re-read for those.
+ */
+function fileData(c: ParsedConfig): Record<string, unknown> {
+  if (envOverridesOf(c.data).length === 0 || c.format !== 'toml') return c.data;
+  try {
+    return parseTomlSafe(c.raw);
+  } catch {
+    return c.data;
+  }
 }
 
 function isMain(c: ParsedConfig): boolean {

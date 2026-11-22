@@ -169,10 +169,10 @@ describe('IronClaw checks', () => {
   it('0.x state unused by a 1.x binary: behavioural checks pass, secrets at rest still fire', async () => {
     const configs = [env(`${LEGACY}/.env`, {
       HTTP_HOST: '0.0.0.0', SANDBOX_ENABLED: 'false', AGENT_AUTO_APPROVE_TOOLS: 'true',
-      ALLOW_LOCAL_TOOLS: 'true', SECRETS_MASTER_KEY: 'a1b2c3d4e5f6a7b8c9d0',
+      ALLOW_LOCAL_TOOLS: 'true', SECRETS_MASTER_KEY: 'a1b2c3d4e5f6a7b8c9d0', LLM_BASE_URL: 'http://10.0.0.7:11434',
     })];
     const ctx = legacyCtx(configs, makeFs(), 'legacy-unused');
-    for (const id of ['IC-001', 'IC-003', 'IC-005', 'IC-006', 'IC-007', 'IC-008']) {
+    for (const id of ['IC-001', 'IC-002', 'IC-003', 'IC-005', 'IC-006', 'IC-007', 'IC-008']) {
       expect((await check(id).run(ctx)).passed, id).toBe(true);
     }
     expect((await check('IC-009').run(ctx)).passed).toBe(false);
@@ -210,6 +210,15 @@ describe('IC-001: Listener Bound Beyond Loopback', () => {
       expect(r.passed, exec).toBe(false);
       expect(r.evidence![0].file).toBe(unit);
       expect(r.fixable).toBe(false);
+    }
+    // a hostname resolves to a network interface too
+    for (const exec of ['ExecStart=/x/ironclaw serve --host myserver.lan', 'ExecStart="/x/ironclaw" "serve" "--host=gw.example.internal"']) {
+      const r = await check('IC-001').run(rebornCtx([onboard()], makeFs({ contents: { [unit]: `[Service]\n${exec}\n` } })));
+      expect(r.passed, exec).toBe(false);
+      expect(r.evidence![0].detail).not.toContain('"');
+    }
+    for (const exec of ['ExecStart=/x/ironclaw serve --host localhost', 'ExecStart=/x/ironclaw serve --host [::1]']) {
+      expect((await check('IC-001').run(rebornCtx([onboard()], makeFs({ contents: { [unit]: `[Service]\n${exec}\n` } })))).passed, exec).toBe(true);
     }
     const loop = makeFs({ contents: { [unit]: '[Service]\nExecStart="/x/ironclaw" "serve" "--host" "127.0.0.1"\n' } });
     expect((await check('IC-001').run(rebornCtx([onboard()], loop))).passed).toBe(true);

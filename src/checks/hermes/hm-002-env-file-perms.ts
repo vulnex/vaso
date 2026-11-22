@@ -1,8 +1,7 @@
 import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
 import { accessibleByOthers, markUnreachable, queryPermissions } from '../../core/permissions.js';
-
-const SECRET_KEY_PATTERN = /(_API_KEY|_TOKEN|_SECRET|_KEY|BEARER|PASSWORD)\s*=/i;
+import { envSecretKeys } from '../../analyzers/secret-values.js';
 
 export const hm002 = defineCheck({
   id: 'HM-002',
@@ -17,7 +16,9 @@ export const hm002 = defineCheck({
     const evidence: Evidence[] = [];
     for (const config of ctx.configs) {
       if (config.format !== 'env') continue;
-      if (!SECRET_KEY_PATTERN.test(config.raw)) continue;
+      // judged on the parsed values: a copied .env.example (keys commented
+      // out or left empty) holds no secret
+      if (envSecretKeys(config.data).length === 0) continue;
       try {
         const perms = await queryPermissions(ctx.fs, config.filePath);
         if (perms === 'unsupported') continue;

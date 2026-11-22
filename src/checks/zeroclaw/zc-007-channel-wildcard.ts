@@ -2,8 +2,26 @@ import { defineCheck } from '../../core/check-builder.js';
 import type { Evidence } from '../../core/types.js';
 import { asRecord, hasWildcard, isTrue, mainConfig, type Rec } from './zc-config.js';
 
-/** Per-channel sender allowlists where "*" admits everyone (e.g. wecom_ws allowed_users/allowed_groups, matrix allowed_rooms). */
-const CHANNEL_ALLOW_KEYS = ['allowed_users', 'allowed_groups', 'allowed_rooms'];
+/**
+ * Per-channel sender allowlists where "*" admits everyone, by channel type
+ * as ZeroClaw 0.8.5's schema (`zeroclaw config schema`) declares them. A key
+ * a channel type doesn't have (telegram `allowed_users`) is rejected as an
+ * unknown property and never applied, so it is not judged.
+ */
+const CHANNEL_ALLOW_KEYS: Record<string, string[]> = {
+  wecom_ws: ['allowed_users', 'allowed_groups'],
+  whatsapp: ['allowed_groups'],
+  matrix: ['allowed_rooms'],
+};
+const ALL_ALLOW_KEYS = [...new Set(Object.values(CHANNEL_ALLOW_KEYS).flat())];
+
+/** Chat policies that admit every sender: whatsapp `dm_policy`/`group_policy`
+ *  = "all" (default allowlist), line `dm_policy` = "open" (default pairing) and
+ *  `group_policy` = "open" (answers every group message; default mention). */
+const OPEN_POLICIES: Record<string, Record<string, string>> = {
+  whatsapp: { dm_policy: 'all', group_policy: 'all' },
+  line: { dm_policy: 'open', group_policy: 'open' },
+};
 
 /** `[channels.<type>.<alias>]` instances. Scalars among the channel types
  *  (cli, message_timeout_secs, …) are skipped; a pre-V3 single-instance
@@ -15,7 +33,8 @@ function channelInstances(data: Rec): Array<{ type: string; alias?: string; cfg:
   for (const [type, raw] of Object.entries(channels)) {
     const table = asRecord(raw);
     if (!table) continue;
-    const legacy = typeof table.enabled === 'boolean' || CHANNEL_ALLOW_KEYS.some(k => Array.isArray(table[k]));
+    const legacy = typeof table.enabled === 'boolean' || ALL_ALLOW_KEYS.some(k => Array.isArray(table[k]))
+      || Object.keys(OPEN_POLICIES[type] ?? {}).some(k => typeof table[k] === 'string');
     if (legacy) {
       out.push({ type, cfg: table });
       continue;
@@ -34,7 +53,7 @@ export const zc007 = defineCheck({
   category: 'zeroclaw',
   severity: 'critical',
   description:
-    'Detect channels that admit any sender: [peer_groups.<name>] external_peers = ["*"], or a channel instance allowlist (allowed_users/allowed_groups/allowed_rooms) containing "*"',
+    'Detect channels that admit any sender: [peer_groups.<name>] external_peers = ["*"], a channel instance allowlist containing "*" (wecom_ws allowed_users/allowed_groups, whatsapp allowed_groups, matrix allowed_rooms), or an open chat policy (whatsapp dm_policy/group_policy = "all", line dm_policy/group_policy = "open")',
   supportedAgents: ['zeroclaw'],
 
   async run(ctx, h) {
@@ -68,13 +87,22 @@ export const zc007 = defineCheck({
     }
 
     for (const inst of instances) {
-      for (const key of CHANNEL_ALLOW_KEYS) {
+      const live = isTrue(inst.cfg.enabled);
+      const path = `channels.${inst.type}${inst.alias ? `.${inst.alias}` : ''}`;
+      for (const key of CHANNEL_ALLOW_KEYS[inst.type] ?? []) {
         if (!hasWildcard(inst.cfg[key])) continue;
-        const live = isTrue(inst.cfg.enabled);
-        const path = `channels.${inst.type}${inst.alias ? `.${inst.alias}` : ''}`;
         evidence.push({
           file: config.filePath,
           detail: `${path}: ${key} = ["*"]` + (live ? ' — any sender is admitted' : ' — channel not enabled'),
+          ...(live ? {} : { mitigated: true }),
+        });
+      }
+      for (const [key, open] of Object.entries(OPEN_POLICIES[inst.type] ?? {})) {
+        if (inst.cfg[key] !== open) continue;
+        evidence.push({
+          file: config.filePath,
+          snippet: `${key} = "${open}"`,
+          detail: `${path}: ${key} = "${open}"` + (live ? ` — the agent answers every ${key.startsWith('dm') ? 'direct message' : 'group message'}` : ' — channel not enabled'),
           ...(live ? {} : { mitigated: true }),
         });
       }
@@ -82,9 +110,9 @@ export const zc007 = defineCheck({
 
     return h.fromEvidence(evidence, {
       passed: 'No channel admits arbitrary senders',
-      failed: (n) => `${n} channel allowlist(s) admit any sender ("*")`,
+      failed: (n) => `${n} channel allowlist(s) or chat policies admit any sender`,
       fixDescription:
-        'Replace "*" with explicit usernames in [peer_groups.<name>] external_peers (or the channel allowlist); use ignore for blocklists',
+        'Replace "*" with explicit usernames in [peer_groups.<name>] external_peers (or the channel allowlist); use ignore for blocklists; set whatsapp dm_policy/group_policy = "allowlist" and line dm_policy = "pairing" / group_policy = "mention"',
     });
   },
 });

@@ -8,7 +8,9 @@ import { asRecord, atomicConfigs, llmProviders } from './shared.js';
 // is appended AFTER those flags, so any of these re-arms the vendor CLI's own
 // tools on the user's machine — outside Atomic Agent's approval ladder.
 const OVERRIDES: Record<string, RegExp> = {
-  claude: /^(?:--tools|--allowed-?tools|--allowedTools|--disallowed-?tools|--mcp-config|--dangerously-skip-permissions|--permission-mode|--add-dir|--settings)(?:=|$)/i,
+  // --plugin-dir/--plugin-url load plugins whose hooks run shell commands
+  // whatever --tools says.
+  claude: /^(?:--tools|--allowed-?tools|--allowedTools|--disallowed-?tools|--mcp-config|--dangerously-skip-permissions|--allow-dangerously-skip-permissions|--permission-mode|--add-dir|--settings|--plugin-dir|--plugin-url)(?:=|$)/i,
   codex: /^(?:-s|--sandbox|--full-auto|--dangerously-bypass-approvals-and-sandbox|--yolo|-c|--config|--add-dir|--profile|-p)(?:=|$)/i,
 };
 

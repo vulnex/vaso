@@ -32,6 +32,45 @@ export function lyrieEnvConfigs(configs: ParsedConfig[]): ParsedConfig[] {
   });
 }
 
+const winners = new WeakMap<object, Map<string, string>>();
+
+/**
+ * One config per checkout holding the values Bun actually hands Lyrie: the
+ * checkout's env files merged in precedence order (a higher layer's key
+ * wins). For checks that combine several keys (a channel's token with its
+ * DM policy and allowlist) — judging each file alone misses a policy set in
+ * `.env.local` over a token in `.env`. `filePath` is the checkout's lowest
+ * layer (normally `.env`); `envFile` names the file a key's value comes from.
+ */
+export function lyrieMergedEnvs(configs: ParsedConfig[]): ParsedConfig[] {
+  const byDir = new Map<string, ParsedConfig[]>();
+  for (const c of configs) {
+    if (c.format !== 'env' || !c.data || typeof c.data !== 'object') continue;
+    const list = byDir.get(dirname(c.filePath)) ?? [];
+    list.push(c);
+    byDir.set(dirname(c.filePath), list);
+  }
+  return [...byDir.values()].map(list => {
+    const layers = [...list].sort((a, b) => layerRank(a.filePath) - layerRank(b.filePath));
+    if (layers.length === 1) return layers[0];
+    const data: Record<string, unknown> = {};
+    const from = new Map<string, string>();
+    for (const layer of layers) {
+      for (const [k, v] of Object.entries(layer.data as Record<string, unknown>)) {
+        data[k] = v;
+        from.set(k, layer.filePath);
+      }
+    }
+    winners.set(data, from);
+    return { ...layers[0], data };
+  });
+}
+
+/** The env file `key`'s value comes from (the config's own file when unset or unmerged). */
+export function envFile(config: ParsedConfig, key: string): string {
+  return winners.get(config.data as object)?.get(key) ?? config.filePath;
+}
+
 /** String value of an env key (undefined for absent / non-string). */
 export function envString(config: ParsedConfig, key: string): string | undefined {
   const v = (config.data as Record<string, unknown>)[key];
@@ -69,8 +108,9 @@ export function expandHomeRef(v: string, home: string): string {
   return v.replace(/^(?:\$\{HOME\}|\$HOME\b|~(?=\/|$))/, home);
 }
 
-/** Lyrie's boolean env parsing is `=== "true"` (a few keys also accept "1"). */
+/** Lyrie's boolean env parsing is `=== "true"` (a few keys also accept "1"):
+ *  exact, so `TRUE` or `True` is false. */
 export function envTrue(config: ParsedConfig, key: string, acceptOne = false): boolean {
-  const v = envString(config, key)?.toLowerCase();
+  const v = envString(config, key);
   return v === 'true' || (acceptOne && v === '1');
 }

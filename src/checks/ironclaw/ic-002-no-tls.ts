@@ -1,7 +1,7 @@
 import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
 import {
-  isLegacy, isLoopbackHost, legacyEnv, legacyToml, lineOf, rebornConfig, rebornProviders, str, table, tableLineOf, urlHost,
+  isLegacy, isLegacyUnused, isLoopbackHost, legacyEnv, legacyToml, lineOf, rebornConfig, rebornProviders, str, table, tableLineOf, urlHost,
 } from './layout.js';
 
 /*
@@ -54,7 +54,8 @@ export const ic002 = defineCheck({
             `providers.json "${str(entry.id) ?? '?'}".default_base_url`, url, host);
         }
       }
-    } else {
+    } else if (!isLegacyUnused(ctx)) {
+      // 0.x state a 1.x binary never reads is not judged (as in IC-001)
       const env = legacyEnv(ctx);
       for (const [key, value] of Object.entries(env?.data ?? {})) {
         if (!/_BASE_URL$|_API_URL$/.test(key)) continue;

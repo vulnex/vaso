@@ -30,8 +30,9 @@ describe('Nanobot websocket channel', () => {
   });
 
   it('CFG-004 still flags ws:// and a certificate without its key', async () => {
-    expect((await cfg004.run(ctx({ host: '0.0.0.0' }))).passed).toBe(false);
-    expect((await cfg004.run(ctx({ host: '0.0.0.0', sslCertfile: '/etc/c.pem' }))).passed).toBe(false);
+    // nanobot refuses an unauthenticated websocket on 0.0.0.0, so these carry a token
+    expect((await cfg004.run(ctx({ host: '0.0.0.0', token: 't' }))).passed).toBe(false);
+    expect((await cfg004.run(ctx({ host: '0.0.0.0', token: 't', sslCertfile: '/etc/c.pem' }))).passed).toBe(false);
   });
 
   it('CFG-001 ignores the host of a channel served on a unix socket', async () => {

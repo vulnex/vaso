@@ -540,6 +540,30 @@ describe('layered .env files (Bun precedence)', () => {
     expect(r.passed).toBe(false);
     expect(r.evidence![0].file).toBe(`${CHECKOUT}/.env.development.local`);
   });
+
+  it('combines keys across layers: a policy/allowlist in .env.local governs a token in .env', async () => {
+    const base = makeEnv({ LYRIE_DISCORD_TOKEN: 'tok', LYRIE_DISCORD_DM_POLICY: 'open', LYRIE_TELEGRAM_TOKEN: 'tg',
+      ANTHROPIC_API_KEY: 'sk-ant-api03-Q7mX2pL9vB8nW4tR6yU0' });
+    const local = makeEnv({ LYRIE_DISCORD_DM_POLICY: 'pairing', LYRIE_TELEGRAM_USERS: '31415926', LYRIE_MODE: 'local' }, `${CHECKOUT}/.env.local`);
+    expect((await check('LY-003').run(makeCtx([base, local]))).passed).toBe(true);
+    const ly007 = await check('LY-007').run(makeCtx([base, local]));
+    expect(ly007.passed).toBe(false);
+    expect(ly007.evidence![0].file).toBe(`${CHECKOUT}/.env.local`);
+    // the token's file is named when the policy is unset everywhere
+    const open = await check('LY-003').run(makeCtx([makeEnv({ LYRIE_DISCORD_TOKEN: 'tok' }), makeEnv({ X: '1' }, `${CHECKOUT}/.env.local`)]));
+    expect(open.evidence![0].file).toBe(ENV_PATH);
+  });
+});
+
+describe('exact values, as Lyrie compares them', () => {
+  it('mis-cased booleans and enum values are not the setting they spell', async () => {
+    const env = makeEnv({ NODE_ENV: 'Development', LYRIE_SHIELD_MODE: 'Passive', LYRIE_LOCAL_DRY_RUN: 'TRUE' });
+    expect((await check('LY-018').run(makeCtx([env]))).passed).toBe(true);
+    expect((await check('LY-009').run(makeCtx([env]))).passed).toBe(true);
+    const ly001 = await check('LY-001').run(makeCtx([env]));
+    expect(ly001.passed).toBe(false);
+    expect(ly001.evidence![0].detail).toContain('Invalid Shield mode');
+  });
 });
 
 describe('LY-019: skill sandbox root over-broad', () => {

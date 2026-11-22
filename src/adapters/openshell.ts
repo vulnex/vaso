@@ -132,7 +132,6 @@ export function gatewayTable(config: ParsedConfig): Record<string, unknown> | un
   return asRecord(asRecord(asRecord(config.data)?.openshell)?.gateway);
 }
 
-const TRUTHY = new Set(['1', 'true', 'yes', 'on']);
 
 function envValue(configs: ParsedConfig[], key: string): string | undefined {
   for (const c of configs) {
@@ -143,9 +142,15 @@ function envValue(configs: ParsedConfig[], key: string): string | undefined {
   return undefined;
 }
 
+/**
+ * A boolean gateway flag set in gateway.env (clap `[env: …]` flags):
+ * exactly `true` or `false` — openshell-gateway 0.0.116 refuses to start on
+ * `1`, `yes` or `TRUE`, so such a value sets nothing (undefined, as unset).
+ * A set value wins over the TOML.
+ */
 export function envTruthy(configs: ParsedConfig[], key: string): boolean | undefined {
   const v = envValue(configs, key);
-  return v === undefined ? undefined : TRUTHY.has(v.toLowerCase());
+  return v === 'true' ? true : v === 'false' ? false : undefined;
 }
 
 /** Effective listener + TLS of the gateway: env file over TOML over the built-in 127.0.0.1:17670. */
@@ -266,6 +271,7 @@ export const openshellAdapter: AgentAdapter = {
       metadataGlobPatterns: [
         '~/.config/openshell/gateways/*/mtls/*',
         '~/.config/openshell/gateways/*/oidc_token.json',
+        '~/.config/openshell/gateways/*/edge_token',
         '~/.local/state/openshell/gateway/openshell.db*',
         // By name too: a glob can't list a dir its owner can traverse but not read
         ...['', '-wal', '-shm'].map(s => `~/.local/state/openshell/gateway/openshell.db${s}`),

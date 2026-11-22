@@ -142,6 +142,10 @@ export interface FSProvider {
   /** Look up an environment variable. SnapshotFSProvider reads from the
    *  probe-collected env section; LocalFSProvider reads from process.env. */
   getEnv(key: string): string | undefined;
+  /** Names of the environment variables `getEnv` can answer (on a snapshot:
+   *  the ones the probe collected). Optional; for agents whose loader reads a
+   *  whole prefix (pydantic-settings `NANOBOT_*`). */
+  envNames?(): string[];
   readonly platform: Platform;
   /** `'snapshot'` when commands were collected ahead of time by the probe:
    *  `exec` then answers by command name, so running a second copy of a CLI
