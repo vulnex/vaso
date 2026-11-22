@@ -31,7 +31,7 @@ describe('buildProbeManifest', () => {
     expect(kinds('~/.zeroclaw/config.toml')).toEqual(['tree', 'tree', 'tree']);
     expect(kinds('~/.picoclaw/config.json')).toEqual(['tree', 'tree']);
     expect(kinds('~/.openclaw/openclaw.json')).toEqual(['tree', 'tree']);
-    expect(kinds('~/.hermes/config.yaml')).toEqual(['stat']);
+    expect(kinds('~/.hermes/config.yaml')).toEqual(['tree', 'stat']);
     expect(kinds('~/.atomic-agent/config.json')).toEqual(['stat']);
     expect(kinds('~/Library/Application Support/Claude/claude_desktop_config.json')).toEqual(['stat']);
     // a config an environment variable relocates is read there too

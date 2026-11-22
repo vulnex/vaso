@@ -44,15 +44,15 @@ export const SECURITY_PATTERNS: PatternRule[] = [
   // `| /bin/zsh`); `\b` keeps `| shasum` out. Only the first download word
   // before a `|` is tried (the lookbehind): later ones reach the same pipe,
   // and `\s+[^|]*` overlapped on a space run (each quadratic on 100 KB).
-  { id: 'CP-001', pattern: /curl\s(?<!curl\s[^|]*?curl\s)[^|]*\|\s*(?:sudo\s+(?:-\S+\s+)*)?(?:env\s+(?:[^\s=]+=\S*\s+)*)?(?:\S*\/)?(?:ba|z|k|da|fi)?sh\b/i, category: 'curl-pipe', severity: 'critical', description: 'Curl-pipe-shell execution' },
-  { id: 'CP-002', pattern: /wget\s(?<!wget\s[^|]*?wget\s)[^|]*\|\s*(?:sudo\s+(?:-\S+\s+)*)?(?:env\s+(?:[^\s=]+=\S*\s+)*)?(?:\S*\/)?(?:ba|z|k|da|fi)?sh\b/i, category: 'curl-pipe', severity: 'critical', description: 'Wget-pipe-shell execution' },
+  { id: 'CP-001', pattern: /curl\s(?<!curl\s[^|]*?curl\s)[^|]*\|\s*(?:(?:tee|cat)\b[^|\n]*\|\s*)*(?:sudo\s+(?:-[ugCDhprRTU]\s+[^\s|-][^\s|]*\s+|-\S+\s+)*)?(?:(?:\S*\/)?env\s+(?:-\S+\s+)*(?:[^\s=]+=\S*\s+)*)?(?:\S*\/)?(?:ba|z|k|da|fi)?sh\b/i, category: 'curl-pipe', severity: 'critical', description: 'Curl-pipe-shell execution' },
+  { id: 'CP-002', pattern: /wget\s(?<!wget\s[^|]*?wget\s)[^|]*\|\s*(?:(?:tee|cat)\b[^|\n]*\|\s*)*(?:sudo\s+(?:-[ugCDhprRTU]\s+[^\s|-][^\s|]*\s+|-\S+\s+)*)?(?:(?:\S*\/)?env\s+(?:-\S+\s+)*(?:[^\s=]+=\S*\s+)*)?(?:\S*\/)?(?:ba|z|k|da|fi)?sh\b/i, category: 'curl-pipe', severity: 'critical', description: 'Wget-pipe-shell execution' },
   // Only when Python runs the download: its program from stdin (`| python`,
   // `| python3 - --args`, `| python3 /dev/stdin`) or `-c` code that executes
   // stdin however it is spelled (`exec(sys.stdin.read())`, `import sys as s;
   // exec(s.stdin.read())`, `exec(compile(sys.stdin.read(), …))`, `from sys
   // import stdin; exec(stdin.read())`). `| python -m json.tool` and
   // `| python -c "print(…)"` read the download as data.
-  { id: 'CP-003', pattern: /(?:curl|wget)\s(?<!(?:curl|wget)\s[^|]*?(?:curl|wget)\s)[^|]*\|\s*(?:sudo\s+(?:-\S+\s+)*)?(?:env\s+(?:[^\s=]+=\S*\s+)*)?(?:\S*\/)?python[\d.]*\b(?:\s+-(?![cm]\b)[A-Za-z]+)*(?:\s*(?=$|[;&|)'"`#\n])|\s+-(?=\s|$)|\s+\/dev\/stdin\b|\s+-c\s+["'](?=[^"'\n]{0,300}\b(?:exec|eval)\s*\()(?=[^"'\n]{0,300}(?:\bstdin\b|\bopen\(\s*(?:0|["']\/dev\/stdin["']))))/i, category: 'curl-pipe', severity: 'critical', description: 'Curl-pipe-python execution' },
+  { id: 'CP-003', pattern: /(?:curl|wget)\s(?<!(?:curl|wget)\s[^|]*?(?:curl|wget)\s)[^|]*\|\s*(?:(?:tee|cat)\b[^|\n]*\|\s*)*(?:sudo\s+(?:-[ugCDhprRTU]\s+[^\s|-][^\s|]*\s+|-\S+\s+)*)?(?:(?:\S*\/)?env\s+(?:-\S+\s+)*(?:[^\s=]+=\S*\s+)*)?(?:\S*\/)?python[\d.]*\b(?:\s+-(?![cm]\b)[A-Za-z]+)*(?:\s*(?=$|[;&|)'"`#\n])|\s+-(?=\s|$)|\s+\/dev\/stdin\b|\s+-c\s+["'](?=[^"'\n]{0,300}\b(?:exec|eval)\s*\()(?=[^"'\n]{0,300}(?:\bstdin\b|\bopen\(\s*(?:0|["']\/dev\/stdin["']))))/i, category: 'curl-pipe', severity: 'critical', description: 'Curl-pipe-python execution' },
   // Download executed without a pipe: `bash <(curl …)`, `sh -c "$(curl …)"`,
   // `eval "$(wget -qO- …)"`, `source <(curl …)`
   { id: 'CP-004', pattern: /(?:\b(?:ba|z|k|da)?sh|\bsource|(?:^|[\s;&|])\.)\s+<\(\s*(?:curl|wget)\b/i, category: 'curl-pipe', severity: 'critical', description: 'Shell process substitution of a download' },
@@ -65,7 +65,7 @@ export const SECURITY_PATTERNS: PatternRule[] = [
   // where a command starts — made executable, run, or sourced — not when a
   // later command reads it (`&& tar xzf f.tgz`, `&& jq . out.json`). Bounded
   // runs: one download word per line is tried (as CP-001).
-  { id: 'CP-007', pattern: /\b(?:curl|wget)\s(?<!\b(?:curl|wget)\s[^\n]{0,400}?\b(?:curl|wget)\s)[^\n|;&]{0,300}?(?<=\s)(?:-o|-O|--output(?:-document)?)[=\s]\s*['"]?([\w./~$-]{1,200})['"]?[^\n]{0,300}?(?:\bchmod\s+(?:[ugoa]*\+[rwX]*x[rwX]*|0?[1357][0-7]{2})\s+['"]?\1(?![\w./-])|(?:&&|;|\|\||\$\(|`)\s*(?:sudo\s+)?(?:(?:ba|z|da|k)?sh\s+|source\s+|\.\s+|python[\d.]*\s+|node\s+|perl\s+)?['"]?\1(?![\w./-]))/i, category: 'curl-pipe', severity: 'critical', description: 'Download saved to a file and executed' },
+  { id: 'CP-007', pattern: /\b(?:curl|wget)\s(?<!\b(?:curl|wget)\s[^\n]{0,400}?\b(?:curl|wget)\s)[^\n|;&]{0,300}?(?:(?<=\s)(?:-o|-O|--output(?:-document)?)[=\s]|(?<![\d&>])>{1,2})\s*['"]?([\w./~$-]{1,200})['"]?[^\n]{0,300}?(?:\bchmod\s+(?:[ugoa]*\+[rwX]*x[rwX]*|0?[1357][0-7]{2})\s+['"]?\1(?![\w./-])|(?:&&|;|\|\||\$\(|`)\s*(?:sudo\s+)?(?:(?:ba|z|da|k)?sh\s+|source\s+|\.\s+|python[\d.]*\s+|node\s+|perl\s+)?['"]?\1(?![\w./-]))/i, category: 'curl-pipe', severity: 'critical', description: 'Download saved to a file and executed' },
   { id: 'CP-006', pattern: /\b(?:iwr|irm|invoke-webrequest|invoke-restmethod)\b(?<!\b(?:iwr|irm|invoke-webrequest|invoke-restmethod)\b[^|]*?\b(?:iwr|irm|invoke-webrequest|invoke-restmethod)\b)[^|]*\|\s*(?:iex|invoke-expression)\b|\b(?:iex|invoke-expression)\s*(?:\(\s*){0,2}(?:iwr|irm|invoke-webrequest|invoke-restmethod|new-object\s+net\.webclient)\b/i, category: 'curl-pipe', severity: 'critical', description: 'PowerShell download-and-execute' },
 
   // Credential harvesting (from B@dskills)
@@ -76,6 +76,10 @@ export const SECURITY_PATTERNS: PatternRule[] = [
   { id: 'CH-005', pattern: /\/\.docker\/config\.json/i, category: 'credential-harvest', severity: 'critical', description: 'Docker config access' },
   { id: 'CH-006', pattern: /\/\.netrc/i, category: 'credential-harvest', severity: 'warning', description: '.netrc file access' },
   { id: 'CH-007', pattern: /\/\.npmrc/i, category: 'credential-harvest', severity: 'warning', description: '.npmrc file access (may contain auth tokens)' },
+  // A credential directory archived, copied or dumped whole
+  // (`tar czf - ~/.ssh | curl -T -`, `cp -r ~/.aws /tmp/x`); not `ls ~/.ssh`
+  // or `chmod 700 ~/.ssh`. One command word per line is tried (as CP-001).
+  { id: 'CH-009', pattern: /\b(?:tar|zip|7z|rsync|scp|cp|base64|xxd|gzip|cat)\b(?<!\b(?:tar|zip|7z|rsync|scp|cp|base64|xxd|gzip|cat)\b[^\n|;&]{0,300}?\b(?:tar|zip|7z|rsync|scp|cp|base64|xxd|gzip|cat)\b)[^\n|;&]{0,300}?(?<![\w.-])(?:~|\$\{?HOME\}?|\/(?:home|Users)\/[\w.-]+)?\/\.(?:ssh|aws|gnupg|kube)(?:\/\*?)?(?=[\s'\"|;&)]|$)/i, category: 'credential-harvest', severity: 'critical', description: 'Credential directory archived or copied' },
   // Reading the keychain — not the word (`# don't use the OS keychain`)
   { id: 'CH-008', pattern: /\bsecurity\s+(?:find-(?:generic|internet)-password|dump-keychain|export\s+-k)\b|\bSec(?:ItemCopyMatching|KeychainFind(?:Generic|Internet)Password)\b|\/Library\/Keychains\/|\blogin\.keychain(?:-db)?\b|\bchainbreaker\b/i, category: 'credential-harvest', severity: 'critical', description: 'macOS Keychain access' },
 
@@ -88,7 +92,7 @@ export const SECURITY_PATTERNS: PatternRule[] = [
   // `require(m)[k]`). postMessage transfer is a browser API.
 
   // Prompt injection indicators
-  { id: 'PI-001', pattern: /ignore\s+(?:all\s+)?(?:previous|above|prior)\s+instructions/i, category: 'prompt-injection', severity: 'warning', description: 'Prompt injection — instruction override' },
+  { id: 'PI-001', pattern: /\b(?:ignore|disregard)\s+(?:(?:all|the|any)\s+){0,2}(?:previous|above|prior|earlier|preceding)\s+instructions/i, category: 'prompt-injection', severity: 'warning', description: 'Prompt injection — instruction override' },
   { id: 'PI-002', pattern: /you\s+are\s+now\s+(?:(?:a|an)\s+|in\s+(?:[\w-]+\s+){0,2}(?:mode|persona)\b)/i, category: 'prompt-injection', severity: 'warning', description: 'Prompt injection — role reassignment' },
   { id: 'PI-003', pattern: /system\s*:\s*you\s+(?:must|should|are)/i, category: 'prompt-injection', severity: 'warning', description: 'Prompt injection — fake system prompt' },
   // Not a markdown table cell holding only the tag (`| [System] | [Type] |` is a
@@ -115,25 +119,45 @@ export const SECURITY_PATTERNS: PatternRule[] = [
   { id: 'OB-004', pattern: /\\u[0-9a-fA-F]{4}(?:\\u[0-9a-fA-F]{4}){5,}/i, category: 'obfuscation', severity: 'warning', description: 'Unicode-encoded string (6+ chars)' },
 ];
 
+/** A line ending in an unescaped `\` (an odd run of them). */
+const CONTINUED = /(?<!\\)(?:\\\\)*\\\r?$/;
+const MAX_CONTINUED_LINES = 20;
+
+/**
+ * What the patterns read: invisible characters dropped (`cu​rl` is
+ * `curl` to a reader and to a copy-paste) and the shell's `${IFS}` / `$IFS`
+ * word separator read as the space it is (`curl${IFS}-fsSL${IFS}x|bash`).
+ */
+export function normalizeForPatterns(line: string): string {
+  return line.replace(/[​-‍⁠﻿­]/g, '').replace(/\$\{IFS\}|\$IFS(?!\w)/g, ' ');
+}
+
 export function scanWithPatterns(code: string, rules?: PatternRule[]): PatternMatch[] {
   const patterns = rules ?? SECURITY_PATTERNS;
   const matches: PatternMatch[] = [];
   const lines = code.split('\n');
 
   for (let i = 0; i < lines.length; i++) {
-    const line = lines[i];
+    const first = i;
     // Skip JS/TS line comments and JSDoc continuation lines. Markdown
     // headings (#) are intentionally not skipped — SKL-007 and CC-011 scan
     // .md content where # carries meaning.
-    const trimmed = line.trimStart();
+    const trimmed = lines[i].trimStart();
     if (trimmed.startsWith('//') || trimmed.startsWith('*')) continue;
+    // A shell command continued with a trailing `\` is one command
+    // (`curl … \` / `  | bash`), matched as one line at its first line
+    let line = lines[i];
+    while (i + 1 < lines.length && i - first < MAX_CONTINUED_LINES && CONTINUED.test(line)) {
+      line = line.replace(CONTINUED, ' ') + lines[++i];
+    }
+    line = normalizeForPatterns(line);
 
     for (const rule of patterns) {
       if (rule.pattern.test(line)) {
         matches.push({
           pattern: rule.id,
           category: rule.category,
-          line: i + 1,
+          line: first + 1,
           snippet: line.trim().slice(0, 120),
           severity: rule.severity,
           description: rule.description,

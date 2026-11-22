@@ -40,6 +40,18 @@ describe('dt17: download-then-run (CP-007) on hostile lines', () => {
   });
 });
 
+describe('1.4.3: runner prefixes, redirects, credential dirs and continued lines on hostile input', () => {
+  it('stays fast', () => {
+    expect(timed(() => scanWithPatterns(`curl x |${' tee a |'.repeat(20_000)} nope`))).toBeLessThan(1000);
+    expect(timed(() => scanWithPatterns(`curl x | sudo ${'-u r '.repeat(20_000)}nope`))).toBeLessThan(1000);
+    expect(timed(() => scanWithPatterns(`curl x | ${'/a/env '.repeat(20_000)}nope`))).toBeLessThan(1000);
+    expect(timed(() => scanWithPatterns(`curl x ${'> f '.repeat(20_000)}`))).toBeLessThan(1000);
+    expect(timed(() => scanWithPatterns(`tar ${'cat '.repeat(30_000)}~/.sshx`))).toBeLessThan(1000);
+    expect(timed(() => scanWithPatterns(`${'curl x \\\n'.repeat(30_000)}`))).toBeLessThan(1000);
+    expect(timed(() => scanWithPatterns(`${'​$IFS'.repeat(30_000)}`))).toBeLessThan(1000);
+  });
+});
+
 describe('dt13 perf: linear on adversarial input', () => {
   it('hidden-instruction tag regex with many unclosed quoted attributes', async () => {
     const { DIRECTIVE_PATTERNS } = await import('../mcp/injection-directives.js');
