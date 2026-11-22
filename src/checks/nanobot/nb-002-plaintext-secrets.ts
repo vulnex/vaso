@@ -70,7 +70,7 @@ export const nb002 = defineCheck({
         const perms = await queryPermissions(ctx.fs, config.filePath);
         // Critical only when every user can actually reach the file: a
         // parent without world traversal (e.g. a 0750 home) blocks it.
-        if (perms !== 'unsupported' && perms.worldRead && !(await worldTraversalBarrier(ctx, config.filePath))) {
+        if (perms !== 'unsupported' && perms.worldRead && !(await worldTraversalBarrier(ctx, config.filePath, perms.groupRead))) {
           exposed = true;
           exposure = ` — and config.json (mode 0${perms.octal}) is readable by all users`;
         }

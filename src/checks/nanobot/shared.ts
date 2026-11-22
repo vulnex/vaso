@@ -1,8 +1,9 @@
-import { dirname } from 'node:path';
 import type { Evidence, ParsedConfig, ScanContext } from '../../core/types.js';
 import { markUnreachable, queryPermissions } from '../../core/permissions.js';
 import { nanobotWorkspaceDir } from '../../adapters/nanobot.js';
 import { isLoopbackAddress } from '../../core/listen-address.js';
+import { otherUsersBarrier } from '../../mcp/writable-command.js';
+import { uncollectedPath } from '../../core/probe-coverage.js';
 
 /*
  * Shared helpers for the NB-* checks. Every accessor tolerates the shapes a
@@ -103,15 +104,20 @@ export function workspaceDir(ctx: ScanContext): string {
 export async function worldWritable(
   ctx: ScanContext,
   paths: Array<{ path: string; what: string }>,
+  unverified?: string[],
 ): Promise<Evidence[]> {
   const evidence: Evidence[] = [];
   for (const { path, what } of paths) {
     try {
-      if (!(await ctx.fs.access(path))) continue;
+      if (!(await ctx.fs.access(path))) {
+        // a workspace moved out of ~/.nanobot: the probe doesn't collect its files
+        if (unverified && (await uncollectedPath(ctx.fs, path))) unverified.push(path);
+        continue;
+      }
       const perms = await queryPermissions(ctx.fs, path);
       if (perms === 'unsupported' || !perms.worldWrite) continue;
       const e: Evidence = { file: path, snippet: `mode 0${perms.octal}`, detail: `${what} is world-writable` };
-      const barrier = await worldTraversalBarrier(ctx, path);
+      const barrier = await worldTraversalBarrier(ctx, path, perms.groupWrite);
       if (barrier) {
         e.mitigated = true;
         e.detail += ` — mitigated: not reachable by other users, parent ${barrier} blocks traversal`;
@@ -124,28 +130,28 @@ export async function worldWritable(
   return evidence;
 }
 
-/** First ancestor directory other users cannot traverse (no world x bit).
- *  Unknown ancestors count as traversable, like markUnreachable. */
-export async function worldTraversalBarrier(ctx: ScanContext, path: string): Promise<string | undefined> {
-  for (let dir = dirname(path); ; dir = dirname(dir)) {
-    try {
-      const q = await queryPermissions(ctx.fs, dir);
-      if (q !== 'unsupported' && !q.worldExec) return `${dir} (${q.octal})`;
-    } catch {
-      // unknown — treat as traversable
-    }
-    if (dirname(dir) === dir) return undefined;
-  }
+/** The ancestor directory that keeps other users from reaching `path`: one
+ *  the world can't traverse, and — when `groupGrants` (the path's group bits
+ *  give its group the access judged) — one the group can't traverse either
+ *  (a 750 home with macOS's shared `staff` group is no barrier). Unknown
+ *  ancestors count as traversable, like markUnreachable. */
+export async function worldTraversalBarrier(ctx: ScanContext, path: string, groupGrants: boolean): Promise<string | undefined> {
+  return otherUsersBarrier(ctx.fs, path, false, groupGrants);
 }
 
 /** Evidence for files readable by group/world, with parent mitigation. */
 export async function readableByOthersEvidence(
   ctx: ScanContext,
   paths: Array<{ path: string; what: string }>,
+  unverified?: string[],
 ): Promise<Evidence[]> {
   const evidence: Evidence[] = [];
   for (const { path, what } of paths) {
     try {
+      if (unverified && !(await ctx.fs.access(path)) && (await uncollectedPath(ctx.fs, path))) {
+        unverified.push(path);
+        continue;
+      }
       const perms = await queryPermissions(ctx.fs, path);
       if (perms === 'unsupported' || !(perms.groupRead || perms.worldRead)) continue;
       evidence.push({

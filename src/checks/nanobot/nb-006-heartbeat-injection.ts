@@ -1,5 +1,6 @@
 import { join } from 'node:path';
 import { defineCheck } from '../../core/check-builder.js';
+import { notCollectedNote } from '../../core/probe-coverage.js';
 import { getPath, nanobotConfigs, pyBool, workspaceDir, worldWritable } from './shared.js';
 
 export const nb006 = defineCheck({
@@ -17,13 +18,14 @@ export const nb006 = defineCheck({
       return h.passed('Gateway heartbeat is disabled (gateway.heartbeat.enabled: false)');
     }
     const ws = workspaceDir(ctx);
+    const unverified: string[] = [];
     const evidence = await worldWritable(ctx, [
       { path: join(ws, 'HEARTBEAT.md'), what: 'HEARTBEAT.md (periodic autonomous task list)' },
       { path: ws, what: 'The agent workspace directory (HEARTBEAT.md can be replaced)' },
-    ]);
+    ], unverified);
     return h.fromEvidence(evidence, {
-      passed: 'HEARTBEAT.md is not writable by other users',
-      failed: () => 'HEARTBEAT.md can be modified by other local users — injected tasks run autonomously',
+      passed: unverified.length > 0 ? `HEARTBEAT.md is not writable by other users; ${notCollectedNote('path(s)', unverified)}` : 'HEARTBEAT.md is not writable by other users',
+      failed: () => `HEARTBEAT.md can be modified by other local users — injected tasks run autonomously${unverified.length > 0 ? `; ${notCollectedNote('path(s)', unverified)}` : ''}`,
       fixDescription: 'chmod o-w the workspace directory and HEARTBEAT.md (e.g. chmod 700 ~/.nanobot/workspace; chmod 600 ~/.nanobot/workspace/HEARTBEAT.md)',
     });
   },

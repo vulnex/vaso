@@ -1,5 +1,6 @@
 import { join } from 'node:path';
 import { defineCheck } from '../../core/check-builder.js';
+import { notCollectedNote } from '../../core/probe-coverage.js';
 import { workspaceDir, worldWritable } from './shared.js';
 
 export const nb010 = defineCheck({
@@ -14,15 +15,16 @@ export const nb010 = defineCheck({
   async run(ctx, h) {
     const cronDir = join(workspaceDir(ctx), 'cron');
     const legacyDir = join(ctx.installation.installDir, 'cron');
+    const unverified: string[] = [];
     const evidence = await worldWritable(ctx, [
       { path: join(cronDir, 'jobs.json'), what: 'The cron job store' },
       { path: cronDir, what: 'The cron directory (jobs.json can be replaced)' },
       { path: join(legacyDir, 'jobs.json'), what: 'The legacy cron job store (migrated on startup)' },
       { path: legacyDir, what: 'The legacy cron directory' },
-    ]);
+    ], unverified);
     return h.fromEvidence(evidence, {
-      passed: 'Cron job store is not writable by other users',
-      failed: (n) => `${n} cron location(s) writable by other local users — scheduled agent turns can be injected`,
+      passed: unverified.length > 0 ? `Cron job store is not writable by other users; ${notCollectedNote('path(s)', unverified)}` : 'Cron job store is not writable by other users',
+      failed: (n) => `${n} cron location(s) writable by other local users — scheduled agent turns can be injected${unverified.length > 0 ? `; ${notCollectedNote('path(s)', unverified)}` : ''}`,
       fixDescription: 'chmod 700 <workspace>/cron and chmod 600 <workspace>/cron/jobs.json',
     });
   },

@@ -1,5 +1,6 @@
 import { join } from 'node:path';
 import { defineCheck } from '../../core/check-builder.js';
+import { notCollectedNote } from '../../core/probe-coverage.js';
 import { workspaceDir, worldWritable } from './shared.js';
 
 export const nb007 = defineCheck({
@@ -13,6 +14,7 @@ export const nb007 = defineCheck({
 
   async run(ctx, h) {
     const ws = workspaceDir(ctx);
+    const unverified: string[] = [];
     const evidence = await worldWritable(ctx, [
       { path: join(ws, 'AGENTS.md'), what: 'AGENTS.md (system prompt)' },
       { path: join(ws, 'SOUL.md'), what: 'SOUL.md (system prompt)' },
@@ -22,10 +24,10 @@ export const nb007 = defineCheck({
       { path: join(ws, 'skills'), what: 'The workspace skills directory' },
       { path: join(ws, 'plugins'), what: 'The workspace plugins directory' },
       { path: ws, what: 'The agent workspace directory (prompt files can be replaced)' },
-    ]);
+    ], unverified);
     return h.fromEvidence(evidence, {
-      passed: 'Prompt, memory and skill locations are not writable by other users',
-      failed: (n) => `${n} prompt/memory/skill location(s) writable by other local users — persistent prompt injection`,
+      passed: unverified.length > 0 ? `Prompt, memory and skill locations are not writable by other users; ${notCollectedNote('path(s)', unverified)}` : 'Prompt, memory and skill locations are not writable by other users',
+      failed: (n) => `${n} prompt/memory/skill location(s) writable by other local users — persistent prompt injection${unverified.length > 0 ? `; ${notCollectedNote('path(s)', unverified)}` : ''}`,
       fixDescription: 'Remove world write access: chmod 700 ~/.nanobot/workspace ~/.nanobot/workspace/{memory,skills,plugins}; chmod 600 the .md files',
     });
   },
