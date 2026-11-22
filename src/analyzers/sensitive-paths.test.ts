@@ -53,6 +53,25 @@ describe('SENSITIVE_SINKS', () => {
     for (const p of ['/home/u/.codex/skills/x', '/home/u/.config/ghostty', '/home/u/.github/x']) expect(classifySensitivePath(p), p).toEqual([]);
   });
 
+  it('covers other tools\' credential files, the GNOME keyring and typed-command history', () => {
+    for (const p of ['/home/u/.vault-token', '/home/u/.my.cnf', '/home/u/.mylogin.cnf', '/home/u/.s3cfg', '/home/u/.boto',
+      '/home/u/.cargo/credentials.toml', '/home/u/.cargo/credentials', '/home/u/.config/rclone/rclone.conf',
+      '/home/u/.terraform.d/credentials.tfrc.json', '/home/u/.local/share/keyrings/login.keyring',
+      '/home/u/.zsh_history', '/home/u/.bash_history', '/home/u/.psql_history', '/Users/u/.zsh_sessions/x.history',
+      '/home/u/.local/share/fish/fish_history']) {
+      expect(classifySensitivePath(p), p).toHaveLength(1);
+    }
+    for (const p of ['/home/u/.vault-token', '/home/u/.cargo/credentials.toml', '/home/u/.config/rclone/rclone.conf', '/home/u/.local/share/keyrings/x']) {
+      expect(isCredentialPath(p), p).toBe(true);
+    }
+    expect(credentialStoreOf('/home/u/.local/share/keyrings/cop/config.json')).toBeDefined();
+    // look-alikes and agents' own files stay ordinary
+    for (const p of ['/home/u/.cargo/config.toml', '/home/u/.config/rclone/filters.txt', '/home/u/proj/history.md',
+      '/home/u/.claude/history.jsonl', '/home/u/.local/share/opencode/x', '/home/u/my.cnf.d/readme']) {
+      expect(classifySensitivePath(p), p).toEqual([]);
+    }
+  });
+
   it("covers every agent token store the probe manifest ships as metadata only", async () => {
     // The manifest's metadata-only globs are the list of agent credential
     // files; a skills tree reaching one through a link (or a linked root)

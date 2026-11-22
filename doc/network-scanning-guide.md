@@ -467,7 +467,7 @@ A remote scan copies data from the target to the scanning machine. This is what 
 
 - **Only manifest-listed paths.** The probe reads the config files, globs, directory listings and system paths in the manifest that `vaso probe manifest` prints — agent configs, skill trees, MCP configs, install metadata — under the scanned homes. It does not walk the rest of the filesystem. A probe running as **root** expands these paths for every home on the host (and records them in the snapshot) even without `--all-users`; `--all-users` only decides whether VASO analyses them.
 - **Conversation and history stores are metadata only** — Codex sessions, ChatGPT conversations, Gemini chats, Copilot history and session state, Muse app data, editor `state.vscdb` and similar are recorded as existence and permissions, never content.
-- **Credential and token stores are metadata only** — credential files (auth/token JSON, keystores, `credentials.toml` and the like) are recorded with permissions for the checks, never their contents. A skill that links into a credential location (`~/.ssh`, `~/.aws`, `~/.kube`, shell rc files, …) is recorded as a link; what it points to is not read.
+- **Credential and token stores are metadata only** — credential files (auth/token JSON, keystores, `credentials.toml` and the like) are recorded with permissions for the checks, never their contents. A skill or agent config that links into a credential location (`~/.ssh`, `~/.aws`, `~/.kube`, shell rc files, other tools' credential files such as `.vault-token`, `.my.cnf`, `.s3cfg`, cargo/rclone/terraform credentials, the GNOME keyring, shell and REPL history, …) is recorded as a link; what it points to is not read.
 
 **How secrets in collected files are handled**
 
