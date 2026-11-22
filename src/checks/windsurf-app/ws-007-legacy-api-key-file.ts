@@ -3,6 +3,7 @@ import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
 import { markUnreachable, queryPermissions, readableByOthers } from '../../core/permissions.js';
 import { restrictFilesToOwner } from '../../remediation/config-writer.js';
+import { permissionFixTargets } from '../../remediation/fix-refusal.js';
 
 export const ws007 = defineCheck({
   id: 'WS-007',
@@ -11,6 +12,7 @@ export const ws007 = defineCheck({
   severity: 'warning',
   description: 'Verify that the legacy ~/.codeium/config.json (plaintext Codeium API key) is not readable by other users',
   supportedAgents: ['windsurf'],
+  fixTargets: permissionFixTargets,
 
   async run(ctx, h) {
     const configPath = join(ctx.fs.homedir(), '.codeium', 'config.json');
