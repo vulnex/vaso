@@ -28,6 +28,14 @@ describe('dedupePermissionFindings', () => {
     expect(pol.message).toContain('other files reported by DEV-002');
   });
 
+  it('recounts the leading file count after dropping files another check reports', () => {
+    const out = dedupePermissionFindings([
+      r('DEV-002', [{ file: '/h/a.toml', snippet: 'mode 0664', detail: 'a.toml is readable by group/other' }]),
+      r('POL-003', [perm('/h/a.toml'), perm('/h/b.json')], { message: '2 session/credential file(s) have overly permissive permissions' }),
+    ]);
+    expect(out.find(x => x.id === 'POL-003')!.message).toBe('1 session/credential file(s) have overly permissive permissions (other files reported by DEV-002)');
+  });
+
   it('keeps a folded CFG-003 fixable (counted once, still fixed by `vaso fix`)', () => {
     const out = dedupePermissionFindings([
       r('LY-006', [{ file: '/h/lyrie/.env', detail: 'Permissions: 644 (should be 600 or tighter)' }]),
