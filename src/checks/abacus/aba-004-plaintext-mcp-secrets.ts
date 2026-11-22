@@ -1,13 +1,16 @@
 import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
 import { literalSecret, mask, mcpServers } from './shared.js';
+import { findArgSecrets, findUrlSecrets } from '../../mcp/config-secrets.js';
+
+const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
 
 export const aba004 = defineCheck({
   id: 'ABA-004',
   name: 'Abacus.AI Plaintext Secrets in MCP Config',
   category: 'coding-agent',
   severity: 'critical',
-  description: 'Detect literal secrets in Abacus.AI MCP server env, headers and OAuth client secrets (config.json, mcp.json, desktop mcp-<mode>.json) — the files are plain JSON and the desktop copies them into its runtime directory',
+  description: 'Detect literal secrets in Abacus.AI MCP server env, headers, arguments, URLs and OAuth client secrets (config.json, mcp.json, desktop mcp-<mode>.json) — the files are plain JSON and the desktop copies them into its runtime directory',
   supportedAgents: ['abacus'],
 
   async run(ctx, h) {
@@ -39,6 +42,26 @@ export const aba004 = defineCheck({
             detail: token
               ? `Plaintext ${token} in MCP ${field} "${key}"`
               : `Literal secret-like value for "${key}" in MCP ${field}`,
+          });
+        }
+      }
+
+      // Tokens on the command line (`--token ghp_…`, `-H "Authorization: …"`)
+      // or in the server URL (`?api_key=…`, userinfo) — the shared MCP finder
+      const args = Array.isArray(server.args) ? server.args.filter((a): a is string => typeof a === 'string') : [];
+      for (const secret of findArgSecrets(args, typeof server.command === 'string' ? server.command : undefined)) {
+        evidence.push({
+          file: config.filePath,
+          snippet: `${path}.${secret.location}: ${secret.masked}`,
+          detail: `${cap(secret.kind)} in an MCP server argument — stored in this config and visible to any local user in the process list`,
+        });
+      }
+      if (typeof server.url === 'string') {
+        for (const secret of findUrlSecrets(server.url, 'url')) {
+          evidence.push({
+            file: config.filePath,
+            snippet: `${path}.url: ${secret.masked}`,
+            detail: `${cap(secret.kind)} in the MCP server URL — stored and logged as written; send it in a header from the environment instead`,
           });
         }
       }

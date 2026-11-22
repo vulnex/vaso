@@ -200,6 +200,19 @@ describe('MCP checks (ABA-004/006/007/008) over both config shapes', () => {
     ]);
   });
 
+  it('ABA-004 flags tokens in server arguments and URL query strings, masked', async () => {
+    const token = 'ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghij';
+    const r = await check('ABA-004').run(userCtx([cfg(USER_MCP, { mcpServers: {
+      cli: { command: 'npx', args: ['-y', 'some-mcp@1.0.0', '--token', token] },
+      web: { type: 'http', url: `https://mcp.example.com/mcp?api_key=q8Zr2LmW7xVb4NcTk3Yd` },
+      clean: { command: 'npx', args: ['-y', 'some-mcp@1.0.0', '--token', '${GH_TOKEN}'], url: undefined },
+    } })]));
+    expect(r.evidence?.map(e => e.snippet?.split(':')[0])).toEqual(['mcpServers.cli.args[3]', 'mcpServers.web.url']);
+    const out = JSON.stringify(r);
+    expect(out).not.toContain(token);
+    expect(out).not.toContain('q8Zr2LmW7xVb4NcTk3Yd');
+  });
+
   it('ABA-004 ignores environment references', async () => {
     const r = await check('ABA-004').run(userCtx([cfg(USER_MCP, { mcpServers: {
       a: { command: 'x', env: { API_KEY: '${API_KEY}' } },
