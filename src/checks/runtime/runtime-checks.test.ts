@@ -399,6 +399,15 @@ describe('RUN-001: agent services vs. suspicious persistence', () => {
     expect(bad.detail).toContain('/tmp/.x/clawbot');
   });
 
+  it('reads `/usr/bin/env node <script>` and systemd %h, and names the agent rather than the keyword', async () => {
+    const fs = linuxFs({
+      'openclaw-gateway.service': '[Service]\nExecStart=/usr/bin/env NODE_ENV=production node %h/.nvm/versions/node/v22.22.1/lib/node_modules/openclaw/dist/index.js gateway\n',
+    });
+    const result = await run001.run(makeRunCtx(fs, 'linux'));
+    expect(result.evidence?.[0].mitigated).toBe(true);
+    expect(result.evidence?.[0].detail).toBe('Systemd service for an installed agent ("openclaw") — runs /home/test/.nvm/versions/node/v22.22.1/lib/node_modules/openclaw/dist/index.js');
+  });
+
   it('parses ExecStart prefixes/quotes and launchd Program/ProgramArguments', () => {
     expect(systemdCommand('ExecStart=-"/opt/My App/bin/nanobot" run')).toEqual(['/opt/My App/bin/nanobot', 'run']);
     const plist = '<dict><key>ProgramArguments</key><array><string>/opt/homebrew/bin/openclaw</string><string>gateway</string></array></dict>';
