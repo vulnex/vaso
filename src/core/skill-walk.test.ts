@@ -41,6 +41,17 @@ describe.skipIf(process.platform === 'win32')('walkSkillTree', () => {
     expect(await getSkillFiles(skills, fs)).toContain(join(skills, 'linked', 'lib', 'util.js'));
   });
 
+  it('lists a link in a vendor folder without following or judging it (as the probe records it)', async () => {
+    await mkdir(join(skills, 'local', 'venv'), { recursive: true });
+    await symlink('/usr/share', join(skills, 'local', 'venv', 'share'));
+    await symlink(join(outside, 'linked'), join(skills, 'local', 'venv', 'lib'));
+    const refused: string[] = [];
+    const entries = await walkSkillTree(fs, skills, refused);
+    expect(refused).toEqual([]);
+    expect(files(entries)).toEqual([join(skills, 'local', 'index.js')]);
+    expect(entries.filter(e => e.isSymbolicLink).map(e => e.name).sort()).toEqual(['lib', 'share']);
+  });
+
   it('does not walk a link into the tree twice', async () => {
     await symlink(join(skills, 'local'), join(skills, 'alias'));
     expect(files(await walkSkillTree(fs, skills))).toEqual([join(skills, 'local', 'index.js')]);
