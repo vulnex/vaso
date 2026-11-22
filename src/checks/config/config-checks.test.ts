@@ -703,6 +703,44 @@ describe('deep-test 2026-10-15: OpenClaw 2026.9.4 schema', () => {
     expect(r.evidence?.[0].file).toBe('/h/.openclaw/agents/x/agent.json');
   });
 
+  // OpenClaw 2026.11.2 tool policy: minimal/messaging profiles carry no
+  // runtime or fs tools; deny wins; group:runtime / group:fs expand
+  it.each([
+    [{ tools: { profile: 'messaging' } }, true, true],
+    [{ tools: { profile: 'minimal' } }, true, true],
+    [{ tools: { deny: ['group:runtime', 'group:fs'] } }, true, true],
+    [{ tools: { deny: ['*'] } }, true, true],
+    [{ tools: { deny: ['bash'] } }, true, false],
+    [{ tools: { allow: ['web_search', 'message'] } }, true, true],
+    // alsoAllow widens the profile
+    [{ tools: { profile: 'messaging', alsoAllow: ['exec'] } }, false, true],
+    [{ tools: { profile: 'coding' } }, false, false],
+    [{ tools: { profile: 'full' } }, false, false],
+    // an allowlist of plugin tools only is dropped by OpenClaw: core tools stay
+    [{ tools: { allow: ['my_plugin_tool'] } }, false, false],
+    // an agent's own profile replaces the root one
+    [{ tools: { profile: 'messaging' }, agents: { entries: { ops: { tools: { profile: 'coding' } } } } }, false, false],
+    [{ tools: { profile: 'coding' }, agents: { entries: { ops: { tools: { profile: 'messaging' } } } } }, false, false],
+  ])('CFG-005/006 on %j: exec removed %s, fs removed %s', async (data, noExec, noFs) => {
+    expect((await cfg005.run(oc(data))).passed).toBe(noExec);
+    expect((await cfg006.run(oc(data))).passed).toBe(noFs);
+  });
+
+  it('CFG-005 judges only the agents that keep exec', async () => {
+    const data = { tools: { profile: 'messaging', exec: { mode: 'full' } }, agents: { entries: { ops: { tools: { profile: 'coding', exec: { mode: 'ask' } } } } } };
+    expect((await cfg005.run(oc(data))).passed).toBe(true);
+    const weak = { tools: { profile: 'messaging' }, agents: { entries: { ops: { tools: { profile: 'coding', exec: { mode: 'full' } } } } } };
+    const r = await cfg005.run(oc(weak));
+    expect(r.passed).toBe(false);
+    expect(r.evidence?.map(e => e.detail)).toEqual(['agents.entries.ops.tools.exec.mode: full']);
+  });
+
+  it('CFG-005/006 pass a gateway.mode "remote" client (tools run on the remote gateway)', async () => {
+    const data = { gateway: { mode: 'remote', remote: { url: 'wss://gw.example.com' } } };
+    expect((await cfg005.run(oc(data))).passed).toBe(true);
+    expect((await cfg006.run(oc(data))).passed).toBe(true);
+  });
+
   it('CFG-013 flags a per-account dmPolicy "open"', async () => {
     const r = await cfg013.run(oc({ channels: { telegram: { enabled: true, dmPolicy: 'pairing', accounts: { ops: { dmPolicy: 'open' } } } } }));
     expect(r.passed).toBe(false);

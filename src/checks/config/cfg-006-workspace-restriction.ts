@@ -2,7 +2,7 @@ import { defineCheck } from '../../core/check-builder.js';
 import { CODING_AGENTS, type Evidence } from '../../core/types.js';
 import { NATIVE_POLICY_FRAMEWORKS } from './native-policy-frameworks.js';
 import { getNestedValue } from '../../core/utils.js';
-import { openclawAgentEntries } from './openclaw-agents.js';
+import { OPENCLAW_FS_TOOLS, openclawRemoteClient, openclawToolScopes } from './openclaw-tool-policy.js';
 
 export const cfg006 = defineCheck({
   id: 'CFG-006',
@@ -21,16 +21,26 @@ export const cfg006 = defineCheck({
     // An agent entry's tools.fs.workspaceOnly overrides the root one for that
     // agent, as does a sub-agent file's.
     if (ctx.installation.agent === 'openclaw') {
+      if (openclawRemoteClient(ctx.configs)) {
+        return h.passed('gateway.mode is "remote" — file tools run on the remote gateway, under its config, not this one\'s');
+      }
+      // Only agents that have file tools are judged (tools.profile minimal /
+      // messaging, or allow/deny lists, can remove them all)
+      const scopes = openclawToolScopes(ctx.configs, OPENCLAW_FS_TOOLS);
+      if (scopes.length > 0 && !scopes.some(s => s.available)) {
+        return h.passed('No agent has file tools (tools.profile / tools.allow / tools.deny) — nothing to confine');
+      }
       const restricted = ctx.configs.some(c => getNestedValue(c.data, 'tools.fs.workspaceOnly') === true);
       const evidence: Evidence[] = [];
       for (const c of ctx.configs) {
-        if (getNestedValue(c.data, 'tools.fs.workspaceOnly') === false) {
+        const own = scopes.find(s => s.config === c && s.agentId === undefined);
+        if (getNestedValue(c.data, 'tools.fs.workspaceOnly') === false && (own?.available ?? true)) {
           evidence.push({ file: c.filePath, detail: 'tools.fs.workspaceOnly: false' });
         }
       }
-      for (const entry of openclawAgentEntries(ctx.configs)) {
-        if (getNestedValue(entry.data, 'tools.fs.workspaceOnly') === false) {
-          evidence.push({ file: entry.config.filePath, detail: `agents.entries.${entry.id}.tools.fs.workspaceOnly: false` });
+      for (const scope of scopes) {
+        if (scope.entry && scope.available && getNestedValue(scope.entry, 'tools.fs.workspaceOnly') === false) {
+          evidence.push({ file: scope.config.filePath, detail: `agents.entries.${scope.agentId}.tools.fs.workspaceOnly: false` });
         }
       }
       const passed = restricted && evidence.length === 0;

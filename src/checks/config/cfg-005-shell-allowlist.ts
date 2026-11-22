@@ -4,7 +4,7 @@ import { CODING_AGENTS } from '../../core/types.js';
 import { NATIVE_POLICY_FRAMEWORKS } from './native-policy-frameworks.js';
 import { fixFirstConfig } from '../../remediation/config-writer.js';
 import { getNestedValue } from '../../core/utils.js';
-import { openclawAgentEntries } from './openclaw-agents.js';
+import { OPENCLAW_EXEC_TOOLS, openclawRemoteClient, openclawToolScopes } from './openclaw-tool-policy.js';
 import { configFixTargets } from '../../remediation/fix-refusal.js';
 
 /** The exec policy one OpenClaw `tools.exec` object selects: `mode`, else the legacy `security`. */
@@ -27,23 +27,37 @@ function execPolicy(exec: unknown): { value: string; key: string } | undefined {
  * set` validates the change.
  */
 function openclawExecPolicy(ctx: ScanContext, h: CheckHelpers) {
+  if (openclawRemoteClient(ctx.configs)) {
+    return h.passed('gateway.mode is "remote" — commands run on the remote gateway, under its exec policy, not this config\'s');
+  }
+  // Only agents that have the exec tool are judged: tools.profile minimal /
+  // messaging, or an allow/deny list without exec, leave nothing to run
+  const scopes = openclawToolScopes(ctx.configs, OPENCLAW_EXEC_TOOLS);
+  if (scopes.length > 0 && !scopes.some(s => s.available)) {
+    return h.passed('The exec tool is not available to any agent (tools.profile / tools.allow / tools.deny) — no host commands run');
+  }
   const evidence: Evidence[] = [];
   const set: string[] = [];
+  // an agent with exec and no tools.exec of its own runs under the root policy
+  let inheritsRoot = scopes.length === 0;
   for (const config of ctx.configs) {
     const policy = execPolicy(getNestedValue(config.data, 'tools.exec'));
     if (!policy) continue;
     set.push(`${policy.value} (tools.exec.${policy.key})`);
-    if (policy.value === 'full') {
+    const own = scopes.find(s => s.config === config && s.agentId === undefined);
+    if (policy.value === 'full' && (own?.available ?? true)) {
       evidence.push({ file: config.filePath, detail: `tools.exec.${policy.key}: full` });
     }
   }
-  for (const entry of openclawAgentEntries(ctx.configs)) {
-    const policy = execPolicy(getNestedValue(entry.data, 'tools.exec'));
-    if (policy?.value === 'full') {
-      evidence.push({ file: entry.config.filePath, detail: `agents.entries.${entry.id}.tools.exec.${policy.key}: full` });
+  for (const scope of scopes) {
+    if (!scope.available) continue;
+    const policy = scope.entry ? execPolicy(getNestedValue(scope.entry, 'tools.exec')) : undefined;
+    if (!policy) inheritsRoot = true;
+    else if (policy.value === 'full') {
+      evidence.push({ file: scope.config.filePath, detail: `agents.entries.${scope.agentId}.tools.exec.${policy.key}: full` });
     }
   }
-  if (set.length === 0) {
+  if (set.length === 0 && inheritsRoot) {
     evidence.push({
       file: ctx.configs[0]?.filePath ?? ctx.installation.installDir,
       detail: 'tools.exec.mode not set — OpenClaw default is "full"',
