@@ -4,12 +4,14 @@ import { defineCheck } from '../../core/check-builder.js';
 import { CODING_AGENTS } from '../../core/types.js';
 import { agentsNamedIn } from './agent-names.js';
 
-const SUSPICIOUS_KEYWORDS = [
+export const SUSPICIOUS_KEYWORDS = [
   'claw',          // catches openclaw, nanoclaw, picoclaw, ironclaw, zeroclaw, nemoclaw, clawdbot
   'nanobot',
   'moltbot',
   'hermes-agent',  // specific enough to avoid Facebook Hermes / unrelated tooling
   'lyrie',
+  'atomic-agent',
+  'openshell',
 ];
 
 const INTERPRETERS = new Set(['node', 'nodejs', 'bun', 'deno', 'python', 'python3', 'uv', 'uvx', 'npx', 'bunx', 'tsx', 'ts-node']);
@@ -66,7 +68,7 @@ export function effectiveCommand(parts: string[], home: string): string[] {
   return out;
 }
 
-function agentExecutable(rawParts: string[], keyword: string, ctx: ScanContext): string | undefined {
+export function agentExecutable(rawParts: string[], keyword: string, ctx: ScanContext): string | undefined {
   const home = ctx.fs.homedir();
   const parts = effectiveCommand(rawParts, home);
   if (parts.length === 0) return undefined;
@@ -117,7 +119,7 @@ async function classify(
  * on the host. Suspicious units (not running a recognized install) and units
  * naming no known framework are reported under each agent.
  */
-function keep(evidence: Evidence[], entry: string, ctx: ScanContext, item: Evidence): void {
+export function keep(evidence: Evidence[], entry: string, ctx: ScanContext, item: Evidence): void {
   const owners = agentsNamedIn(entry);
   if (item.mitigated && owners.length > 0 && !owners.includes(ctx.installation.agent)) return;
   evidence.push(item);

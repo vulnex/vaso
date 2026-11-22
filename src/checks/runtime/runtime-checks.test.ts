@@ -186,10 +186,26 @@ describe('RUN-002: Suspicious Cron Entries', () => {
     expect(result.evidence?.[0].snippet).toContain('openclaw');
   });
 
-  it('flags cron entries that reference nanobot', async () => {
-    const crontab = '*/10 * * * * /usr/local/bin/nanobot heartbeat';
+  it('flags cron entries that run an agent-named program outside the install roots', async () => {
+    const crontab = '*/10 * * * * /tmp/.cache/nanobot heartbeat';
     const result = await run002.run(makeCronCtx(crontab));
     expect(result.passed).toBe(false);
+    expect(result.severity).toBe('warning');
+  });
+
+  it("reports an installed agent's own job as info, under that agent only", async () => {
+    const ctx = makeCronCtx('*/10 * * * * /usr/local/bin/nanobot heartbeat\n@reboot /home/test/.local/bin/openclaw gateway');
+    const r = await run002.run(ctx);
+    // the nanobot job belongs to nanobot's installation; openclaw's own job is info
+    expect(r.evidence?.map(e => e.detail)).toEqual(['Cron entry runs an installed agent — /home/test/.local/bin/openclaw']);
+    expect(r.severity).toBe('info');
+    expect(r.message).toContain('all run an installed agent');
+  });
+
+  it('covers Lyrie, Atomic Agent and OpenShell too', async () => {
+    for (const name of ['lyrie', 'atomic-agent', 'openshell']) {
+      expect((await run002.run(makeCronCtx(`0 3 * * * /tmp/${name}-sync`))).passed).toBe(false);
+    }
   });
 
   it('passes when crontab is unavailable', async () => {
