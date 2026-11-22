@@ -272,6 +272,13 @@ describe('AT-005 credential file permissions', () => {
     expect((await check('AT-005').run(makeCtx([]))).passed).toBe(true);
   });
 
+  it('judges a loaded .env by its values: no stored credential, no finding', async () => {
+    const fs = makeFs({ modes: { [`${STATE}/.env`]: 0o100644, '/home/test': 0o040755, [STATE]: 0o040755 } });
+    const env = (data: Record<string, string>) => ({ raw: '', format: 'env' as const, filePath: `${STATE}/.env`, data });
+    expect((await check('AT-005').run(makeCtx([env({ OPENAI_API_KEY: '', TELEGRAM_BOT_TOKEN: 'your-bot-token' })], fs))).passed).toBe(true);
+    expect((await check('AT-005').run(makeCtx([env({ TELEGRAM_BOT_TOKEN: '7234567890:AAF3k9Qx2mZ7pL1vB8nW4tR6yU0cE5dH1sJ' })], fs))).passed).toBe(false);
+  });
+
   it('downgrades to info when a parent directory blocks access', async () => {
     const fs = makeFs({ modes: { [`${STATE}/.env`]: 0o100644, '/home/test': 0o040700, [STATE]: 0o040755 } });
     const r = await check('AT-005').run(makeCtx([], fs));

@@ -4,6 +4,7 @@ import { defineCheck } from '../../core/check-builder.js';
 import { accessibleByOthers, markUnreachable, queryPermissions } from '../../core/permissions.js';
 import { restrictFilesToOwner } from '../../remediation/config-writer.js';
 import { permissionFixTargets } from '../../remediation/fix-refusal.js';
+import { envSecretKeys } from '../../analyzers/secret-values.js';
 
 // Upstream writes both with mode 0600, so a wider mode means the file was
 // created or copied by hand (a common first step: `cp .env.example .env`).
@@ -29,6 +30,11 @@ export const at005 = defineCheck({
       const file = join(ctx.installation.installDir, rel);
       try {
         if (!(await ctx.fs.access(file))) continue;
+        // A loaded .env is judged on its parsed values: a copied .env.example
+        // (keys commented out or left empty) holds no credential. An .env
+        // that couldn't be parsed is still judged by its mode.
+        const loaded = rel === '.env' ? ctx.configs.find((c) => c.filePath === file && c.format === 'env') : undefined;
+        if (loaded && envSecretKeys(loaded.data).length === 0) continue;
         const perms = await queryPermissions(ctx.fs, file);
         if (perms === 'unsupported' || !accessibleByOthers(perms)) continue;
         evidence.push({
