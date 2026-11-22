@@ -5,7 +5,7 @@ import type { ProbeManifest } from '../core/snapshot-types.js';
 import type { FSProvider } from '../core/fs-provider.js';
 import { LocalFSProvider } from '../core/local-fs-provider.js';
 import { loadConfig } from '../core/config-loader.js';
-import { deepMerge, getNestedValue } from '../core/utils.js';
+import { getNestedValue } from '../core/utils.js';
 import { discoverCliInstalls } from './cli-installs.js';
 import { npmPackageJsonGlobs } from './nvm-binary.js';
 import { queryCliVersion, readPackageVersion } from './version-query.js';
@@ -38,10 +38,6 @@ const USER_CLI_RELATIVE_PATHS = [
   '.nvm/current/bin/openclaw',
   '.npm-global/bin/openclaw',
   'bin/openclaw',
-];
-
-const AGENT_CONFIG_FILENAMES = [
-  'agent.yaml', 'agent.json', 'config.yaml', 'config.json', '.env',
 ];
 
 const APP_BUNDLE_PATH = '/Applications/OpenClaw.app';
@@ -398,70 +394,10 @@ export const openclawAdapter: AgentAdapter = {
         };
         installations.push(globalInstallation);
 
-        // Discover per-agent subdirectories
-        const agentsDir = join(dir, 'agents');
-        if (await fs.access(agentsDir)) {
-          try {
-            const agentEntries = await fs.readdirEntries(agentsDir);
-            for (const entry of agentEntries) {
-              if (!entry.isDirectory) continue;
-              const agentSubDir = join(agentsDir, entry.name);
-
-              // Load agent-specific config files
-              const agentConfigFiles = [];
-              for (const filename of AGENT_CONFIG_FILENAMES) {
-                const filePath = join(agentSubDir, filename);
-                try {
-                  const config = await loadConfig(filePath, fs);
-                  agentConfigFiles.push(config);
-                } catch {
-                  // File doesn't exist or can't be parsed
-                }
-              }
-
-              // 2026.x keeps per-agent runtime state in agents/<id>/ too
-              // (agents/main/agent/auth-profiles.json, sessions/) — only a
-              // directory with its own config file is a sub-agent install;
-              // the rest are state dirs of agents configured in openclaw.json.
-              if (agentConfigFiles.length === 0) continue;
-
-              // Merge global config data with agent-specific data
-              let agentMerged = { ...merged };
-              for (const c of agentConfigFiles) {
-                agentMerged = deepMerge(agentMerged, c.data) as Record<string, unknown>;
-              }
-
-              // Per-agent skills only: the shared dir is the parent
-              // installation's, scanned (and reported) there once — analysing
-              // it again per sub-agent only repeated the work, since
-              // inherited findings are dropped from sub-agents anyway
-              const agentSkillsDirs: string[] = [];
-              const agentSkillsDir = join(agentSubDir, 'skills');
-              if (await fs.access(agentSkillsDir)) {
-                agentSkillsDirs.push(agentSkillsDir);
-              }
-
-              installations.push({
-                agent: 'openclaw',
-                agentName: entry.name,
-                version,
-                installDir: agentSubDir,
-                configFiles: [...configFiles, ...agentConfigFiles],
-                skillsDir: agentSkillsDirs.length > 0 ? agentSkillsDirs[agentSkillsDirs.length - 1] : undefined,
-                skillsDirs: agentSkillsDirs.length > 0 ? agentSkillsDirs : undefined,
-                gateway: openclawGatewayInfo(agentMerged, inContainer),
-                models: await this.getModels?.([...configFiles, ...agentConfigFiles]),
-                profile,
-                user: options?.allUsers ? user : undefined,
-                appBundle,
-                cliBinary,
-                otherInstalls: installs.others.length > 0 ? installs.others : undefined,
-              });
-            }
-          } catch {
-            // agents/ directory not readable
-          }
-        }
+        // No OpenClaw release reads a config from agents/<id>/ (2026.11.2:
+        // only runtime state — auth profiles, sessions — lives there); an
+        // agent's overrides are agents.entries.<id> in this config, judged on
+        // this installation (OC-001, CFG-005/006/008).
 
         foundForUser = true;
       }
@@ -618,14 +554,8 @@ export const openclawAdapter: AgentAdapter = {
         '~/.openclaw-*/skills/**',
         // a profile's default workspace skills/ (as for ~/.openclaw)
         '~/.openclaw-*/workspace/skills/**',
-        '~/.openclaw/agents/*/agent.yaml',
-        '~/.openclaw/agents/*/agent.json',
-        '~/.openclaw/agents/*/config.yaml',
-        '~/.openclaw/agents/*/config.json',
-        '~/.openclaw/agents/*/.env',
-        '~/.openclaw/agents/*/skills/**',
         // Legacy dirs load skills the same way
-        ...['~/.clawdbot', '~/.moltbot'].flatMap(d => [`${d}/skills/**`, `${d}/agents/*/skills/**`, `${d}/workspace/skills/**`]),
+        ...['~/.clawdbot', '~/.moltbot'].flatMap(d => [`${d}/skills/**`, `${d}/workspace/skills/**`]),
       ],
       commands: [
         { id: 'openclaw-which', cmd: 'which', args: ['openclaw'], timeout: 3000 },
