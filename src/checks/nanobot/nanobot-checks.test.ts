@@ -477,7 +477,7 @@ describe('NB-008: websocket / WebUI authentication', () => {
 
   it('reports an unauthenticated unix-socket channel as info, not a browser-reachable hole (dt20 g5-F5)', async () => {
     const ctx = await makeCtx(merge(onboardConfig(), {
-      channels: { websocket: { unixSocketPath: '/run/nanobot.sock', host: '0.0.0.0', websocketRequiresToken: false } },
+      channels: { websocket: { unixSocketPath: '/run/nanobot.sock', host: '10.0.0.9', websocketRequiresToken: false } },
     }));
     const r = await check('NB-008').run(ctx);
     expect(r.severity).toBe('info');

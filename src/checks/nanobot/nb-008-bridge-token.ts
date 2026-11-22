@@ -1,6 +1,6 @@
 import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
-import { nanobotWebsocketHost } from '../../adapters/nanobot.js';
+import { nanobotWebsocketHost, nanobotWebsocketRejected } from '../../adapters/nanobot.js';
 import { hostPort } from '../../core/listen-address.js';
 import { asRecord, getPath, isLoopbackHost, nanobotConfigs, nonEmptyString, pick, pyBool } from './shared.js';
 
@@ -12,8 +12,9 @@ import { asRecord, getPath, isLoopbackHost, nanobotConfigs, nonEmptyString, pick
  * short-lived token when websocketRequiresToken is true, else nothing. Tokens
  * are issued by tokenIssuePath, protected by tokenIssueSecret (or token).
  * No Origin check — any web page can open ws://127.0.0.1:8765.
- * The schema only rejects an unauthenticated 0.0.0.0 / :: bind; a specific
- * LAN address without auth loads fine.
+ * The schema only rejects an unauthenticated 0.0.0.0 / :: bind (nanobot then
+ * doesn't start: reported at info); a specific LAN address without auth loads
+ * fine.
  */
 
 export const nb008 = defineCheck({
@@ -30,7 +31,14 @@ export const nb008 = defineCheck({
 
     for (const config of nanobotConfigs(ctx.configs)) {
       const ws = asRecord(getPath(config.data, 'channels.websocket')) ?? {};
-      if (pyBool(ws.enabled) !== false) {
+      if (pyBool(ws.enabled) !== false && nanobotWebsocketRejected(ws)) {
+        evidence.push({
+          file: config.filePath,
+          snippet: `channels.websocket.host: ${JSON.stringify(pick(ws, 'host'))}`,
+          detail: 'A wildcard websocket host needs a token, tokenIssueSecret or trustedProxyAuth — nanobot rejects this config.json and does not start (set one before binding beyond loopback)',
+          mitigated: true,
+        });
+      } else if (pyBool(ws.enabled) !== false) {
         const unixSocket = nonEmptyString(pick(ws, 'unixSocketPath'));
         const hostRaw = pick(ws, 'host');
         // A whitespace-only host never binds: no network exposure to rate

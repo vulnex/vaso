@@ -176,7 +176,7 @@ describe('Nanobot adapter', () => {
   });
 
   it('reports wss:// only when sslCertfile and sslKeyfile are both set, in either casing (dt20 g5-F2)', () => {
-    const gw = (ws: Record<string, unknown>) => nanobotAdapter.getGatewayInfo({ channels: { websocket: { host: '0.0.0.0', ...ws } } });
+    const gw = (ws: Record<string, unknown>) => nanobotAdapter.getGatewayInfo({ channels: { websocket: { host: '10.0.0.9', ...ws } } });
     expect(gw({ sslCertfile: '/etc/c.pem', sslKeyfile: '/etc/k.pem' })?.tls).toBe(true);
     expect(gw({ ssl_certfile: '/etc/c.pem', ssl_keyfile: '/etc/k.pem' })?.tls).toBe(true);
     // One without the other: the channel refuses to start over TLS
@@ -184,8 +184,18 @@ describe('Nanobot adapter', () => {
     expect(gw({ sslCertfile: '/etc/c.pem', sslKeyfile: '  ' })?.tls).toBe(false);
   });
 
+  it('a websocket host nanobot rejects or cannot resolve does not listen', () => {
+    const gw = (ws: Record<string, unknown>) => nanobotAdapter.getGatewayInfo({ channels: { websocket: ws } });
+    // wildcard_host_requires_auth: config.json fails to load
+    expect(gw({ host: '0.0.0.0', websocketRequiresToken: false })).toBeUndefined();
+    expect(gw({ host: '::' })).toBeUndefined();
+    expect(gw({ host: '0.0.0.0', token: 'tok' })?.host).toBe('0.0.0.0');
+    // getaddrinfo takes no brackets
+    expect(gw({ host: '[::]', token: 'tok' })).toBeUndefined();
+  });
+
   it('reads a numeric-string websocket port as pydantic does (dt20 re-verify)', () => {
-    const gw = (port: unknown) => nanobotAdapter.getGatewayInfo({ channels: { websocket: { host: '0.0.0.0', port } } });
+    const gw = (port: unknown) => nanobotAdapter.getGatewayInfo({ channels: { websocket: { host: '10.0.0.9', port } } });
     expect(gw('9000')?.port).toBe(9000);
     expect(gw(' 9001 ')?.port).toBe(9001);
     expect(gw('auto')?.port).toBe(8765);

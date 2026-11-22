@@ -67,13 +67,30 @@ export const NANOBOT_DEFAULT_WEBSOCKET_PORT = 8765;
  * The address the websocket channel listens on. Absent (or null) is the
  * WebSocketConfig default 127.0.0.1; a present empty string is kept by
  * pydantic and handed to asyncio's create_server, which binds every
- * interface (IPv4 and IPv6) for it. A whitespace-only host fails to resolve,
+ * interface (IPv4 and IPv6) for it. A whitespace-only host, or a bracketed
+ * one (`[::]`, `[::1]` — getaddrinfo takes no brackets), fails to resolve,
  * so the channel never listens: undefined.
  */
 export function nanobotWebsocketHost(raw: unknown): string | undefined {
   if (typeof raw !== 'string') return '127.0.0.1';
   if (raw === '') return '0.0.0.0';
+  if (raw.trim().startsWith('[')) return undefined;
   return raw.trim() === '' ? undefined : raw.trim();
+}
+
+/**
+ * WebSocketConfig's `wildcard_host_requires_auth` validator: a host of
+ * exactly "0.0.0.0" or "::" with no token, tokenIssueSecret or
+ * trustedProxyAuth fails validation, so nanobot refuses to load config.json
+ * and nothing listens (nanobot-ai 0.4.1).
+ */
+export function nanobotWebsocketRejected(ws: Record<string, unknown>): boolean {
+  const field = (camel: string): unknown => camel in ws ? ws[camel] : ws[camel.replace(/[A-Z]/g, c => `_${c.toLowerCase()}`)];
+  const host = field('host');
+  if (host !== '0.0.0.0' && host !== '::') return false;
+  const set = (v: unknown): boolean => typeof v === 'string' && v.trim().length > 0;
+  const proxy = field('trustedProxyAuth');
+  return !set(field('token')) && !set(field('tokenIssueSecret')) && (proxy === undefined || proxy === null);
 }
 
 function asRecord(v: unknown): Record<string, unknown> | undefined {
@@ -297,7 +314,7 @@ export const nanobotAdapter: AgentAdapter = {
     // _build_ssl_context; one without the other fails the channel's start)
     const set = (v: unknown): boolean => typeof v === 'string' && v.trim().length > 0;
     const listenHost = nanobotWebsocketHost(host);
-    if (listenHost === undefined) return undefined;
+    if (listenHost === undefined || nanobotWebsocketRejected(ws)) return undefined;
     return {
       host: listenHost,
       // pydantic coerces a numeric string ("9000") to the int port

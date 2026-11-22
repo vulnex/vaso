@@ -3,7 +3,7 @@
   "llm": {
     "activeTextProvider": "main",
     "providers": [
-      {"id": "main", "kind": "openai", "model": "gpt-5", "baseUrl": "http://llm.example.net/v1", "apiKey": "sk-literalkey1234567890abcdef",
+      {"id": "main", "kind": "openai-compatible", "model": "gpt-5", "baseUrl": "http://llm.example.net/v1", "apiKey": "sk-literalkey1234567890abcdef",
        "headers": {"Authorization": "Bearer abcdefghijklmnop"}},
       {"id": "cc", "kind": "subscription-cli", "subscriptionCli": {"cli": "claude", "extraArgs": ["--dangerously-skip-permissions"]}}
     ]
@@ -16,5 +16,5 @@
     {"name": "ww", "transport": {"kind": "stdio", "command": "{{HOME}}/tools/mcp-bin", "args": []}},
     {"name": "remote", "transport": {"kind": "streamable_http", "url": "http://mcp.example.org/mcp"}}
   ]},
-  "webhooks": {"open": {"prompt": "x"}, "withsecret": {"secret": "hooksecretvalue123"}}
+  "webhooks": {"open": {"userMessageTemplate": "x"}, "withsecret": {"userMessageTemplate": "y", "secret": "hooksecretvalue123"}}
 }

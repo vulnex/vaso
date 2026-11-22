@@ -62,12 +62,14 @@ export const ic001 = defineCheck({
           // systemd ExecStart=… serve --host 0.0.0.0 ; launchd <string>--host</string><string>0.0.0.0</string>
           const joined = lines[i] + (lines[i].includes('<string>--host</string>') ? (lines[i + 1] ?? '') : '');
           // `ironclaw service install` quotes each ExecStart argument
-          const m = /--host"?(?:=|\s+|<\/string>\s*<string>)"?\[?([0-9a-fA-F:.]+)\]?/.exec(joined);
-          if (m && exposedBind(m[1])) {
+          // — an address or a hostname (`serve --host myserver.lan`)
+          const m = /--host"?(?:=|\s+|<\/string>\s*<string>)"?([^\s"'<]+)/.exec(joined);
+          const host = m?.[1].replace(/^\[(.*)\]$/, '$1');
+          if (host && exposedBind(host)) {
             evidence.push({
               file: unit.file,
               line: i + 1,
-              detail: `Service runs \`ironclaw serve --host ${m[1]}\` — WebChat v2 listener reachable from the network`,
+              detail: `Service runs \`ironclaw serve --host ${host}\` — WebChat v2 listener reachable from the network`,
             });
           }
         }
