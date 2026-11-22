@@ -5,7 +5,7 @@
   },
   "channels": {
     "websocket": {
-      "host": "[::]",
+      "host": "::",
       "port": 8765,
       "token": "golden-static-ws-token-0001"
     }
