@@ -1,8 +1,10 @@
 import { normalize } from 'node:path';
 
 /**
- * Shared "overly broad trusted path" catalogue for workspace-trust checks
- * (CDX-006, GEM-011, GHC-009). Trusting one of these paths defeats the
+ * Shared "overly broad trusted path" catalogue for workspace-trust and
+ * path-permission checks (CDX-006, GEM-011, GHC-009, ABA-*, DEV-*, OPC-002, …).
+ * A directory above the home always counts; with `ancestors`, so does a
+ * directory above any catalogue entry. Trusting one of these paths defeats the
  * approval prompt for anything run inside it.
  */
 
@@ -47,13 +49,23 @@ export function isBroadPath(rawPath: string, broadPaths: BroadPath[], home: stri
     ? normalized.slice(0, -1)
     : normalized;
   const exact = broadPaths.find(b => trimmed === b.path);
-  if (exact || !opts.ancestors || !trimmed.startsWith('/')) return exact;
-  const below = broadPaths.find(b => b.path !== '/' && b.path.startsWith(`${trimmed}/`));
-  if (!below) return undefined;
-  return {
-    path: trimmed,
-    reason: below.path === home
-      ? `contains every home directory under it, ${home} included`
-      : `contains ${below.path}, which ${below.reason}`,
-  };
+  if (exact) return exact;
+  if (!trimmed.startsWith('/')) return undefined;
+  if (opts.ancestors) {
+    // The agent trusts the whole subtree: a folder above any broad path is broad
+    const below = broadPaths.find(b => b.path !== '/' && b.path.startsWith(`${trimmed}/`));
+    if (!below) return undefined;
+    return {
+      path: trimmed,
+      reason: below.path === home
+        ? `contains every home directory under it, ${home} included`
+        : `contains ${below.path}, which ${below.reason}`,
+    };
+  }
+  // A directory above the home (`/Users`, `/home`, `~/..`) covers it too —
+  // and every other user's home beside it
+  if (broadPaths.some(b => b.path === home) && trimmed !== home && home.startsWith(trimmed === '/' ? '/' : `${trimmed}/`)) {
+    return { path: trimmed, reason: 'contains the home directory and every other user\'s' };
+  }
+  return undefined;
 }

@@ -34,6 +34,17 @@ export const adv002 = defineCheck({
     const npmDeps = await collectServerDependencies(join(installDir, 'package.json'), 'javascript', ctx.fs, { searchParents: false });
     const cargoDeps = await loadCargoTomlDeps(ctx, installDir);
     const undeclared = transitiveLookup(ctx, installDir);
+    const pushShipped = (t: ShippedCopy, adv: (typeof depAdvisories)[number]) => {
+      if (!adv.appliesWhen) matched.add(adv.severity);
+      // An advisory that needs a particular use of the library (appliesWhen)
+      // can't be judged for code the agent doesn't own: report it, informationally.
+      evidence.push({
+        file: t.source,
+        detail: `${adv.id}: ${adv.affectedDependency!.name}@${t.version} (installed as a dependency of a dependency) — ${adv.title}`
+          + (adv.appliesWhen ? ` — applies only when ${adv.appliesWhen.usage}` : ''),
+        ...(adv.appliesWhen ? { mitigated: true } : {}),
+      });
+    };
 
     for (const adv of depAdvisories) {
       const dep = adv.affectedDependency!;
@@ -56,20 +67,15 @@ export const adv002 = defineCheck({
             ...(match === 'excluded' ? { mitigated: true } : {}),
           });
         }
+        // Another package's own copy of it, nested in node_modules
+        for (const t of (await undeclared(dep.name)).filter(c => c.nested)) {
+          if (satisfies(fullVersion(t.version), dep.versionConstraint)) pushShipped(t, adv);
+        }
         continue;
       }
       const shipped = dep.ecosystem === 'npm' || dep.ecosystem === undefined ? await undeclared(dep.name) : [];
       for (const t of shipped) {
-        if (!satisfies(fullVersion(t.version), dep.versionConstraint)) continue;
-        if (!adv.appliesWhen) matched.add(adv.severity);
-        // An advisory that needs a particular use of the library (appliesWhen)
-        // can't be judged for code the agent doesn't own: report it, informationally.
-        evidence.push({
-          file: t.source,
-          detail: `${adv.id}: ${dep.name}@${t.version} (installed as a dependency of a dependency) — ${adv.title}`
-            + (adv.appliesWhen ? ` — applies only when ${adv.appliesWhen.usage}` : ''),
-          ...(adv.appliesWhen ? { mitigated: true } : {}),
-        });
+        if (satisfies(fullVersion(t.version), dep.versionConstraint)) pushShipped(t, adv);
       }
       if (shipped.length > 0) continue;
       const cargoVersion = cargoDeps[dep.name];
@@ -90,38 +96,57 @@ export const adv002 = defineCheck({
   },
 });
 
+interface ShippedCopy {
+  version: string;
+  source: string;
+  /** A copy nested under another package (`a/node_modules/<name>`), not the hoisted one. */
+  nested: boolean;
+}
+
 /**
- * Exact versions of a package the project doesn't declare but ships anyway
- * (a dependency of a dependency): the hoisted installed copy, else every
- * lockfile entry for it (package-lock v2/v3 `packages`, nested copies too).
- * Looked up by advisory name only — no full tree walk.
+ * Exact versions of a package the project ships: the hoisted copy (installed,
+ * else its lockfile entry) plus every nested copy the lockfile records
+ * (package-lock v2/v3 `packages`, `…/node_modules/<name>`). A safe hoisted
+ * copy doesn't hide a vulnerable nested one. Looked up by advisory name
+ * only — no full tree walk.
  */
-function transitiveLookup(ctx: ScanContext, dir: string): (name: string) => Promise<Array<{ version: string; source: string }>> {
+function transitiveLookup(ctx: ScanContext, dir: string): (name: string) => Promise<ShippedCopy[]> {
   let lock: Promise<Record<string, { version?: unknown }>> | undefined;
   const readLock = async () => {
     try {
       const data = JSON.parse(await ctx.fs.readFile(join(dir, 'package-lock.json'))) as { packages?: Record<string, { version?: unknown }> };
-      return data.packages ?? {};
+      return data.packages && typeof data.packages === 'object' ? data.packages : {};
     } catch {
       return {};
     }
   };
   return async (name) => {
+    const out: ShippedCopy[] = [];
+    const seen = new Set<string>();
+    const add = (copy: ShippedCopy) => {
+      const key = `${copy.nested ? 'n' : 'h'}:${copy.version}`;
+      if (seen.has(key)) return;
+      seen.add(key);
+      out.push(copy);
+    };
     const installed = join(dir, 'node_modules', name, 'package.json');
+    let hoistedInstalled = false;
     try {
       const version = (JSON.parse(await ctx.fs.readFile(installed)) as { version?: unknown }).version;
-      if (typeof version === 'string') return [{ version, source: installed }];
+      if (typeof version === 'string') {
+        add({ version, source: installed, nested: false });
+        hoistedInstalled = true;
+      }
     } catch {
-      // not installed — try the lockfile
+      // not installed — the lockfile says what would be
     }
-    const packages = await (lock ??= readLock());
-    const out: Array<{ version: string; source: string }> = [];
-    const seen = new Set<string>();
-    for (const [key, entry] of Object.entries(packages)) {
-      if (key !== `node_modules/${name}` && !key.endsWith(`/node_modules/${name}`)) continue;
-      if (typeof entry?.version !== 'string' || seen.has(entry.version)) continue;
-      seen.add(entry.version);
-      out.push({ version: entry.version, source: join(dir, 'package-lock.json') });
+    const lockFile = join(dir, 'package-lock.json');
+    for (const [key, entry] of Object.entries(await (lock ??= readLock()))) {
+      const hoisted = key === `node_modules/${name}`;
+      if (!hoisted && !key.endsWith(`/node_modules/${name}`)) continue;
+      if (hoisted && hoistedInstalled) continue; // the installed copy wins
+      if (typeof entry?.version !== 'string') continue;
+      add({ version: entry.version, source: lockFile, nested: !hoisted });
     }
     return out;
   };

@@ -63,7 +63,7 @@ export const gb001 = defineCheck({
     return h.fromEvidence([...critical, ...warning, ...info], {
       passed: 'Grok Bot asks before running anything on this computer',
       failed: (n) => `Found ${n} Grok Bot local-execution setting(s) that skip approval`,
-      severity: critical.length > 0 ? undefined : warning.length > 0 ? 'warning' : 'info',
+      severity: critical.length > 0 ? undefined : warning.length > 0 ? 'warning' : info.length > 0 ? 'info' : undefined,
       fixable: critical.length + warning.length > 0,
       fixDescription: 'In Grok Bot set Settings → General → Bot → Execution on Local Computer to "Ask every time" (or "Never allow"); vaso fix writes localToolPermission: "ask" — quit Grok Bot first, since the running app rewrites settings.json',
     });

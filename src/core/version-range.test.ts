@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { exactVersion, rangeBounds, rangeEntirelyAffected } from './version-range.js';
+import { exactVersion, fullVersion, rangeBounds, rangeEntirelyAffected } from './version-range.js';
+import { satisfies } from './semver.js';
 
 describe('rangeBounds', () => {
   it.each([
@@ -94,5 +95,34 @@ describe('dt20 g3 re-verify: hyphen ranges', () => {
 describe('dt21 g2-R1: a partial npm version is a range', () => {
   it.each([['0.1', undefined], ['=0.1', undefined], ['1', undefined], ['v2.3', undefined], ['==0.1', '0.1.0'], ['===5.3', '5.3.0'], ['0.1.5', '0.1.5']])('%s', (spec, version) => {
     expect(exactVersion(spec)).toBe(version);
+  });
+});
+
+describe('PEP 440 pre-, dev- and post-releases', () => {
+  it('maps the suffixes to semver that sorts like PEP 440', () => {
+    expect(fullVersion('1.10.0rc1')).toBe('1.10.0-rc.1');
+    expect(fullVersion('2.0b2')).toBe('2.0.0-b.2');
+    expect(fullVersion('2.0a1')).toBe('2.0.0-a.1');
+    expect(fullVersion('3.1.dev4')).toBe('3.1.0-0.dev.4');
+    expect(fullVersion('1.4.post1')).toBe('1.4.0');
+    expect(fullVersion('1.4.0-beta.1')).toBe('1.4.0-beta.1');
+    expect(fullVersion('1.4.0foo')).toBe('1.4.0foo');
+  });
+
+  it('a release candidate is before its release', () => {
+    expect(satisfies(fullVersion('1.10.0rc1'), '<1.10.0')).toBe(true);
+    expect(satisfies(fullVersion('1.10.0'), '<1.10.0')).toBe(false);
+    for (const [lo, hi] of [['1.0.dev1', '1.0a1'], ['1.0a1', '1.0b1'], ['1.0b1', '1.0rc1'], ['1.0rc1', '1.0']]) {
+      expect(satisfies(fullVersion(lo!), `<${fullVersion(hi!)}`), `${lo} < ${hi}`).toBe(true);
+    }
+  });
+
+  it('pins and ranges of pre-releases', () => {
+    expect(exactVersion('==1.10.0rc1')).toBe('1.10.0-rc.1');
+    expect(rangeBounds('>=1.9.0,<1.10.0rc2', 'pypi')).toEqual({ min: '1.9.0', maxExclusive: '1.10.0-rc.2' });
+  });
+
+  it('npm ^0.0.x admits that patch only', () => {
+    expect(rangeBounds('^0.0.3')).toEqual({ min: '0.0.3', maxExclusive: '0.0.4' });
   });
 });

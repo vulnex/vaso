@@ -1,0 +1,20 @@
+{
+  "version": 1,
+  "accountScopes": {},
+  "activeAccountScope": "2222222222222222222222222222222222222222222222222222222222222222",
+  "autoUpdateWhenIdle": true,
+  "botColorInChatEnabled": false,
+  "egressTunnelEnabled": false,
+  "hasSeenOnboarding": true,
+  "localEgressAllowed": true,
+  "localToolPermission": "ask",
+  "macMailSendEnabled": true,
+  "mcpBoxServers": [],
+  "mcpCustomInstructions": {},
+  "mcpCustomInstructionsByServerId": {},
+  "mcpDisabledToolsByServerId": {},
+  "messagesEnabled": true,
+  "messagesReadEnabled": false,
+  "messagesSendEnabled": true,
+  "webauthnProxyEnabled": true
+}

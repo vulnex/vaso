@@ -39,7 +39,7 @@ export const mm001 = defineCheck({
     } else if (sig.state === 'broken') {
       evidence.push({ file: APP_BUNDLE_PATH, snippet: sig.detail, detail: 'codesign reports an invalid signature — the bundle was modified after signing' });
     } else if (sig.state === 'adhoc') {
-      evidence.push({ file: APP_BUNDLE_PATH, snippet: 'Signature=adhoc', detail: 'Muse.app is signed ad hoc, without a developer identity — this is not the official Meta build' });
+      evidence.push({ file: APP_BUNDLE_PATH, snippet: 'codesign: ad hoc signature', detail: 'Muse.app is signed ad hoc, without a developer identity — this is not the official Meta build' });
     } else {
       if (sig.team !== EXPECTED_TEAM_ID) {
         evidence.push({

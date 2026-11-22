@@ -97,12 +97,10 @@ export function overbroadPathRule(rule: string, home: string): string | undefine
   const root = globRoot(parsed.arg);
   if (root === '' || root === '.' || root === './') return 'covers every file in the workspace';
   if (root === '..' || root.startsWith('../')) return 'reaches outside the workspace (parent directory)';
+  // the home, a directory above it (`/Users/**`), /, /tmp, /etc
   const broad = isBroadPath(root, buildBroadPaths(home), home)?.reason;
   if (broad) return broad;
   const abs = expandHome(root, home);
-  if (abs.startsWith('/') && abs !== '/' && home.startsWith(`${abs.replace(/\/+$/, '')}/`)) {
-    return 'covers the home directory and every other user\'s';
-  }
   // reading one /etc file (`/etc/hosts`) exposes nothing; writing one does
   const sinks = classifySensitivePath(abs).filter(label => parsed.tool === 'write' || !label.includes('(/etc)'));
   if (sinks.length > 0) {

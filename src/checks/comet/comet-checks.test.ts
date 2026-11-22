@@ -2,6 +2,7 @@ import { describe, it, expect, vi } from 'vitest';
 import type { ScanContext, ParsedConfig, AgentInstallation } from '../../core/types.js';
 import type { FSProvider } from '../../core/fs-provider.js';
 import { cometChecks } from './index.js';
+import { compareDottedVersions } from './pc-002-extension-inventory.js';
 
 function makeFs(overrides: Partial<FSProvider> = {}): FSProvider {
   return {
@@ -88,5 +89,11 @@ describe('PC-002: Extension Inventory', () => {
     const fs = makeFs({ access: vi.fn(async () => false) });
     const result = await check.run(makeCtx(fs));
     expect(result.passed).toBe(true);
+  });
+});
+
+describe('PC-002 newest extension version', () => {
+  it('orders version dirs by number', () => {
+    expect(['9.0.0_0', '10.0.0_0', '10.0.0_1', '2.1'].sort(compareDottedVersions)).toEqual(['2.1', '9.0.0_0', '10.0.0_0', '10.0.0_1']);
   });
 });

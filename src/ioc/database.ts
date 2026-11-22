@@ -276,10 +276,10 @@ const MALICIOUS_SKILL_PATTERNS = [
   /\bhack(?:ing)?[-_ ]?tools?\b/i,
   /stealer/i,
   /keylog/i,
-  /rat[-_]?tool/i,
+  /(?:^|[^a-z0-9])rat[-_]?tools?(?![a-z0-9])/i,
   /backdoor/i,
   /trojan/i,
-  /miner[-_]?skill/i,
+  /(?:^|[^a-z0-9])miner[-_]?skills?(?![a-z0-9])/i,
 ];
 
 const TRUSTED_SKILL_NAMES = [

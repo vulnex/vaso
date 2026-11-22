@@ -1,6 +1,15 @@
 import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
-import { isEnvReference, literalSecret, mask, settingsConfigs } from './shared.js';
+import { isLoopbackUrl, literalSecret, mask, settingsConfigs } from './shared.js';
+
+// What local servers' docs tell you to put in the key field when they don't
+// check it (`lm-studio`, `not-needed`, `sk-no-key-required`, `ollama`): only
+// lowercase words, no digits. Judged a dummy only for a loopback endpoint.
+const DUMMY_WORDS = /^[a-z]+(?:[-_][a-z]+)*$/;
+
+function dummyLocalKey(value: string, baseUrl: unknown): boolean {
+  return typeof baseUrl === 'string' && isLoopbackUrl(baseUrl) && DUMMY_WORDS.test(value.trim());
+}
 
 const KEY_FIELDS = ['apiKey', 'api_key', 'token', 'accessToken'];
 
@@ -23,7 +32,9 @@ export const aba005 = defineCheck({
         if (!options || typeof options !== 'object') continue;
         for (const field of KEY_FIELDS) {
           const value = options[field];
-          if (typeof value !== 'string' || value.trim().length < 8 || isEnvReference(value)) continue;
+          // Env references and placeholders (`your-api-key-here`) are not keys
+          if (typeof value !== 'string' || !literalSecret(field, value)) continue;
+          if (dummyLocalKey(value, options.baseURL ?? options.baseUrl)) continue;
           evidence.push({
             file: config.filePath,
             snippet: `providers.${id}.options.${field}: ${mask(value)}`,

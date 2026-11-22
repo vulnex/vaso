@@ -10,6 +10,11 @@ import { dataFile, effectivePermission, readJson, settingsConfig } from './share
  * needs the user's macMailSendEnabled (default off). Every device-tool call
  * asks first — "always" covers only command and file actions — and a mail
  * send spends a single-use approval; "never" refuses them.
+ *
+ * 1.2 moved Mail behind its own gate, mac-mail-tools-gate.json (server flag
+ * sand_mac_mail_drafts): the daemon enables a Mail tool from that gate and
+ * every other device tool from the device-tools gate. The app writes the
+ * mail gate at every start, so when it exists it alone governs Mail.
  */
 export const gb014 = defineCheck({
   id: 'GB-014',
@@ -24,20 +29,36 @@ export const gb014 = defineCheck({
     const file = dataFile(ctx, DATA_FILES.macDeviceToolsGate);
     const gate = await readJson(ctx, file) as { isOn?: unknown } | undefined;
     const gateOn = gate?.isOn === true;
+    const mailFile = dataFile(ctx, DATA_FILES.macMailToolsGate);
+    const mailGate = await readJson(ctx, mailFile) as { isOn?: unknown } | undefined;
+    // 1.2+: a separate Mail gate; before it, Mail followed the device-tools gate
+    const separateMail = mailGate !== undefined || await ctx.fs.access(mailFile);
+    const mailOn = separateMail ? mailGate?.isOn === true : gateOn;
     const config = settingsConfig(ctx);
     const mailSend = config?.data.macMailSendEnabled === true;
-    if (!gateOn && !mailSend) return h.passed('Grok Bot Mac device tools are not enabled');
+    if (!gateOn && !mailOn && !mailSend) return h.passed('Grok Bot Mac device tools are not enabled');
 
     const settings = config?.data ?? {};
     const never = effectivePermission(settings.localToolPermission, settings.localToolPermissionCeiling) === 'never';
     const evidence: Evidence[] = [];
+    const inactive = 'Inactive while local execution is "never"';
     if (gateOn) {
       evidence.push({
         file,
         snippet: 'isOn: true',
         detail: never
-          ? 'Inactive while local execution is "never"'
-          : 'The cloud agent can use Reminders, Calendar, Contacts, Notes and Mail on this computer; each call asks first',
+          ? inactive
+          : separateMail
+            ? 'The cloud agent can use Reminders, Calendar, Contacts and Notes on this computer; each call asks first'
+            : 'The cloud agent can use Reminders, Calendar, Contacts, Notes and Mail on this computer; each call asks first',
+        mitigated: never || undefined,
+      });
+    }
+    if (separateMail && mailOn) {
+      evidence.push({
+        file: mailFile,
+        snippet: 'isOn: true',
+        detail: never ? inactive : 'The cloud agent can use Mail on this computer; each call asks first',
         mitigated: never || undefined,
       });
     }
@@ -45,20 +66,22 @@ export const gb014 = defineCheck({
       evidence.push({
         file: config.filePath,
         snippet: 'macMailSendEnabled: true',
-        detail: !gateOn
-          ? 'Inactive while the Mac device tools are off (mac-device-tools-gate.json)'
+        detail: !mailOn
+          ? `Inactive while the Mac Mail tools are off (${separateMail ? DATA_FILES.macMailToolsGate : DATA_FILES.macDeviceToolsGate})`
           : never
-            ? 'Inactive while local execution is "never"'
+            ? inactive
             : 'The cloud agent can send email from your Mail accounts; each message needs its own approval',
-        mitigated: !gateOn || never || undefined,
+        mitigated: !mailOn || never || undefined,
       });
     }
+    const apps = [...(mailOn ? ['Mail'] : []), ...(gateOn ? ['Notes', 'Contacts', 'Calendar', 'Reminders'] : [])];
+    const appList = apps.length > 1 ? `${apps.slice(0, -1).join(', ')} and ${apps[apps.length - 1]}` : apps[0];
     return h.fromEvidence(evidence, {
       passed: '',
-      failed: () => mailSend && gateOn
-        ? 'Grok Bot can use Mail, Notes, Contacts, Calendar and Reminders, and send email, on this computer'
-        : gateOn
-          ? 'Grok Bot can use Mail, Notes, Contacts, Calendar and Reminders on this computer'
+      failed: () => mailSend && mailOn
+        ? `Grok Bot can use ${appList}, and send email, on this computer`
+        : apps.length > 0
+          ? `Grok Bot can use ${appList} on this computer`
           : 'Grok Bot Mail sending is turned on',
       fixDescription: 'Keep "Execution on Local Computer" on "Ask every time", turn off Mail sending in Grok Bot settings unless you need it, and review the Automation and Contacts/Calendars/Reminders grants for Grok Bot in System Settings → Privacy & Security; the device-tools gate itself is controlled by Grok Bot\'s server',
     });

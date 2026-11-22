@@ -233,6 +233,35 @@ describe('ADV-002: Dependency Vulnerability', () => {
     }
   });
 
+  it('a safe hoisted copy does not hide a vulnerable nested one', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'vaso-adv002-'));
+    try {
+      writeFileSync(join(dir, 'package.json'), JSON.stringify({ dependencies: { express: '^4.18.0' } }));
+      // hoisted copy is fixed (>= 0.1.16), a nested copy is affected
+      mkdirSync(join(dir, 'node_modules', 'mcp-remote'), { recursive: true });
+      writeFileSync(join(dir, 'node_modules', 'mcp-remote', 'package.json'), JSON.stringify({ version: '0.1.16' }));
+      writeFileSync(join(dir, 'package-lock.json'), JSON.stringify({ lockfileVersion: 3, packages: {
+        '': { name: 'x' },
+        'node_modules/mcp-remote': { version: '0.1.16' },
+        'node_modules/foo/node_modules/mcp-remote': { version: '0.1.10' },
+      } }));
+      const r = await adv002.run(makeContext({ installDir: dir }));
+      expect(r.passed).toBe(false);
+      expect(r.evidence?.map(e => e.detail?.match(/mcp-remote@[\d.]+/)?.[0])).toEqual(['mcp-remote@0.1.10']);
+      // the same when the project declares the package itself
+      writeFileSync(join(dir, 'package.json'), JSON.stringify({ dependencies: { 'mcp-remote': '0.1.16' } }));
+      const declared = await adv002.run(makeContext({ installDir: dir }));
+      expect(declared.evidence?.map(e => e.detail?.match(/mcp-remote@[\d.]+/)?.[0])).toEqual(['mcp-remote@0.1.10']);
+      // nothing nested: clean
+      writeFileSync(join(dir, 'package-lock.json'), JSON.stringify({ lockfileVersion: 3, packages: {
+        '': { name: 'x' }, 'node_modules/mcp-remote': { version: '0.1.16' },
+      } }));
+      expect((await adv002.run(makeContext({ installDir: dir }))).passed).toBe(true);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it('has correct metadata', () => {
     expect(adv002.id).toBe('ADV-002');
     expect(adv002.category).toBe('advisory');

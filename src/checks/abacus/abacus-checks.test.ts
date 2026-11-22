@@ -200,6 +200,19 @@ describe('MCP checks (ABA-004/006/007/008) over both config shapes', () => {
     ]);
   });
 
+  it('ABA-004 flags tokens in server arguments and URL query strings, masked', async () => {
+    const token = 'ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghij';
+    const r = await check('ABA-004').run(userCtx([cfg(USER_MCP, { mcpServers: {
+      cli: { command: 'npx', args: ['-y', 'some-mcp@1.0.0', '--token', token] },
+      web: { type: 'http', url: `https://mcp.example.com/mcp?api_key=q8Zr2LmW7xVb4NcTk3Yd` },
+      clean: { command: 'npx', args: ['-y', 'some-mcp@1.0.0', '--token', '${GH_TOKEN}'], url: undefined },
+    } })]));
+    expect(r.evidence?.map(e => e.snippet?.split(':')[0])).toEqual(['mcpServers.cli.args[3]', 'mcpServers.web.url']);
+    const out = JSON.stringify(r);
+    expect(out).not.toContain(token);
+    expect(out).not.toContain('q8Zr2LmW7xVb4NcTk3Yd');
+  });
+
   it('ABA-004 ignores environment references', async () => {
     const r = await check('ABA-004').run(userCtx([cfg(USER_MCP, { mcpServers: {
       a: { command: 'x', env: { API_KEY: '${API_KEY}' } },
@@ -278,6 +291,23 @@ describe('ABA-005 provider API keys', () => {
     } })]));
     expect(r.passed).toBe(false);
     expect(r.evidence).toHaveLength(1);
+  });
+});
+
+describe('ABA-005 dummy keys for local servers', () => {
+  it('ignores word-only dummy keys on loopback and placeholders, keeps them on remote hosts', async () => {
+    const r = await check('ABA-005').run(userCtx([cfg(USER_CFG, { providers: {
+      lms: { options: { baseURL: 'http://localhost:1234/v1', apiKey: 'lm-studio' } },
+      llama: { options: { baseURL: 'http://127.0.0.1:8080/v1', apiKey: 'sk-no-key-required' } },
+      vllm: { options: { baseURL: 'http://[::1]:8000/v1', api_key: 'not-needed' } },
+      doc: { options: { baseURL: 'https://api.example.com/v1', apiKey: 'your-api-key-here' } },
+      real: { options: { baseURL: 'http://localhost:1234/v1', apiKey: 'q8Zr2LmW7xVb4NcTk3Yd' } },
+      remote: { options: { baseURL: 'https://gw.example.com/v1', apiKey: 'not-needed-here' } },
+    } })]));
+    expect(r.evidence?.map(e => e.snippet?.split(':')[0])).toEqual([
+      'providers.real.options.apiKey',
+      'providers.remote.options.apiKey',
+    ]);
   });
 });
 

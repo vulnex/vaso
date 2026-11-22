@@ -16,6 +16,13 @@ describe('IOC Database', () => {
     expect(db.trustedSkillNames.length).toBeGreaterThan(0);
   });
 
+  it('malicious skill-name patterns match whole words, not parts of ordinary names', () => {
+    const db = getIOCDatabase();
+    const hit = (name: string) => db.maliciousSkillPatterns.some(p => p.test(name));
+    for (const name of ['rat-tool', 'rat_tools', 'ratTool', 'my-rat-tool', 'crypto-miner-skill']) expect(hit(name), name).toBe(true);
+    for (const name of ['strat-tool', 'migrate-tool', 'examiner-skill', 'pirat-tools']) expect(hit(name), name).toBe(false);
+  });
+
   it('reloads database', () => {
     const db1 = getIOCDatabase();
     reloadIOCDatabase();

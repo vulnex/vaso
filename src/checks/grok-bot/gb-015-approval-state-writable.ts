@@ -32,6 +32,7 @@ function targets(ctx: ScanContext): Target[] {
     { path: dataFile(ctx, DATA_FILES.retirements), level: 'warning', holds: 'withdrawn approvals (clearing it revives them)' },
     { path: dataFile(ctx, DATA_FILES.computerUseGate), level: 'warning', holds: 'the computer-use gate the daemon reads' },
     { path: dataFile(ctx, DATA_FILES.macDeviceToolsGate), level: 'warning', holds: 'the Mac device-tools gate the daemon reads' },
+    { path: dataFile(ctx, DATA_FILES.macMailToolsGate), level: 'warning', holds: 'the Mac Mail-tools gate the daemon reads' },
   ];
 }
 
