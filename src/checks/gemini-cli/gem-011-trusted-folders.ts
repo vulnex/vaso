@@ -50,7 +50,7 @@ export const gem011 = defineCheck({
         // (trustedFolders.ts: effectivePath = path.dirname(rulePath)), so
         // "~/code": "TRUST_PARENT" trusts all of $HOME.
         const effective = level.toUpperCase() === 'TRUST_PARENT' ? dirname(path) : path;
-        const broad = isBroadPath(effective, broadPaths, home);
+        const broad = isBroadPath(effective, broadPaths, home, { ancestors: true });
         if (broad) {
           evidence.push({
             file: config.filePath,

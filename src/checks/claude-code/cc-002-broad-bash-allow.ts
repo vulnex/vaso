@@ -2,6 +2,7 @@ import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
 import { getNestedValue } from '../../core/utils.js';
 import { DANGEROUS_COMMANDS } from '../devin/dev-001-broad-permissions.js';
+import { claudeManagedLocks } from './managed-locks.js';
 
 /** Why allowing a command family without a prompt is risky. */
 const FAMILY_REASONS: Record<string, string> = {
@@ -42,10 +43,16 @@ export const cc002 = defineCheck({
 
   async run(ctx, h) {
     const evidence: Evidence[] = [];
+    const locks = await claudeManagedLocks(ctx);
 
     for (const config of ctx.configs) {
       const allow = getNestedValue(config.data, 'permissions.allow') as unknown;
       if (!Array.isArray(allow)) continue;
+      // allowManagedPermissionRulesOnly: only managed allow rules apply
+      const lockedOut = locks.permissionRulesOnly && !locks.managedFiles.has(config.filePath)
+        ? { mitigated: true, note: ` (mitigated: ignored — ${locks.permissionRulesOnly} sets allowManagedPermissionRulesOnly)` }
+        : undefined;
+      const start = evidence.length;
 
       for (const entry of allow) {
         if (typeof entry !== 'string') continue;
@@ -60,6 +67,12 @@ export const cc002 = defineCheck({
             detail: FAMILY_REASONS[rule.family]
               ?? `"${rule.family}" runs arbitrary code, opens a shell or reaches the network — allowing it skips the prompt for all of that`,
           });
+        }
+      }
+      if (lockedOut) {
+        for (const e of evidence.slice(start)) {
+          e.mitigated = true;
+          e.detail = `${e.detail}${lockedOut.note}`;
         }
       }
     }

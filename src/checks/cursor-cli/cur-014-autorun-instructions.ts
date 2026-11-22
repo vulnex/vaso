@@ -10,7 +10,10 @@ import { maskProseSecrets } from '../../mcp/source-snippet.js';
 // bare Shell() allows do in cli-config.json (CUR-003).
 const BLANKET_RE = /^\s*(\*|all|everything|any(thing| command| commands)?|run (everything|anything|any command))\s*$/i;
 const DANGEROUS_WORD_RE = /\b(curl|wget|bash|sh|zsh|perl|python3?|node|npx|uvx|ssh|scp|sudo|chmod|rm|eval)\b/i;
-const BROAD_VERB_RE = /\b(allow|run|execute|permit)\b.*\b(all|any|every)\b|\b(all|any|every)\b.*\b(command|shell|terminal)s?\b/i;
+// "any/every/all" must quantify the commands themselves ("run any command",
+// "every shell script"); "tests for any package" or "on every branch" is a
+// scoped hint
+const BROAD_VERB_RE = /\b(anything|everything)\b|\b(all|any|every)\s+(?:[\w-]+\s+)?(commands?|shell|terminals?|scripts?|programs?|executables?)\b/i;
 
 export const cur014 = defineCheck({
   id: 'CUR-014',
@@ -37,7 +40,7 @@ export const cur014 = defineCheck({
           evidence.push({
             file: config.filePath,
             snippet: maskCredentialsInLine(redactProseSecrets(maskProseSecrets(entry, (v) => secretShape(v)))),
-            detail: 'Blanket auto-run grant — the agent executes matching commands with no prompt',
+            detail: 'Blanket auto-run instruction — it steers Auto-run to approve every command with no prompt',
           });
         } else if (DANGEROUS_WORD_RE.test(entry)) {
           evidence.push({

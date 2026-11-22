@@ -6,7 +6,7 @@ export const cur007 = defineCheck({
   name: 'Cursor Privacy Mode Disabled',
   category: 'coding-agent',
   severity: 'warning',
-  description: 'Detect when privacyCache shows ghostMode=false or privacyMode != 1 (training data may be retained)',
+  description: 'Detect when privacyCache shows ghostMode=false or privacyMode allowing training (3/4; 1 no-storage and 2 no-training are private)',
   supportedAgents: ['cursor-cli'],
 
   async run(ctx, h) {
@@ -23,11 +23,21 @@ export const cur007 = defineCheck({
           detail: 'Ghost mode off — Cursor may store and use code/prompts beyond the active session',
         });
       }
-      if (typeof privacy.privacyMode === 'number' && privacy.privacyMode !== 1) {
+      // Cursor's PrivacyMode enum (agent.v1): 0 UNSPECIFIED, 1 NO_STORAGE,
+      // 2 NO_TRAINING (Privacy Mode), 3 USAGE_DATA_TRAINING_ALLOWED,
+      // 4 USAGE_CODEBASE_TRAINING_ALLOWED. 1 and 2 both keep code out of training.
+      const mode = privacy.privacyMode;
+      if (typeof mode === 'number' && mode !== 1 && mode !== 2) {
+        const training = mode === 3 || mode === 4;
         evidence.push({
           file: config.filePath,
-          snippet: `privacyCache.privacyMode = ${privacy.privacyMode}`,
-          detail: 'Privacy mode disabled (1 = on) — code may be sent to model providers for training',
+          snippet: `privacyCache.privacyMode = ${mode}`,
+          detail: training
+            ? `Privacy mode off (${mode === 3 ? 'usage data' : 'usage data and codebase'} training allowed) — code and prompts may be used for training`
+            : mode === 0
+              ? 'Privacy mode unspecified — Cursor falls back to no-training; confirm Privacy Mode in Cursor settings'
+              : `Unrecognised privacy mode ${mode} — confirm Privacy Mode in Cursor settings`,
+          ...(training ? {} : { mitigated: true }),
         });
       }
     }

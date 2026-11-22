@@ -24,7 +24,7 @@ function list(value: unknown): string[] {
 }
 
 /** Why an allowed command prefix runs far more than one command, or undefined. */
-function broadPrefix(prefix: string): string | undefined {
+export function broadPrefix(prefix: string): string | undefined {
   const first = prefix.trim().split(/\s+/)[0] ?? '';
   if (first === '' || first === '*') return 'matches every shell command';
   const stem = commandStem(first.split('/').pop() ?? first);

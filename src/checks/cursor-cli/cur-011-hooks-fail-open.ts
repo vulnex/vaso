@@ -12,8 +12,11 @@ import { defineCheck } from '../../core/check-builder.js';
  * Fail-open matters only for these: an observational hook (afterFileEdit,
  * sessionStart, stop, …) gates nothing, so a crash in it lets nothing through.
  */
+// beforeSubmitPrompt gates the prompt (`continue: false`, which a failClosed
+// hook returns when it fails — Cursor's hook runner)
 const GATING_EVENTS = new Set([
   'preToolUse', 'beforeShellExecution', 'beforeMCPExecution', 'beforeReadFile', 'beforeTabFileRead', 'subagentStart',
+  'beforeSubmitPrompt',
 ]);
 
 export const cur011 = defineCheck({

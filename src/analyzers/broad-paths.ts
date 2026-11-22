@@ -18,6 +18,10 @@ export function buildBroadPaths(home: string): BroadPath[] {
     { path: '/tmp', reason: 'is shared by all local users' },
     { path: '/var/tmp', reason: 'is shared by all local users' },
     { path: '/etc', reason: 'is the system configuration directory' },
+    // macOS: /tmp, /var/tmp and /etc are links into /private
+    { path: '/private/tmp', reason: 'is shared by all local users' },
+    { path: '/private/var/tmp', reason: 'is shared by all local users' },
+    { path: '/private/etc', reason: 'is the system configuration directory' },
   ];
 }
 
@@ -27,11 +31,29 @@ export function expandHome(p: string, home: string): string {
   return p;
 }
 
-export function isBroadPath(rawPath: string, broadPaths: BroadPath[], home: string): BroadPath | undefined {
+export interface BroadPathOptions {
+  /**
+   * The agent trusts a folder and everything below it (Gemini CLI
+   * `isSubpath`, Copilot CLI "the files in, and below"), so a folder above
+   * a broad path (`/Users`, `/home`, `/private`) is broad too.
+   */
+  ancestors?: boolean;
+}
+
+export function isBroadPath(rawPath: string, broadPaths: BroadPath[], home: string, opts: BroadPathOptions = {}): BroadPath | undefined {
   const normalized = normalize(expandHome(rawPath, home));
   // normalize('/home/user/') → '/home/user', but normalize('/') stays '/'
   const trimmed = normalized.length > 1 && normalized.endsWith('/')
     ? normalized.slice(0, -1)
     : normalized;
-  return broadPaths.find(b => trimmed === b.path);
+  const exact = broadPaths.find(b => trimmed === b.path);
+  if (exact || !opts.ancestors || !trimmed.startsWith('/')) return exact;
+  const below = broadPaths.find(b => b.path !== '/' && b.path.startsWith(`${trimmed}/`));
+  if (!below) return undefined;
+  return {
+    path: trimmed,
+    reason: below.path === home
+      ? `contains every home directory under it, ${home} included`
+      : `contains ${below.path}, which ${below.reason}`,
+  };
 }

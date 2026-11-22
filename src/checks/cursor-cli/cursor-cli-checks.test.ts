@@ -191,6 +191,19 @@ describe('CUR-007: Privacy Mode', () => {
     })]));
     expect(result.passed).toBe(true);
   });
+
+  it('reads the PrivacyMode enum: 2 (no training) is private, 3/4 allow training, 0 is unspecified', async () => {
+    const run = (privacyMode: number) => check.run(makeCtx([makeConfig('cli-config.json', { privacyCache: { ghostMode: true, privacyMode } })]));
+    expect((await run(2)).passed).toBe(true);
+    for (const m of [3, 4]) {
+      const r = await run(m);
+      expect(r.passed).toBe(false);
+      expect(r.severity).toBe('warning');
+    }
+    const unspecified = await run(0);
+    expect(unspecified.passed).toBe(false);
+    expect(unspecified.severity).toBe('info');
+  });
 });
 
 describe('CUR-008: Sandbox Network', () => {
@@ -339,6 +352,14 @@ describe('CUR-011: Hooks Fail-Open', () => {
     })]));
     expect(result.passed).toBe(true);
   });
+
+  it('treats beforeSubmitPrompt as a guard (a failing fail-closed hook stops the prompt)', async () => {
+    const result = await check.run(makeCtx([makeConfig('/home/test/.cursor/hooks.json', {
+      version: 1,
+      hooks: { beforeSubmitPrompt: [{ command: './hooks/dlp-scan.sh' }] },
+    })]));
+    expect(result.passed).toBe(false);
+  });
 });
 
 describe('CUR-012: Workspace Trust Disabled', () => {
@@ -472,6 +493,22 @@ describe('CUR-014: Auto-Run Instructions Too Broad', () => {
       },
     })]));
     expect(result.passed).toBe(true);
+  });
+
+  it('does not call scoped hints with "any"/"every" blanket grants', async () => {
+    const scoped = await check.run(makeCtx([makeConfig('/home/test/.cursor/permissions.json', {
+      autoRun: {
+        allow_instructions: ['Allow running the unit tests for any package in this monorepo', 'Allow read-only git commands like log and diff on every branch'],
+        block_instructions: ['anything that pushes'],
+      },
+    })]));
+    expect(scoped.passed).toBe(true);
+    for (const broad of ['Allow any shell command', 'run every script', 'Allow running anything', 'permit all terminal commands']) {
+      const r = await check.run(makeCtx([makeConfig('/home/test/.cursor/permissions.json', {
+        autoRun: { allow_instructions: [broad], block_instructions: ['rm'] },
+      })]));
+      expect(r.passed, broad).toBe(false);
+    }
   });
 });
 

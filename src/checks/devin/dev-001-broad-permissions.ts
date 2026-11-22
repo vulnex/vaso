@@ -8,6 +8,9 @@ import { commandFamily } from '../../analyzers/command-families.js';
 
 // Commands whose unrestricted Exec() allowance hands the agent arbitrary
 // code execution or network egress.
+/** permission_mode values that start sessions in Bypass mode. */
+const BYPASS_MODES = new Set(['dangerous', 'yolo', 'bypass']);
+
 export const DANGEROUS_COMMANDS = new Set([
   'curl', 'wget', 'bash', 'sh', 'zsh', 'fish', 'dash', 'ksh', 'pwsh',
   'perl', 'python', 'ruby', 'php', 'node', 'deno', 'bun',
@@ -101,7 +104,9 @@ export const dev001 = defineCheck({
     if (ctx.installation.agent === 'devin' && ctx.installation.profile !== 'project') {
       for (const config of ctx.configs) {
         const mode = config.data.permission_mode;
-        if (typeof mode === 'string' && mode.trim().toLowerCase() === 'dangerous') {
+        // Devin accepts "yolo" and "bypass" as aliases of "dangerous"
+        // (its error text: "dangerous (yolo, bypass)")
+        if (typeof mode === 'string' && BYPASS_MODES.has(mode.trim().toLowerCase())) {
           criticalEvidence.push({
             file: config.filePath,
             snippet: `permission_mode: "${mode}"`,
@@ -234,7 +239,7 @@ export const dev001 = defineCheck({
       // the same gap in Claude Code
       severity: criticalEvidence.length > 0 ? undefined
         : warningEvidence.some(e => e.snippet?.startsWith('local_tools_bypass_permissions') || e.snippet?.startsWith('permission_mode')) ? 'warning' : 'info',
-      fixDescription: 'Set permission_mode to "normal" (not "dangerous", "smart" or "accept-edits") and local_tools_bypass_permissions, scope Exec()/Write() allow rules to specific commands and paths, and add deny rules for shells, network tools, and credential paths',
+      fixDescription: 'Set permission_mode to "auto" (alias "normal"; not "dangerous"/"yolo"/"bypass", "smart" or "accept-edits") and local_tools_bypass_permissions, scope Exec()/Write() allow rules to specific commands and paths, and add deny rules for shells, network tools, and credential paths',
     });
   },
 });

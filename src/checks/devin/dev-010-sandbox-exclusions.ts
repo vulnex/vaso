@@ -1,6 +1,7 @@
 import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
 import { DANGEROUS_COMMANDS, execCommandName, parseRule } from './dev-001-broad-permissions.js';
+import { commandFamily } from '../../analyzers/command-families.js';
 
 const WILDCARD = new Set(['', '*', '**']);
 
@@ -43,7 +44,7 @@ export const dev010 = defineCheck({
           continue;
         }
         const cmd = execCommandName(resource);
-        if (DANGEROUS_COMMANDS.has(cmd)) {
+        if (DANGEROUS_COMMANDS.has(commandFamily(cmd))) {
           warning.push({
             file: config.filePath,
             snippet: `sandbox.excluded.allow: "${entry}"`,

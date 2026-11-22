@@ -3,44 +3,41 @@ import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
 import { recordListFailure } from '../../core/config-loader.js';
 import { pathPresent, readTextIfPresent } from '../../adapters/load-if-present.js';
+import { commandStem, INTERPRETER_COMMANDS, SHELL_COMMANDS, WRAPPER_COMMANDS } from '../../analyzers/command-families.js';
 
-// Commands whose bare approval grants network access or arbitrary execution.
-const DANGEROUS_BARE = new Set([
+// Commands whose bare approval grants network access or arbitrary execution:
+// the shared shell / interpreter / wrapper families (python3.12 → python,
+// env, xargs, nohup, fish, pwsh, …) plus network and permission tools.
+const NETWORK_OR_SYSTEM = new Set([
   'curl', 'wget', 'nc', 'ncat', 'telnet', 'ssh', 'scp', 'rsync',
-  'bash', 'sh', 'zsh', 'dash', 'ksh',
-  'perl', 'python', 'python3', 'node', 'ruby', 'php', 'deno', 'bun',
-  'npx', 'uvx', 'eval', 'exec', 'sudo', 'doas',
   'chmod', 'chown', 'dd', 'mkfs',
 ]);
 
-const SHELLS = new Set(['bash', 'sh', 'zsh', 'dash', 'ksh']);
-const INTERPRETERS = new Set(['perl', 'python', 'python3', 'node', 'ruby', 'php', 'deno', 'bun']);
-
-function baseCommand(el: string): string {
-  return el.includes('/') ? el.slice(el.lastIndexOf('/') + 1) : el;
+function isDangerousBare(cmd: string): boolean {
+  return NETWORK_OR_SYSTEM.has(cmd) || SHELL_COMMANDS.has(cmd) || INTERPRETER_COMMANDS.has(cmd) || WRAPPER_COMMANDS.has(cmd);
 }
 
 /** Returns a reason string when an allow-rule prefix still permits arbitrary execution. */
 export function classifyPrefixPattern(pattern: string[]): string | undefined {
   if (pattern.length === 0) return undefined;
-  const cmd = baseCommand(pattern[0]);
+  const cmd = commandStem(pattern[0]);
 
-  if (pattern.length === 1 && DANGEROUS_BARE.has(cmd)) {
-    return `bare "${cmd}" prefix allows any ${cmd} invocation without approval`;
+  if (pattern.length === 1 && isDangerousBare(cmd)) {
+    return `bare "${pattern[0]}" prefix allows any ${pattern[0]} invocation without approval`;
   }
 
-  // Shell whose pattern ends at -c/-lc/-l: the actual command is unconstrained.
-  if (SHELLS.has(cmd)) {
+  // Shell whose pattern ends at -c/-lc/-l (pwsh -Command, cmd /c): the actual command is unconstrained.
+  if (SHELL_COMMANDS.has(cmd)) {
     const last = pattern[pattern.length - 1];
-    if (/^-l?c$/.test(last) || (pattern.length > 1 && pattern.slice(1).every(p => p.startsWith('-')))) {
+    if (/^-l?c$/.test(last) || /^(?:-command|\/c|\/k)$/i.test(last) || (pattern.length > 1 && pattern.slice(1).every(p => p.startsWith('-')))) {
       return `"${pattern.join(' ')}" allows the shell to run any command without approval`;
     }
   }
 
   // Interpreter where everything after the binary is flags — payload is unconstrained
   // (e.g. ["perl", "-0pi"] approves rewriting any file with any expression).
-  if (INTERPRETERS.has(cmd) && pattern.length > 1 && pattern.slice(1).every(p => p.startsWith('-'))) {
-    return `"${pattern.join(' ')}" approves any ${cmd} payload — arbitrary code/file modification`;
+  if (INTERPRETER_COMMANDS.has(cmd) && pattern.length > 1 && pattern.slice(1).every(p => p.startsWith('-'))) {
+    return `"${pattern.join(' ')}" approves any ${pattern[0]} payload — arbitrary code/file modification`;
   }
 
   return undefined;

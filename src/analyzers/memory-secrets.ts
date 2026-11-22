@@ -2,6 +2,12 @@ import type { Evidence, Severity } from '../core/types.js';
 import { API_KEY_PATTERNS, isPlaceholderSecret, isSecretReference, secretShape } from '../core/patterns.js';
 import { findHighEntropyBlocks } from './entropy.js';
 import { isCredentialValueName, isHashedValue, isKnownSecretValue, looksRandom } from './secret-values.js';
+import { findUrlSecrets } from '../mcp/config-secrets.js';
+
+/** A `scheme://` URL in prose, up to whitespace, a quote or a closing bracket. */
+/** A password field's name written as its value in documentation. */
+const DOC_PASSWORD = /^(?:pass(?:word)?|passwd|pwd|secret|changeme|example|test|xxx+|\*+|\.{3})$/i;
+const PROSE_URL =/\b[a-z][a-z0-9+.-]*:\/\/[^\s"'`<>)\]]+/gi;
 
 /**
  * Plaintext-secret scan for the prose files coding agents load into every
@@ -134,6 +140,30 @@ export function scanMemorySecrets(file: string, content: string, kind = 'memory 
       detail: `High-entropy string (${b.entropy} bits) — possible embedded secret`,
     });
   }
+  // A credential inside a URL: a connection string's password
+  // (`postgres://app:<pw>@db`, `mongodb+srv://u:<pw>@cluster`), a token query
+  // parameter or path — the same rules as MCP config URLs
+  for (let i = 0; i < lines.length; i++) {
+    if (reported.has(i + 1) || !lines[i].includes('://')) continue;
+    for (const m of lines[i].matchAll(PROSE_URL)) {
+      const url = m[0].replace(/[.,;:!?]+$/, '');
+      // userinfo, query and fragment credentials (a token in a URL path is
+      // the entropy rule's, which the probe mirrors)
+      const secret = findUrlSecrets(url).find(f => /userinfo|query parameter|fragment/.test(f.kind)
+        // docs write the word itself (`postgres://user:password@localhost`)
+        && !isPlaceholderSecret(f.value) && !DOC_PASSWORD.test(f.value));
+      if (!secret) continue;
+      reported.add(i + 1);
+      evidence.push({
+        file,
+        line: i + 1,
+        snippet: secret.masked,
+        detail: `Plaintext ${secret.kind} in ${kind}`,
+      });
+      break;
+    }
+  }
+
   return evidence;
 }
 

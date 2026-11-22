@@ -377,6 +377,15 @@ describe('deep-test 2026-10-15 regressions', () => {
     expect(narrow.passed).toBe(true);
   });
 
+  it('QC-005 counts a shell, interpreter or wrapper prefix as broad (it runs anything it is given)', async () => {
+    for (const rule of ['Bash(python3 *)', 'Shell(bash -c *)', 'run_shell_command(env *)', 'Bash(node:*)', 'Bash(/usr/bin/python3.12 *)']) {
+      const result = await byId('QC-005').run(makeCtx([makeConfig('settings.json', { permissions: { allow: [rule] } })]));
+      expect(result.passed, rule).toBe(false);
+    }
+    // a non-shell tool's specifier is a path, not a command
+    expect((await byId('QC-005').run(makeCtx([makeConfig('settings.json', { permissions: { allow: ['Edit(python3/*)', 'WebFetch(node.example.com)'] } })]))).passed).toBe(true);
+  });
+
   it('QC-005 counts legacy tools.exclude as a deny net — for the tool it excludes', async () => {
     const result = await byId('QC-005').run(makeCtx([makeConfig('settings.json', {
       permissions: { allow: ['Bash'] }, tools: { exclude: ['run_shell_command(rm)'] },

@@ -359,6 +359,8 @@ export interface HookItem {
   scripts: string[];
   /** `url` of an HTTP hook. */
   url?: string;
+  /** The hook's `name`, when it sets one (Gemini's `hooksConfig.disabled` lists names, else commands). */
+  name?: string;
 }
 
 /**
@@ -376,8 +378,9 @@ export function hookItems(hooks: unknown): HookItem[] {
     if (!h || typeof h !== 'object') return;
     const rec = h as Record<string, unknown>;
     const type = typeof rec.type === 'string' ? rec.type : 'command';
+    const name = typeof rec.name === 'string' && rec.name !== '' ? { name: rec.name } : {};
     if (type === 'http') {
-      if (typeof rec.url === 'string') out.push({ event, matcher, scripts: [], url: rec.url });
+      if (typeof rec.url === 'string') out.push({ event, matcher, scripts: [], url: rec.url, ...name });
       return;
     }
     if (type !== 'command') return;
@@ -386,13 +389,13 @@ export function hookItems(hooks: unknown): HookItem[] {
     if (Array.isArray(rec.args) && typeof rec.command === 'string') {
       const args = rec.args.filter((a): a is string => typeof a === 'string');
       const at = shellCommandWrapper(rec.command, args) ? args.findIndex(a => /^-[a-zA-Z]*c[a-zA-Z]*$/.test(a)) : -1;
-      if (at >= 0 && typeof args[at + 1] === 'string') out.push({ event, matcher, scripts: [args[at + 1]] });
+      if (at >= 0 && typeof args[at + 1] === 'string') out.push({ event, matcher, scripts: [args[at + 1]], ...name });
       return;
     }
     const scripts = [...new Set(['command', 'bash', 'powershell']
       .map(k => rec[k])
       .filter((v): v is string => typeof v === 'string' && v.trim() !== ''))];
-    if (scripts.length > 0) out.push({ event, matcher, scripts });
+    if (scripts.length > 0) out.push({ event, matcher, scripts, ...name });
   };
   for (const [event, entries] of Object.entries(hooks as Record<string, unknown>)) {
     for (const entry of Array.isArray(entries) ? entries : [entries]) {

@@ -2,6 +2,8 @@ import { join } from 'node:path';
 import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
 import { markUnreachable, queryPermissions, readableByOthers } from '../../core/permissions.js';
+import { restrictFilesToOwner } from '../../remediation/config-writer.js';
+import { permissionFixTargets } from '../../remediation/fix-refusal.js';
 
 export const ws007 = defineCheck({
   id: 'WS-007',
@@ -10,6 +12,7 @@ export const ws007 = defineCheck({
   severity: 'warning',
   description: 'Verify that the legacy ~/.codeium/config.json (plaintext Codeium API key) is not readable by other users',
   supportedAgents: ['windsurf'],
+  fixTargets: permissionFixTargets,
 
   async run(ctx, h) {
     const configPath = join(ctx.fs.homedir(), '.codeium', 'config.json');
@@ -38,7 +41,12 @@ export const ws007 = defineCheck({
     return h.fromEvidence(evidence, {
       passed: 'Legacy Codeium config.json has restricted permissions',
       failed: () => 'Legacy Codeium config.json is readable by other users — restrict it to 0600',
-      fixDescription: 'Run `chmod 600 ~/.codeium/config.json` to restrict access to the owner',
+      fixable: true,
+      fixDescription: 'Remove group/other access from ~/.codeium/config.json (chmod go-rwx ~/.codeium/config.json)',
     });
+  },
+
+  async fix(ctx) {
+    return restrictFilesToOwner('WS-007', [join(ctx.fs.homedir(), '.codeium', 'config.json')]);
   },
 });

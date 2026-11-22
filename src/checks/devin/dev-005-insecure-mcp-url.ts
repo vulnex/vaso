@@ -21,16 +21,19 @@ export const dev005 = defineCheck({
       for (const [name, serverRaw] of Object.entries(servers)) {
         if (!serverRaw || typeof serverRaw !== 'object') continue;
         const server = serverRaw as Record<string, unknown>;
-        const url = server.url;
-        if (typeof url !== 'string') continue;
-        if (!isPlaintextRemoteUrl(url)) continue;
+        // Devin reads `url` or `serverUrl` (`devin mcp list` shows either)
+        for (const key of ['url', 'serverUrl'] as const) {
+          const url = server[key];
+          if (typeof url !== 'string') continue;
+          if (!isPlaintextRemoteUrl(url)) continue;
 
-        const transport = typeof server.transport === 'string' ? server.transport : undefined;
-        evidence.push({
-          file: config.filePath,
-          snippet: `mcpServers.${name}.url: ${url}`,
-          detail: `Plaintext http:// MCP URL${transport === 'sse' ? ' (sse transport)' : ''} — tool traffic, headers, and OAuth tokens travel unencrypted`,
-        });
+          const transport = typeof server.transport === 'string' ? server.transport : undefined;
+          evidence.push({
+            file: config.filePath,
+            snippet: `mcpServers.${name}.${key}: ${url}`,
+            detail: `Plaintext http:// MCP URL${transport === 'sse' ? ' (sse transport)' : ''} — tool traffic, headers, and OAuth tokens travel unencrypted`,
+          });
+        }
       }
     }
 

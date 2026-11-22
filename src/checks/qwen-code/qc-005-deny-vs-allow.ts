@@ -2,6 +2,7 @@ import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
 import { markUntrustedWorkspace } from '../../adapters/folder-trust.js';
 import { qwenWorkspaceTrusted } from '../../adapters/qwen-code.js';
+import { commandStem, INTERPRETER_COMMANDS, SHELL_COMMANDS, WRAPPER_COMMANDS } from '../../analyzers/command-families.js';
 
 // Tools whose blanket auto-approval runs commands or changes files. Aliases
 // from Qwen settings.md ("Tool name aliases"); Read/Grep/Glob are read-only.
@@ -44,7 +45,13 @@ function isBroadRule(rule: string): boolean {
   const m = RULE.exec(rule);
   if (!m) return false;
   if (!RISKY_TOOLS.has(m[1].toLowerCase())) return false;
-  return m[2] === undefined || ALL_WILDCARD.test(m[2]);
+  if (m[2] === undefined || ALL_WILDCARD.test(m[2])) return true;
+  // `Bash(python3 *)`, `Shell(env:*)`: a shell, interpreter or wrapper prefix
+  // runs whatever it is given, so the rule approves every command
+  if (FAMILIES[m[1].toLowerCase()] !== 'shell') return false;
+  const first = m[2].trim().split(/[\s:]+/)[0] ?? '';
+  const stem = commandStem(first);
+  return SHELL_COMMANDS.has(stem) || INTERPRETER_COMMANDS.has(stem) || WRAPPER_COMMANDS.has(stem);
 }
 
 function strings(value: unknown): string[] {

@@ -3,7 +3,7 @@ import type { Evidence, ParsedConfig } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
 import { isPlaceholderSecret, secretShape } from '../../core/patterns.js';
 import { isKnownSecretValue, isSecretNamedValue } from '../../analyzers/secret-values.js';
-import { headerSecret } from '../../mcp/config-secrets.js';
+import { findArgSecrets, findUrlSecrets, headerSecret } from '../../mcp/config-secrets.js';
 
 const GITHUB_TOKEN_PATTERNS = [
   { pattern: /\bgho_[A-Za-z0-9]{20,}/, name: 'GitHub OAuth token' },
@@ -54,12 +54,74 @@ function providerSecrets(config: ParsedConfig): Evidence[] {
   return out;
 }
 
+/**
+ * MCP server definitions (~/.copilot/mcp-config.json, project .mcp.json /
+ * .github/mcp.json): a credential written as a literal in `env`, `headers`,
+ * `args` or the URL instead of a `$VAR` / `${VAR}` reference. A GitHub token
+ * the raw scan already reported is not listed twice.
+ */
+function mcpServerSecrets(config: ParsedConfig, reported: Set<string>): Evidence[] {
+  const out: Evidence[] = [];
+  const servers = config.data.mcpServers;
+  if (!servers || typeof servers !== 'object' || Array.isArray(servers)) return out;
+  const seen = (v: string) => [...reported].some(r => v.includes(r));
+  for (const [name, raw] of Object.entries(servers as Record<string, unknown>)) {
+    if (!raw || typeof raw !== 'object') continue;
+    const server = raw as Record<string, unknown>;
+    const env = server.env;
+    if (env && typeof env === 'object' && !Array.isArray(env)) {
+      for (const [key, v] of Object.entries(env as Record<string, unknown>)) {
+        if (typeof v !== 'string' || seen(v) || isPlaceholderSecret(v.trim())) continue;
+        if (!(isSecretNamedValue(key, v) || isKnownSecretValue(v))) continue;
+        out.push({
+          file: config.filePath,
+          snippet: `mcpServers.${name}.env.${key}=${secretShape(v.trim())}`,
+          detail: `Plaintext secret in MCP server env "${key}" — reference an environment variable ($${key}) instead of storing the value`,
+        });
+      }
+    }
+    const headers = server.headers;
+    if (headers && typeof headers === 'object' && !Array.isArray(headers)) {
+      for (const [key, v] of Object.entries(headers as Record<string, unknown>)) {
+        if (typeof v !== 'string' || seen(v)) continue;
+        const kind = headerSecret(key, v);
+        if (!kind) continue;
+        out.push({
+          file: config.filePath,
+          snippet: `mcpServers.${name}.headers.${key} (literal value)`,
+          detail: `Plaintext ${kind} in MCP server header "${key}" — reference an environment variable instead`,
+        });
+      }
+    }
+    const args = Array.isArray(server.args) ? server.args.filter((a): a is string => typeof a === 'string') : [];
+    for (const secret of findArgSecrets(args, typeof server.command === 'string' ? server.command : undefined)) {
+      if (seen(secret.value)) continue;
+      out.push({
+        file: config.filePath,
+        snippet: `mcpServers.${name}.${secret.location} = ${secret.masked}`,
+        detail: `${secret.kind} in an MCP server argument — stored in this config and visible to any local user in the process list`,
+      });
+    }
+    if (typeof server.url === 'string') {
+      for (const secret of findUrlSecrets(server.url, 'url')) {
+        if (seen(secret.value)) continue;
+        out.push({
+          file: config.filePath,
+          snippet: `mcpServers.${name}.url = ${secret.masked}`,
+          detail: `${secret.kind} in the MCP server URL — stored and logged as written`,
+        });
+      }
+    }
+  }
+  return out;
+}
+
 export const ghc003 = defineCheck({
   id: 'GHC-003',
   name: 'Copilot CLI Plaintext GitHub Token or Provider Key',
   category: 'coding-agent',
   severity: 'critical',
-  description: 'Scan ~/.copilot/{config,settings}.json for inline GitHub tokens (gho_, ghp_, etc.) and providers.json for plaintext BYOK API keys / bearer tokens',
+  description: 'Scan ~/.copilot/{config,settings}.json for inline GitHub tokens (gho_, ghp_, etc.), providers.json for plaintext BYOK API keys / bearer tokens, and MCP server env/headers/args/URLs for literal credentials',
   supportedAgents: ['copilot-cli'],
 
   async run(ctx, h) {
@@ -70,11 +132,12 @@ export const ghc003 = defineCheck({
         evidence.push(...providerSecrets(config));
         continue;
       }
-      if (!config.raw) continue;
-      for (const { pattern, name } of GITHUB_TOKEN_PATTERNS) {
+      const reported = new Set<string>();
+      for (const { pattern, name } of config.raw ? GITHUB_TOKEN_PATTERNS : []) {
         const m = pattern.exec(config.raw);
         if (m && isPlaceholderSecret(m[0])) continue;
         if (m) {
+          reported.add(m[0]);
           evidence.push({
             file: config.filePath,
             snippet: secretShape(m[0]),
@@ -82,6 +145,7 @@ export const ghc003 = defineCheck({
           });
         }
       }
+      evidence.push(...mcpServerSecrets(config, reported));
     }
 
     return h.fromEvidence(evidence, {

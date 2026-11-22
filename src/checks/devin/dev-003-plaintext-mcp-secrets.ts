@@ -1,6 +1,7 @@
 import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
 import { API_KEY_PATTERNS, envReference, isPlaceholderSecret, secretShape, storedFallback } from '../../core/patterns.js';
+import { findArgSecrets, findUrlSecrets } from '../../mcp/config-secrets.js';
 
 // Devin supports secret interpolation: ${env:VAR} and ${file:/path}, also
 // embedded in a larger value (`Bearer ${env:TOKEN}`). Whatever remains after
@@ -10,6 +11,8 @@ const AUTH_SCHEME = /^\s*(?:Bearer|Basic|Token)\b\s*/i;
 
 const SECRET_KEY_HINT = /(KEY|TOKEN|SECRET|PASS|API|AUTH)/i;
 const MIN_SECRET_LENGTH = 8;
+
+const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
 
 function mask(value: string): string {
   return secretShape(value);
@@ -53,7 +56,7 @@ export const dev003 = defineCheck({
   name: 'Devin Plaintext Secrets in MCP Config',
   category: 'coding-agent',
   severity: 'critical',
-  description: 'Detect literal secrets in Devin mcpServers env/headers/oauthClientSecret instead of ${env:VAR}/${file:/path} interpolation — including Devin API tokens (devin- current; cog_/apk_/apk_user_ legacy)',
+  description: 'Detect literal secrets in Devin mcpServers env/headers/oauthClientSecret/args/URL instead of ${env:VAR}/${file:/path} interpolation — including Devin API tokens (devin- current; cog_/apk_/apk_user_ legacy)',
   supportedAgents: ['devin'],
 
   async run(ctx, h) {
@@ -112,6 +115,28 @@ export const dev003 = defineCheck({
               detail: tokenName
                 ? `Plaintext ${tokenName} in MCP ${field} "${key}" — use \${env:VAR} or \${file:/path} interpolation`
                 : `Literal secret-like value for "${key}" in MCP ${field} — use \${env:VAR} or \${file:/path} interpolation`,
+            });
+          }
+        }
+
+        // Tokens on the command line (`--token ghp_…`) or in the server URL
+        // (`?api_key=…`, userinfo) — the same rules as WS-003
+        const args = Array.isArray(server.args) ? server.args.filter((a): a is string => typeof a === 'string') : [];
+        for (const secret of findArgSecrets(args, typeof server.command === 'string' ? server.command : undefined)) {
+          evidence.push({
+            file: config.filePath,
+            snippet: `mcpServers.${name}.${secret.location} = ${secret.masked}`,
+            detail: `${cap(secret.kind)} in an MCP server argument — stored in this config and visible to any local user in the process list; use \${env:VAR} interpolation`,
+          });
+        }
+        for (const key of ['url', 'serverUrl'] as const) {
+          const url = server[key];
+          if (typeof url !== 'string') continue;
+          for (const secret of findUrlSecrets(url, key)) {
+            evidence.push({
+              file: config.filePath,
+              snippet: `mcpServers.${name}.${key} = ${secret.masked}`,
+              detail: `${cap(secret.kind)} in the MCP server URL — stored, logged and synced as written; use a header with \${env:VAR} interpolation`,
             });
           }
         }
