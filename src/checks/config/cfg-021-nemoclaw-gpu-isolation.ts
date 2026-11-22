@@ -7,6 +7,9 @@ const SANDBOXES_FILE = 'sandboxes.json';
 interface SandboxEntry {
   name?: string;
   gpuEnabled?: boolean;
+  sandboxGpuEnabled?: boolean;
+  sandboxGpuMode?: string | null;
+  sandboxGpuDevice?: string | null;
   nimContainer?: string | null;
   provider?: string;
   model?: string;
@@ -23,7 +26,7 @@ export const cfg021 = defineCheck({
   name: 'NemoClaw GPU Isolation',
   category: 'config',
   severity: 'warning',
-  description: 'Check if GPU-enabled NemoClaw sandboxes use NIM container isolation',
+  description: 'Check whether NemoClaw sandboxes get the host GPU passed through (sandboxGpuEnabled), exposing the host GPU driver to agent code',
   supportedAgents: ['openclaw', 'nemoclaw'],
 
   async run(ctx, h) {
@@ -51,26 +54,27 @@ export const cfg021 = defineCheck({
     const evidence: Evidence[] = [];
     let unsafeCount = 0;
 
+    // NemoClaw records whether the sandbox gets the host GPU as
+    // sandboxGpuEnabled (onboard's effective choice; sandboxGpuMode is the
+    // requested auto/1/0), mirrored into gpuEnabled — `nemoclaw status` reads
+    // sandboxGpuEnabled ?? gpuEnabled. nimContainer is the local NIM inference
+    // server the sandbox talks to, not an isolation layer around the GPU.
     for (const [name, sandbox] of Object.entries(config.sandboxes)) {
-      if (sandbox.gpuEnabled && !sandbox.nimContainer) {
-        unsafeCount++;
-        evidence.push({
-          file: sandboxesPath,
-          detail: `Sandbox "${name}": GPU enabled but nimContainer is ${sandbox.nimContainer === null ? 'null' : 'not set'} — GPU passthrough without NIM container isolation`,
-        });
-      } else if (sandbox.gpuEnabled && sandbox.nimContainer) {
-        evidence.push({
-          file: sandboxesPath,
-          detail: `Sandbox "${name}": GPU isolated via NIM container "${sandbox.nimContainer}"`,
-        });
-      }
+      const gpu = typeof sandbox.sandboxGpuEnabled === 'boolean' ? sandbox.sandboxGpuEnabled : sandbox.gpuEnabled === true;
+      if (!gpu) continue;
+      unsafeCount++;
+      const device = typeof sandbox.sandboxGpuDevice === 'string' && sandbox.sandboxGpuDevice ? ` (device ${sandbox.sandboxGpuDevice})` : '';
+      evidence.push({
+        file: sandboxesPath,
+        detail: `Sandbox "${name}": host GPU passed into the sandbox${device}${sandbox.sandboxGpuMode ? `, sandboxGpuMode ${JSON.stringify(sandbox.sandboxGpuMode)}` : ''} — the host GPU driver is reachable from agent code`,
+      });
     }
 
     return h.result({
       passed: unsafeCount === 0,
       message: unsafeCount === 0
-        ? 'All GPU-enabled sandboxes use NIM container isolation'
-        : `${unsafeCount} sandbox(es) have GPU passthrough without NIM container isolation`,
+        ? 'No sandbox has the host GPU passed through'
+        : `${unsafeCount} sandbox(es) have the host GPU passed through — enable it (sandboxGpuMode) only when the agent runs local GPU workloads`,
       evidence,
     });
   },
