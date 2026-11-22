@@ -1,7 +1,7 @@
 import { join } from 'node:path';
 import { defineCheck } from '../../core/check-builder.js';
 import type { Severity } from '../../core/types.js';
-import { markUnreachable, queryPermissions } from '../../core/permissions.js';
+import { queryPermissions } from '../../core/permissions.js';
 import { checkoutDir, Findings, groupOnlyNote } from './shared.js';
 
 const TEMP_PREFIXES = ['/tmp', '/var/tmp', '/private/tmp', '/private/var/tmp', '/dev/shm'];
@@ -70,7 +70,7 @@ export const nc003 = defineCheck({
       findings.add({ file: '<process env>', detail: `NANOCLAW_TEMPLATES_DIR=${templates} — agent templates loaded from a world-writable temp location` }, 'warning');
     }
 
-    await markUnreachable(ctx.fs, findings.evidence);
+    await findings.markUnreachable(ctx.fs);
     return h.fromEvidence(findings.evidence, {
       passed: 'NanoClaw checkout and state directory are owner-controlled',
       failed: (n) => `${n} NanoClaw checkout/state path${n === 1 ? ' is' : 's are'} exposed to other users`,

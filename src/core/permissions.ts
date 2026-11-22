@@ -114,8 +114,13 @@ export function accessibleByOthers(f: PermissionFacts): boolean {
  *
  * Unknown ancestors (stat errors, 'unsupported') count as traversable, so
  * remote/snapshot providers without ancestor data keep full severity.
+ *
+ * Returns the items whose world access is blocked while group access
+ * remains, so a check that tiers world vs group exposure can re-tier them.
  */
-export async function markUnreachable(fs: FSProvider, evidence: Evidence[]): Promise<void> {
+export async function markUnreachable(fs: FSProvider, evidence: Evidence[]): Promise<Set<Evidence>> {
+  /** Items whose world access an ancestor blocks while group access remains. */
+  const groupOnly = new Set<Evidence>();
   const cache = new Map<string, PermissionFacts | undefined>();
   const factsOf = async (p: string): Promise<PermissionFacts | undefined> => {
     if (cache.has(p)) return cache.get(p);
@@ -170,6 +175,8 @@ export async function markUnreachable(fs: FSProvider, evidence: Evidence[]): Pro
       e.detail = `${e.detail ? `${e.detail} — ` : ''}mitigated: not reachable by other users, parent ${barrier} blocks traversal`;
     } else if (worldExposed && worldBarrier) {
       e.detail = `${e.detail ? `${e.detail} — ` : ''}world access blocked by parent ${worldBarrier}; group access remains`;
+      groupOnly.add(e);
     }
   }
+  return groupOnly;
 }
