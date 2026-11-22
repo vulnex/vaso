@@ -1,6 +1,6 @@
 import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
-import { envString, envTrue, isConfigured, lyrieEnvConfigs } from './env.js';
+import { envFile, envString, envTrue, isConfigured, lyrieMergedEnvs } from './env.js';
 
 function isLoopback(host: string): boolean {
   const h = host.replace(/^\[|\]$/g, '').toLowerCase();
@@ -24,7 +24,7 @@ export const ly010 = defineCheck({
 
   async run(ctx, h) {
     const evidence: Evidence[] = [];
-    for (const config of lyrieEnvConfigs(ctx.configs)) {
+    for (const config of lyrieMergedEnvs(ctx.configs)) {
       if (!envTrue(config, 'LYRIE_WEBCHAT_ENABLED')) continue;
 
       const host = envString(config, 'LYRIE_WEBCHAT_HOST') || '127.0.0.1';
@@ -33,7 +33,7 @@ export const ly010 = defineCheck({
 
       const port = envString(config, 'LYRIE_WEBCHAT_PORT') || '7777';
       evidence.push({
-        file: config.filePath,
+        file: envFile(config, 'LYRIE_WEBCHAT_HOST'),
         snippet: `LYRIE_WEBCHAT_HOST=${host}`,
         detail: `WebChat enabled on ${host}:${port} with no LYRIE_WEBCHAT_TOKEN — anyone who can reach it could talk to the agent (the 3.4.0 WebChat listener is not wired yet, so nothing binds today)`,
       });

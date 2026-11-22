@@ -1,6 +1,6 @@
 import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
-import { envString, envTrue, lyrieEnvConfigs } from './env.js';
+import { envFile, envString, envTrue, lyrieMergedEnvs } from './env.js';
 
 /**
  * gateway/src/webchat/bot.ts isWebChatOriginAllowed(): an empty/unset
@@ -16,19 +16,19 @@ export const ly011 = defineCheck({
 
   async run(ctx, h) {
     const evidence: Evidence[] = [];
-    for (const config of lyrieEnvConfigs(ctx.configs)) {
+    for (const config of lyrieMergedEnvs(ctx.configs)) {
       if (!envTrue(config, 'LYRIE_WEBCHAT_ENABLED')) continue;
 
       const origins = (envString(config, 'LYRIE_WEBCHAT_ORIGINS') ?? '')
         .split(',').map(s => s.trim()).filter(Boolean);
       if (origins.length === 0) {
         evidence.push({
-          file: config.filePath,
+          file: envFile(config, 'LYRIE_WEBCHAT_ENABLED'),
           detail: 'WebChat enabled but LYRIE_WEBCHAT_ORIGINS is unset — every origin is accepted',
         });
       } else if (origins.includes('*')) {
         evidence.push({
-          file: config.filePath,
+          file: envFile(config, 'LYRIE_WEBCHAT_ORIGINS'),
           snippet: `LYRIE_WEBCHAT_ORIGINS=${origins.join(',')}`,
           detail: 'LYRIE_WEBCHAT_ORIGINS contains "*" — every origin is accepted',
         });

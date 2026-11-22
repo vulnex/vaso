@@ -12,7 +12,8 @@ import { configFixTargets } from '../../remediation/fix-refusal.js';
  * ships NODE_ENV=development, so a copied config disables the SSRF guard.
  */
 function isDevelopment(v: string | undefined): boolean {
-  return v?.toLowerCase() === 'development';
+  // exact, like isUrlSafe; `Development` fails config validation (zod enum)
+  return v === 'development';
 }
 
 export const ly018 = defineCheck({

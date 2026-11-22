@@ -27,7 +27,8 @@ export const ly001 = defineCheck({
   async run(ctx, h) {
     const evidence: Evidence[] = [];
     for (const config of lyrieEnvConfigs(ctx.configs)) {
-      const mode = envString(config, 'LYRIE_SHIELD_MODE')?.toLowerCase();
+      // zod enum: exact, so `Passive` is invalid, not passive
+      const mode = envString(config, 'LYRIE_SHIELD_MODE');
       if (mode === 'passive') {
         evidence.push({
           file: config.filePath,
@@ -52,7 +53,7 @@ export const ly001 = defineCheck({
 
   async fix(ctx) {
     const affected = lyrieEnvConfigs(ctx.configs).filter(c => {
-      const mode = envString(c, 'LYRIE_SHIELD_MODE')?.toLowerCase();
+      const mode = envString(c, 'LYRIE_SHIELD_MODE');
       return !!mode && mode !== 'active' && mode !== 'strict';
     });
     return fixFirstConfig(affected, {

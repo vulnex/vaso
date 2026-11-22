@@ -1,6 +1,6 @@
 import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
-import { envString, envTrue, isConfigured, lyrieEnvConfigs } from './env.js';
+import { envFile, envString, envTrue, isConfigured, lyrieMergedEnvs } from './env.js';
 
 /** Cloud keys ModelRouter.initialize() registers (packages/core/src/index.ts). */
 const CLOUD_PROVIDER_KEYS = [
@@ -27,8 +27,10 @@ export const ly007 = defineCheck({
 
   async run(ctx, h) {
     const evidence: Evidence[] = [];
-    for (const config of lyrieEnvConfigs(ctx.configs)) {
-      const localMode = envString(config, 'LYRIE_MODE')?.toLowerCase() === 'local';
+    // judged on the merged layers: LYRIE_MODE in .env.local, keys in .env
+    for (const config of lyrieMergedEnvs(ctx.configs)) {
+      // zod enum cloud|local|hybrid: exact
+      const localMode = envString(config, 'LYRIE_MODE') === 'local';
       const requireLocal = envTrue(config, 'LYRIE_REQUIRE_LOCAL');
       if (!localMode && !requireLocal) continue;
 
@@ -37,7 +39,7 @@ export const ly007 = defineCheck({
 
       const intent = requireLocal ? 'LYRIE_REQUIRE_LOCAL=true' : 'LYRIE_MODE=local';
       evidence.push({
-        file: config.filePath,
+        file: envFile(config, requireLocal ? 'LYRIE_REQUIRE_LOCAL' : 'LYRIE_MODE'),
         snippet: intent,
         detail: `${intent} but ${keys.join(', ')} ${keys.length === 1 ? 'is' : 'are'} set — Lyrie 3.4.0 still routes to these cloud providers`,
       });
