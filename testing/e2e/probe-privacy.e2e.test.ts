@@ -5,6 +5,7 @@ import { chmod, link, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'n
 import { existsSync, realpathSync } from 'node:fs';
 import { dirname, extname, basename, join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
+import { classifySensitivePath } from '../../src/analyzers/sensitive-paths.js';
 
 /**
  * Privacy canary: every place the probe collects from, filled with fake
@@ -967,7 +968,9 @@ describe.skipIf(!goAvailable)('probe privacy canary', () => {
     for (const rel of CONFIG_ROOT_UNCOLLECTED) expect(snap.files[join(home, rel)], `${rel} not collected`).toBeUndefined();
     for (const rel of Object.keys(CONFIG_TREE_CREDENTIALS)) {
       const e = snap.files[join(home, rel)];
-      expect(e?.exists, `${rel} recorded`).toBe(true);
+      // a file that is a sensitive sink itself (.vault-token, shell history)
+      // is not walked at all, here or locally; the others are metadata only
+      if (classifySensitivePath(join(home, rel)).length === 0) expect(e?.exists, `${rel} recorded`).toBe(true);
       expect(e?.content ?? '', `${rel} metadata only`).toBe('');
     }
     for (const rel of CONFIG_COMMANDS) {
