@@ -17,11 +17,34 @@ export interface VersionBounds {
   maxInclusive?: string;
 }
 
+/**
+ * PEP 440 pre-, post- and dev-release suffixes (`1.10.0rc1`, `2.0b2`,
+ * `1.4.post1`, `3.1.dev4`) as semver: pre-releases become `-a.N` / `-b.N` /
+ * `-rc.N` (a < b < rc, all before the release), a dev release `-0.dev.N`
+ * (before them), and a post-release is the release itself (it only fixes
+ * packaging). Without this, `1.10.0rc1` read as 1.10.0, past a `<1.10.0` fix.
+ */
+const PEP440_SUFFIX = /^[-_.]?(?:(a|alpha|b|beta|c|rc|pre|preview)[-_.]?(\d*))?(?:[-_.]?(post|rev|r)[-_.]?(\d*))?(?:[-_.]?(dev)[-_.]?(\d*))?$/i;
+
+function pep440Suffix(suffix: string): string | undefined {
+  const m = PEP440_SUFFIX.exec(suffix);
+  if (!m) return undefined;
+  const pre = m[1]?.toLowerCase();
+  const kind = pre === undefined ? undefined : pre.startsWith('a') ? 'a' : pre.startsWith('b') ? 'b' : 'rc';
+  if (kind) return `-${kind}.${m[2] || 0}${m[5] ? `.dev.${m[6] || 0}` : ''}`;
+  if (m[5]) return m[3] ? '' : `-0.dev.${m[6] || 0}`; // `1.0.post1.dev2` is after 1.0
+  return '';
+}
+
 /** `1`, `1.2`, `1.2.3` → full x.y.z (missing parts are 0). */
 function full(version: string): string | undefined {
-  const m = /^v?(\d+)(?:\.(\d+))?(?:\.(\d+))?(-[\w.]+)?$/.exec(version.trim());
-  if (!m) return undefined;
-  return `${m[1]}.${m[2] ?? 0}.${m[3] ?? 0}${m[4] ?? ''}`;
+  const v = version.trim();
+  const m = /^v?(\d+)(?:\.(\d+))?(?:\.(\d+))?(-[\w.]+)?$/.exec(v);
+  if (m) return `${m[1]}.${m[2] ?? 0}.${m[3] ?? 0}${m[4] ?? ''}`;
+  const p = /^v?(\d+)(?:\.(\d+))?(?:\.(\d+))?([-_.]?[A-Za-z][\w.]*)$/.exec(v);
+  const suffix = p ? pep440Suffix(p[4]) : undefined;
+  if (!p || suffix === undefined) return undefined;
+  return `${p[1]}.${p[2] ?? 0}.${p[3] ?? 0}${suffix}`;
 }
 
 /**
@@ -136,7 +159,12 @@ export function rangeBounds(range: string, ecosystem: 'npm' | 'pypi' = 'npm'): V
  */
 export function exactVersion(spec: string): string | undefined {
   const m = /^(===?|=)?\s*v?(\d+\.\d+(\.\d+)?(?:-[\w.]+)?)$/.exec(spec.trim());
-  if (!m || (!m[3] && !m[1]?.startsWith('=='))) return undefined;
+  if (!m) {
+    // PEP 440 pin of a pre-release (`==1.10.0rc1`)
+    const pin = /^===?\s*(\d+(?:\.\d+)*[-_.]?[A-Za-z][\w.]*)$/.exec(spec.trim());
+    return pin ? full(pin[1]) : undefined;
+  }
+  if (!m[3] && !m[1]?.startsWith('==')) return undefined;
   return full(m[2]);
 }
 
