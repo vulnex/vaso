@@ -677,4 +677,15 @@ describe('analyzePythonSinks — tool input through comprehensions, helper retur
     expect(run('validate_file_path')).toEqual([]);
     expect(run('file_size')).toEqual([8]);
   });
+
+  it('seeds the function a hand-written loop routes tools/call to, whatever its name', () => {
+    const server = (route: string[]) => sinks([...head, 'class Server:', '    async def handle_message(self, message):', '        method = message.get("method")',
+      ...route.map((r) => `        ${r}`),
+      '    async def on_invoke(self, message):', '        args = message.get("params", {}).get("arguments", {})', '        return self.read(args.get("path"))',
+      '    async def read(self, rp):', '        return open(os.path.join(BASE, rp)).read()']).map((f) => f.line);
+    expect(server(['if method == "tools/call":', '    return await self.on_invoke(message)'])).toEqual([14]);
+    expect(server(['handlers = {"tools/call": self.on_invoke}', 'return await handlers[method](message)'])).toEqual([14]);
+    // routed elsewhere: tools/list only
+    expect(server(['if method == "tools/list":', '    return await self.on_invoke(message)'])).toEqual([]);
+  });
 });

@@ -1053,6 +1053,42 @@ const mentions = (text: string, name: string): boolean => new RegExp(String.raw`
  * what it is given is the request, so its parameters carry tool input.
  */
 const TOOL_DISPATCHER = /^_*(?:handle_?)?(?:tools?_?call|call_?tools?)$/i;
+/** A `"tools/call"` method literal: the JSON-RPC request that runs a tool. */
+const TOOLS_CALL_LITERAL = /(["'])tools\/call\1/;
+/** Calls in a `tools/call` branch that only answer it, not run the tool. */
+const NOT_A_RUNNER = new Set(['print', 'len', 'str', 'dict', 'list', 'isinstance', 'get', 'error_response', 'make_error', 'json', 'dumps', 'loads']);
+
+/**
+ * Functions a hand-written JSON-RPC loop routes `tools/call` requests to,
+ * whatever they are named: called in the branch that tests for it
+ * (`if method == "tools/call": return await self.on_invoke(message)`,
+ * `case "tools/call":`) or mapped to it (`{"tools/call": self.on_invoke}`).
+ */
+function routedToolCalls(stmts: Array<CodeLine & { last: number }>): Set<string> {
+  const out = new Set<string>();
+  const callees = (text: string): void => {
+    for (const m of blankStrings(text).matchAll(/(?<![\w.])(?:(?:self|cls)\.)?([A-Za-z_]\w*)\s*\(/g)) {
+      if (!NOT_A_RUNNER.has(m[1])) out.add(m[1]);
+    }
+  };
+  for (let i = 0; i < stmts.length; i++) {
+    const text = stmts[i].text;
+    if (!TOOLS_CALL_LITERAL.test(text)) continue;
+    for (const m of text.matchAll(/(["'])tools\/call\1\s*:\s*(?:(?:self|cls)\.)?([A-Za-z_]\w*)/g)) out.add(m[2]);
+    if (!/^\s*(?:(?:el)?if|case)\b/.test(text)) continue;
+    // the branch's own line after the colon, then its suite
+    const colon = text.indexOf(':', text.search(TOOLS_CALL_LITERAL) + 12);
+    if (colon !== -1) callees(text.slice(colon + 1));
+    const indent = text.search(/\S/);
+    for (let j = i + 1; j < stmts.length; j++) {
+      const at = stmts[j].text.search(/\S/);
+      if (at >= 0 && at <= indent) break;
+      callees(stmts[j].text);
+    }
+  }
+  return out;
+}
+
 /** Rounds of the taint fixpoint: each adds a name or ends it; bounds a pathological file. */
 const MAX_TAINT_ROUNDS = 32;
 
@@ -1111,8 +1147,9 @@ function taintedNames(stmts: Array<CodeLine & { last: number }>, fns: PyFunction
     return via ? `${target} ← ${via}() ← ${chain}` : `${target} ← ${chain}`;
   };
   const tainted = new Map<PyFunction, Map<string, string>>();
+  const routed = routedToolCalls(stmts);
   for (const fn of fns) {
-    const seeded = fn.tool || TOOL_DISPATCHER.test(fn.name);
+    const seeded = fn.tool || TOOL_DISPATCHER.test(fn.name) || routed.has(fn.name);
     tainted.set(fn, new Map(seeded ? fn.params.map((p) => [p, p]) : []));
     argvNames.set(fn, new Set());
   }
