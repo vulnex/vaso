@@ -379,6 +379,19 @@ describe('module groups grow from the tool handlers', () => {
       expect(r4.severity).toBe('critical');
     });
 
+    it('records a helper one group left out for size even when a later group takes it in', async () => {
+      const pad = sinkPadTo(MAX_GROUP_SOURCE - 20_000);
+      // a.js passes tool input, b.js a constant; lib.js fits only b.js's group
+      const a = `import { server } from "./index.js";\nimport { f0 } from "./pad.js";\nimport { run } from "./lib.js";\nserver.tool("exec", { cmd: z.string() }, async (args) => { run(args.cmd); return { content: [{ type: "text", text: f0("x") }] }; });`;
+      const b = `import { server } from "./index.js";\nimport { run } from "./lib.js";\nserver.tool("status", {}, async () => { run("git status"); return { content: [] }; });\n${codePadTo(30_000)}`;
+      const lib = `${LIB}\n${codePadTo(30_000)}`;
+      const code = joined({ 'index.js': INDEX, 'a.js': a, 'b.js': b, 'lib.js': lib, 'pad.js': pad });
+      expect(taintCoverage(code).untraced).toEqual([expect.objectContaining({ path: 'lib.js', from: 'a.js' })]);
+      const r5 = await mcp005.run(ctx({ sourceCode: code, sourceRoot: '/srv/app' }));
+      expect(r5.passed).toBe(false);
+      expect(r5.evidence?.[0]?.detail).toMatch(/not verified/);
+    }, 60_000);
+
     it('records a link into a helper too big to share as not followed (not verified, never clean)', async () => {
       const pad = sinkPadTo(MAX_GROUP_SOURCE - 100_000);
       const lib = `${LIB}\n${codePadTo(80_000)}`;

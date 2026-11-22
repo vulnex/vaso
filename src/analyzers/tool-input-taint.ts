@@ -229,7 +229,7 @@ function traced(code: string, filename: string): TaintedSink[] {
 export interface UntracedModule {
   /** Its path, as its `// === path ===` header names it. */
   path: string;
-  /** The module whose import of it was not followed. */
+  /** The module(s) whose import of it was not followed, comma-separated. */
   from: string;
   /** Its lines in the joined source (first, last). */
   startLine: number;
@@ -249,7 +249,7 @@ export function taintCoverage(code: string): { untraced: UntracedModule[] } {
     const chunks = sourceChunks(code);
     untraced = planModules(chunks).untraced.map(({ index, from }) => ({
       path: chunks[index].path!,
-      from: chunks[from].path!,
+      from: from.map((f) => chunks[f].path!).join(', '),
       startLine: chunks[index].startLine,
       endLine: chunks[index].startLine + chunks[index].code.split('\n').length - 1,
     }));
@@ -283,13 +283,13 @@ function resolveChunk<T>(from: string, specifier: string, byPath: Map<string, T>
 }
 
 /** A file that registers a tool/request handler (HANDLER_REGISTRARS): where tool input enters. */
-const HANDLER_REGISTRATION = /\.\s*(?:tool|registerTool|setRequestHandler|addTool)\s*\(/;
+const HANDLER_REGISTRATION = /\.\s*(?:tool|registerTool|setRequestHandler|addTool)\s*\(|\[\s*(["'`])(?:tool|registerTool|setRequestHandler|addTool)\1\s*\]\s*\(/;
 
 interface ModulePlan {
   /** Chunks (by index) to trace together. */
   groups: number[][];
-  /** Modules a handler file reaches by imports that its group left out for size, with the importer whose link was dropped. */
-  untraced: Array<{ index: number; from: number }>;
+  /** Modules a handler file reaches by imports that its group left out for size, with the importers whose link was dropped. */
+  untraced: Array<{ index: number; from: number[] }>;
 }
 
 /**
@@ -471,9 +471,20 @@ function planModules(chunks: SourceChunk[]): ModulePlan {
   const groups: number[][] = [];
   const members: Set<number>[] = [];
   const total: number[] = [];
-  const dropped = new Map<number, number>();
+  // links left out for size: the module, the importer and the importer's group
+  const dropped = new Map<number, Array<{ from: number; g: number }>>();
+  const drop = (t: number, from: number, g: number): void => {
+    const list = dropped.get(t) ?? [];
+    if (list.length === 0) dropped.set(t, list);
+    if (!list.some((d) => d.from === from)) list.push({ from, g });
+  };
   // links into a module another group holds that could not be shared
-  const crossed = new Map<number, number>();
+  const crossed = new Map<number, number[]>();
+  const cross = (t: number, from: number): void => {
+    const list = crossed.get(t) ?? [];
+    if (list.length === 0) crossed.set(t, list);
+    if (!list.includes(from)) list.push(from);
+  };
   let shared = 0;
   const add = (i: number, g: number): void => {
     members[g].add(i);
@@ -508,7 +519,7 @@ function planModules(chunks: SourceChunk[]): ModulePlan {
           const fits = total[current] + size[t] <= MAX_GROUP_SOURCE;
           if (groupOf[t] === -1) {
             if (!fits) {
-              if (!dropped.has(t)) dropped.set(t, queue[q]);
+              drop(t, queue[q], current);
               continue;
             }
             join(t, current);
@@ -519,7 +530,7 @@ function planModules(chunks: SourceChunk[]): ModulePlan {
             // within a budget; past it, the link is recorded as not followed.
             if (isHandler[t]) continue;
             if (!fits || size[t] > MAX_SHARED_MODULE || shared + size[t] > MAX_SHARED_TOTAL) {
-              if (!crossed.has(t)) crossed.set(t, queue[q]);
+              cross(t, queue[q]);
               continue;
             }
             shared += size[t];
@@ -531,7 +542,7 @@ function planModules(chunks: SourceChunk[]): ModulePlan {
     }
   }
   // Modules a handler file reaches only through a dropped link: not traced from it
-  const untraced: Array<{ index: number; from: number }> = [];
+  const untraced: Array<{ index: number; from: number[] }> = [];
   const seen = new Set<number>(handlerFiles);
   const queue = [...handlerFiles];
   for (let q = 0; q < queue.length; q++) {
@@ -539,12 +550,19 @@ function planModules(chunks: SourceChunk[]): ModulePlan {
       if (seen.has(t)) continue;
       seen.add(t);
       queue.push(t);
-      if (groupOf[t] === -1) untraced.push({ index: t, from: dropped.get(t) ?? queue[q] });
+      if (groupOf[t] === -1) untraced.push({ index: t, from: dropped.get(t)?.map((d) => d.from) ?? [queue[q]] });
     }
   }
-  // and the shared helpers some group could not take in
+  // the shared helpers some group could not take in, and a module left out of
+  // one group for size that a later group took in: the first group's
+  // handlers still lost it
+  const lost = new Map(crossed);
+  for (const [t, list] of dropped) {
+    if (groupOf[t] === -1 || isHandler[t]) continue;
+    for (const d of list) if (!members[d.g].has(t)) lost.set(t, [...(lost.get(t) ?? []), d.from].filter((f, i, a) => a.indexOf(f) === i));
+  }
   const listed = new Set(untraced.map((u) => u.index));
-  for (const [index, from] of crossed) if (!listed.has(index)) untraced.push({ index, from });
+  for (const [index, from] of lost) if (!listed.has(index)) untraced.push({ index, from });
 
   // The rest: linked files together, as far as the cap allows
   const parent = chunks.map((_, i) => i);
@@ -901,7 +919,48 @@ interface ModuleFile {
   stars?: ModuleFile[];
   lines?: string[];
 }
-type ExportEntry = { fn: NodePath } | { from: ModuleFile; name: string };
+/** A function it exports, a name it forwards from another module, or an instance of one of its classes (`export const tm = new TerminalManager()`). */
+type ExportEntry = { fn: NodePath } | { from: ModuleFile; name: string } | { cls: NodePath };
+
+/** Array methods whose callback receives the receiver's elements as its first parameter (`reduce`: its second). */
+const ELEMENT_CALLBACKS: Record<string, number> = {
+  forEach: 0, map: 0, flatMap: 0, filter: 0, some: 0, every: 0, find: 0, findIndex: 0, findLast: 0, findLastIndex: 0, reduce: 1, reduceRight: 1,
+};
+/** Functions of an object a computed call (`handlers[name](args)`) may reach, at most. */
+const MAX_DISPATCH_TARGETS = 256;
+
+/** The class a `new X(…)` expression instantiates, when `X` is a class of this file. */
+function classOfNew(p: NodePath | null | undefined): NodePath | undefined {
+  if (!p?.isNewExpression()) return undefined;
+  const callee = p.get('callee') as NodePath;
+  if (callee.isClassExpression()) return callee;
+  if (!callee.isIdentifier()) return undefined;
+  const b = callee.scope.getBinding(callee.node.name);
+  if (b?.path.isClassDeclaration()) return b.path;
+  if (b?.path.isVariableDeclarator()) {
+    const init = b.path.get('init') as NodePath;
+    if (init.isClassExpression()) return init;
+  }
+  return undefined;
+}
+
+/** The method `name` of a class (or of a class of this file it extends, a few levels up). */
+function classMethod(cls: NodePath, name: string, depth = 0): NodePath | undefined {
+  const body = cls.get('body') as NodePath;
+  for (const m of (body.get('body') as NodePath[])) {
+    if ((m.isClassMethod() || m.isClassPrivateMethod()) && m.node.kind === 'method' && keyName(m.node.key, m.node.computed) === name) return m;
+    // `run = (cmd) => …` as a class field
+    if (m.isClassProperty() && keyName(m.node.key, m.node.computed) === name) {
+      const value = m.get('value') as NodePath;
+      if (value.isArrowFunctionExpression() || value.isFunctionExpression()) return value;
+    }
+  }
+  const sup = cls.get('superClass') as NodePath;
+  if (depth >= 4 || !sup.isIdentifier()) return undefined;
+  const b = sup.scope.getBinding(sup.node.name);
+  const parent = b?.path.isClassDeclaration() ? b.path : undefined;
+  return parent ? classMethod(parent, name, depth + 1) : undefined;
+}
 
 /** `module.exports` */
 function isModuleExports(node: Node): boolean {
@@ -986,6 +1045,8 @@ function analyze(chunks: SourceChunk[], untraced: ReadonlySet<string> = new Set(
     if (!p?.node) return undefined;
     const fn = functionAt(p);
     if (fn) return { fn };
+    const cls = instanceClass(p);
+    if (cls) return { cls };
     if (p.isMemberExpression()) {
       const name = memberName(p.node);
       const from = name === undefined ? undefined : requiredModule(p.get('object') as NodePath);
@@ -1005,6 +1066,15 @@ function analyze(chunks: SourceChunk[], untraced: ReadonlySet<string> = new Set(
     }
     return undefined;
   };
+
+  /** The class whose instance `p` is: `new X()`, or a never-reassigned constant holding one. */
+  function instanceClass(p: NodePath): NodePath | undefined {
+    const direct = classOfNew(p);
+    if (direct || !p.isIdentifier()) return direct;
+    const b = p.scope.getBinding(p.node.name);
+    if (!b?.constant || !b.path.isVariableDeclarator()) return undefined;
+    return classOfNew(b.path.get('init') as NodePath);
+  }
 
   /** The object literal a never-reassigned constant holds (`const h = { run() {…} }; export default h`). */
   const constObject = (p: NodePath): NodePath | undefined => {
@@ -1124,12 +1194,110 @@ function analyze(chunks: SourceChunk[], untraced: ReadonlySet<string> = new Set(
     known.set(name, null); // a re-export cycle exports nothing more
     const entry = exportsOf(file).get(name);
     let fn: NodePath | undefined;
-    if (entry) fn = 'fn' in entry ? entry.fn : lookup(entry.from, entry.name, depth + 1);
+    if (entry) fn = 'fn' in entry ? entry.fn : 'cls' in entry ? undefined : lookup(entry.from, entry.name, depth + 1);
     else if (name !== 'default' && !name.startsWith('default.')) {
       for (const star of file.stars ?? []) if ((fn = lookup(star, name, depth + 1))) break;
     }
     known.set(name, fn ?? null);
     return fn;
+  };
+
+  /** The class of the instance a module exports under `name`, through re-exports; cycles end. */
+  const exportedClasses = new Map<ModuleFile, Map<string, NodePath | null>>();
+  const lookupClass = (file: ModuleFile, name: string, depth = 0): NodePath | undefined => {
+    let known = exportedClasses.get(file);
+    if (!known) exportedClasses.set(file, (known = new Map()));
+    if (known.has(name)) return known.get(name) ?? undefined;
+    if (depth > MAX_DEPTH) return undefined;
+    known.set(name, null);
+    const entry = exportsOf(file).get(name);
+    let cls: NodePath | undefined;
+    if (entry) cls = 'cls' in entry ? entry.cls : 'from' in entry ? lookupClass(entry.from, entry.name, depth + 1) : undefined;
+    else if (name !== 'default') {
+      for (const star of file.stars ?? []) if ((cls = lookupClass(star, name, depth + 1))) break;
+    }
+    known.set(name, cls ?? null);
+    return cls;
+  };
+
+  /** The module of the group an identifier names: a namespace or default import, or a CommonJS `require` binding. */
+  const moduleOfName = (id: NodePath): ModuleFile | undefined => {
+    if (!id.isIdentifier()) return undefined;
+    const b = id.scope.getBinding(id.node.name);
+    const decl = b?.path.node;
+    if (!b || !decl) return undefined;
+    if (decl.type === 'ImportNamespaceSpecifier' || decl.type === 'ImportDefaultSpecifier') return moduleAt(b.path, bindingModule(b));
+    return requiredModule(id);
+  };
+
+  /**
+   * The class of the object a method is called on: a local `new X()`, an
+   * instance another module of the group exports (`import { tm } from
+   * './tm.js'`, `const { tm } = require('./tm')`, `tm_1.tm` in TypeScript's
+   * CommonJS output, `ns.tm` of a namespace import).
+   */
+  const receiverClass = (object: NodePath): NodePath | undefined => {
+    if (object.isIdentifier()) {
+      const local = instanceClass(object);
+      if (local || !linked) return local;
+      const b = object.scope.getBinding(object.node.name);
+      const decl = b?.path.node;
+      if (!b || !decl) return undefined;
+      if (decl.type === 'ImportSpecifier' || decl.type === 'ImportDefaultSpecifier') {
+        const from = moduleAt(b.path, bindingModule(b));
+        return from && lookupClass(from, decl.type === 'ImportDefaultSpecifier' ? 'default' : importedName(b));
+      }
+      if (decl.type === 'VariableDeclarator' && decl.id.type === 'ObjectPattern') {
+        const from = moduleAt(b.path, moduleOfInit(decl.init, b.scope));
+        return from && lookupClass(from, importedName(b));
+      }
+      return undefined;
+    }
+    if (!linked || !(object.isMemberExpression() || object.isOptionalMemberExpression())) return undefined;
+    const name = memberName(object.node);
+    const from = name === undefined ? undefined : moduleOfName(object.get('object') as NodePath);
+    return from && name !== undefined ? lookupClass(from, name) : undefined;
+  };
+
+  /** The method a call on a class instance invokes (`tm.executeCommand(cmd)`), when the instance's class is known. */
+  const instanceMethod = (path: NodePath): NodePath | undefined => {
+    if (!path.isCallExpression() && !path.isOptionalCallExpression()) return undefined;
+    const callee = path.get('callee') as NodePath;
+    if (!(callee.isMemberExpression() || callee.isOptionalMemberExpression())) return undefined;
+    const name = keyName(callee.node.property as Node, callee.node.computed);
+    if (name === undefined) return undefined;
+    const cls = receiverClass(callee.get('object') as NodePath);
+    return cls ? classMethod(cls, name) : undefined;
+  };
+
+  /**
+   * The functions a computed call may reach (`handlers[name](args)`): every
+   * function of a constant object literal, or every function a namespace
+   * import of the group exports.
+   */
+  const dispatchTargets = (path: NodePath): Node[] => {
+    if (!path.isCallExpression()) return [];
+    const callee = path.get('callee') as NodePath;
+    if (!callee.isMemberExpression() || !callee.node.computed || callee.get('property').isStringLiteral()) return [];
+    const object = callee.get('object') as NodePath;
+    const out: Node[] = [];
+    const literal = constObject(object);
+    if (literal) {
+      for (const prop of literal.get('properties') as NodePath[]) {
+        if (out.length >= MAX_DISPATCH_TARGETS) break;
+        const fn = prop.isObjectMethod() ? prop : prop.isObjectProperty() ? functionAt(prop.get('value') as NodePath) ?? importedFunction(prop, prop.node.value as Node) : undefined;
+        if (fn) out.push(fn.node);
+      }
+      return out;
+    }
+    const from = linked ? moduleOfName(object) : undefined;
+    if (!from) return [];
+    for (const name of exportsOf(from).keys()) {
+      if (out.length >= MAX_DISPATCH_TARGETS) break;
+      const fn = lookup(from, name);
+      if (fn) out.push(fn.node);
+    }
+    return out;
   };
 
   /**
@@ -1193,8 +1361,10 @@ function analyze(chunks: SourceChunk[], untraced: ReadonlySet<string> = new Set(
     safely(() => traverse(file.ast, {
       CallExpression(path) {
         const { callee, arguments: args } = path.node;
-        if (callee.type !== 'MemberExpression' || callee.property.type !== 'Identifier') return;
-        if (!HANDLER_REGISTRARS.has(callee.property.name)) return;
+        // `server.tool(…)`, also written `server["tool"](…)`
+        if (callee.type !== 'MemberExpression') return;
+        const registrar = keyName(callee.property, callee.computed);
+        if (registrar === undefined || !HANDLER_REGISTRARS.has(registrar)) return;
         // Inline, by reference (`server.tool("t", "d", {}, handleIt)`, also
         // imported from another module), or FastMCP-TS's `addTool({ name, execute })`.
         const constrained = constrainedSchemaFields(args as Node[]);
@@ -1252,10 +1422,20 @@ function analyze(chunks: SourceChunk[], untraced: ReadonlySet<string> = new Set(
         if (declarator.isVariableDeclarator()) {
           const init = declarator.get('init');
           if (init.node) taint = expressionTaint(init as NodePath, depth + 1);
+          // `for (const c of cmds)`, `for (const k in input)`: the loop variable holds the iterable's elements or keys
+          const loop = declarator.parentPath?.parentPath;
+          if (!init.node && (loop?.isForOfStatement() || loop?.isForInStatement()) && loop.node.left === declarator.parent) {
+            taint = expressionTaint(loop.get('right') as NodePath, depth + 1);
+          }
         }
         for (const violation of binding.constantViolations) {
           if (taint.origin) break;
           if (violation.isAssignmentExpression()) taint = mergeTaint(taint, expressionTaint(violation.get('right'), depth + 1));
+        }
+        // what is stored on it: `opts.command = cmd`, `o[k] = v`
+        for (const { right } of memberStores(binding)) {
+          if (taint.origin) break;
+          taint = mergeTaint(taint, expressionTaint(right, depth + 1));
         }
         taint = renamed(name, taint);
       }
@@ -1264,11 +1444,72 @@ function analyze(chunks: SourceChunk[], untraced: ReadonlySet<string> = new Set(
       return taint;
     };
 
+    /**
+     * Assignments to a property of the object a binding holds (`o.x = v`,
+     * `o[k] = v`): `prop` undefined for a computed key.
+     */
+    const stores = new Map<Binding, Array<{ prop?: string; right: NodePath }>>();
+    function memberStores(binding: Binding): Array<{ prop?: string; right: NodePath }> {
+      let out = stores.get(binding);
+      if (out) return out;
+      out = [];
+      for (const ref of binding.referencePaths) {
+        const member = ref.parentPath;
+        if (!member?.isMemberExpression() || member.node.object !== ref.node) continue;
+        const assign = member.parentPath;
+        if (!assign?.isAssignmentExpression({ operator: '=' }) || assign.node.left !== member.node) continue;
+        out.push({ prop: keyName(member.node.property, member.node.computed), right: assign.get('right') });
+      }
+      stores.set(binding, out);
+      return out;
+    }
+
+    /**
+     * What `o.prop` carries when `o` is a local object literal never
+     * reassigned, read field by field: the literal's `prop` and what is
+     * stored under that name (or a computed key). Undefined when a spread or
+     * computed key makes its fields unknown — the object is then read whole.
+     */
+    const propertyTaint = (m: NodePath, depth: number): Taint | undefined => {
+      if (!m.isMemberExpression() || m.node.object.type !== 'Identifier') return undefined;
+      // a method called on it (`o.toString()`) reads the whole object
+      if (m.parentPath?.isCallExpression() && m.parent.type === 'CallExpression' && (m.parent as { callee: Node }).callee === m.node) return undefined;
+      const prop = keyName(m.node.property, m.node.computed);
+      if (prop === undefined) return undefined;
+      const b = m.scope.getBinding(m.node.object.name);
+      if (!b || b.constantViolations.length > 0 || !b.path.isVariableDeclarator()) return undefined;
+      const init = b.path.get('init') as NodePath;
+      if (!init.isObjectExpression()) return undefined;
+      // memoized per object and field, like bindingTaint; a cycle reads nothing more
+      let fields = fieldMemo.get(b);
+      if (!fields) fieldMemo.set(b, (fields = new Map()));
+      if (fields.has(prop)) return fields.get(prop) ?? CLEAN;
+      const props = init.get('properties') as NodePath[];
+      for (const p of props) {
+        if (!p.isObjectProperty() && !p.isObjectMethod()) return undefined;
+        if (keyName(p.node.key, p.node.computed) === undefined) return undefined;
+      }
+      fields.set(prop, null);
+      let taint = CLEAN;
+      for (const p of props) {
+        if (p.isObjectProperty() && keyName(p.node.key, p.node.computed) === prop) taint = mergeTaint(taint, expressionTaint(p.get('value') as NodePath, depth + 1));
+      }
+      for (const st of memberStores(b)) {
+        if (taint.origin) break;
+        if (st.prop === undefined || st.prop === prop) taint = mergeTaint(taint, expressionTaint(st.right, depth + 1));
+      }
+      fields.set(prop, taint);
+      return taint;
+    };
+    const fieldMemo = new Map<Binding, Map<string, Taint | null>>();
+
     /** What tool input `path` may carry: every input-derived identifier it references, up to the first certain one. */
     const expressionTaint = (path: NodePath, depth: number): Taint => {
       // A number derived from input (`actions.length`, `Number(x)`) can't
       // carry a path, a query or a command
       if (yieldsNumber(path)) return CLEAN;
+      const field = depth < MAX_DEPTH ? propertyTaint(path, depth) : undefined;
+      if (field) return field;
       const local = localFunctionCall(path);
       if (local) return callTaint(path, local, depth);
       let found = CLEAN;
@@ -1293,7 +1534,14 @@ function analyze(chunks: SourceChunk[], untraced: ReadonlySet<string> = new Set(
         },
         // A nested function's body doesn't flow into this value.
         Function(fn) { fn.skip(); },
-        MemberExpression(m) { if (yieldsNumber(m)) m.skip(); },
+        MemberExpression(m) {
+          if (yieldsNumber(m)) return m.skip();
+          const field = depth < MAX_DEPTH ? propertyTaint(m, depth) : undefined;
+          if (field) {
+            found = mergeTaint(found, field);
+            m.skip();
+          }
+        },
         CallExpression(c) {
           if (found.origin) return c.stop();
           if (yieldsNumber(c)) return c.skip();
@@ -1312,7 +1560,7 @@ function analyze(chunks: SourceChunk[], untraced: ReadonlySet<string> = new Set(
     const localFunctionCall = (path: NodePath): NodePath | undefined => {
       if (!path.isCallExpression()) return undefined;
       const callee = path.get('callee');
-      if (!callee.isIdentifier()) return importedFunction(path, callee.node);
+      if (!callee.isIdentifier()) return importedFunction(path, callee.node) ?? instanceMethod(path);
       const binding = path.scope.getBinding(callee.node.name);
       if (!binding) return undefined;
       if (binding.path.isFunctionDeclaration()) return binding.path;
@@ -1472,31 +1720,45 @@ function analyze(chunks: SourceChunk[], untraced: ReadonlySet<string> = new Set(
       taintedParams.set(fn, set);
       reached.push([fn, index]);
     };
+    /** What `t` carries reaches parameter `index` of each of `targets`. */
+    const flowInto = (t: Taint, targets: Node[], index: number): void => {
+      for (const target of targets) {
+        if (t.origin) {
+          taintParam(target, index);
+          continue;
+        }
+        for (const d of t.deps) {
+          if (edges >= MAX_FLOW_EDGES) return;
+          let byIndex = flowsTo.get(d.fn);
+          if (!byIndex) flowsTo.set(d.fn, (byIndex = new Map()));
+          const list = byIndex.get(d.index) ?? [];
+          if (list.length === 0) byIndex.set(d.index, list);
+          list.push([target, index]);
+          edges++;
+        }
+      }
+    };
     const visitCalls = {
       CallExpression(path: NodePath) {
-        const imported = importedFunction(path, (path.node as { callee: Node }).callee);
-        const targets = imported ? [...localCallees(path), imported.node] : localCallees(path);
+        const callee = (path.node as { callee: Node }).callee;
+        // `cmds.forEach((c) => exec(c))`: the callback's parameter holds the receiver's elements
+        if (callee.type === 'MemberExpression' && !callee.computed && callee.property.type === 'Identifier' && callee.property.name in ELEMENT_CALLBACKS) {
+          const cb = functionAt((path.get('arguments') as NodePath[])[0]);
+          if (cb) {
+            const t = expressionTaint(path.get('callee.object') as NodePath, 0);
+            if (!isClean(t)) flowInto(t, [cb.node], ELEMENT_CALLBACKS[callee.property.name]);
+          }
+        }
+        const imported = importedFunction(path, callee);
+        const method = imported ? undefined : instanceMethod(path);
+        const targets = [...localCallees(path), ...(imported ? [imported.node] : []), ...(method ? [method.node] : []), ...dispatchTargets(path)];
         if (targets.length === 0) return;
         const args = path.get('arguments') as NodePath[];
         args.forEach((arg, index) => {
           if (!arg.node) return;
           const t = expressionTaint(arg, 0);
           if (isClean(t)) return;
-          for (const target of targets) {
-            if (t.origin) {
-              taintParam(target, index);
-              continue;
-            }
-            for (const d of t.deps) {
-              if (edges >= MAX_FLOW_EDGES) return;
-              let byIndex = flowsTo.get(d.fn);
-              if (!byIndex) flowsTo.set(d.fn, (byIndex = new Map()));
-              const list = byIndex.get(d.index) ?? [];
-              if (list.length === 0) byIndex.set(d.index, list);
-              list.push([target, index]);
-              edges++;
-            }
-          }
+          flowInto(t, targets, index);
         });
       },
     };
@@ -1543,6 +1805,9 @@ function analyze(chunks: SourceChunk[], untraced: ReadonlySet<string> = new Set(
 
         const exec = sinkCallee(path);
         if (exec) {
+          // `new Function(code);` with the result discarded compiles the code
+          // (a syntax check), never runs it
+          if (exec.fn === 'Function' && !exec.display.startsWith('._compile') && path.parentPath?.isExpressionStatement()) return;
           return report(path, exec.display, exec.kind === 'code' ? args : processArgs(exec.fn, args), exec.kind);
         }
 
@@ -2145,8 +2410,10 @@ function destructuredField(binding: Binding): string | undefined {
 function processArgs(sink: string, args: NodePath[]): NodePath[] {
   if (sink === 'exec' || sink === 'execSync' || EXECA_FUNCTIONS[sink] === 'command') return args.slice(0, 1);
   const program = args[0]?.node;
+  // the program as a literal, or a constant holding one (`const shell = "/bin/sh"`)
+  const programText = program ? staticString(program, args[0].scope) : undefined;
   const viaShell =
-    (program?.type === 'StringLiteral' && SHELLS.test(program.value)) ||
+    (programText !== undefined && SHELLS.test(programText)) ||
     args.some((a) => a.node?.type === 'ObjectExpression' && a.node.properties.some((p) =>
       p.type === 'ObjectProperty' && p.key.type === 'Identifier' && p.key.name === 'shell' &&
       p.value.type === 'BooleanLiteral' && p.value.value));
