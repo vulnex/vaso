@@ -8,11 +8,8 @@ const SUSPICIOUS_PARENTS = new Set([
   'python', 'python3', 'ruby', 'perl',
 ]);
 
-const SUSPICIOUS_PARENT_PATTERNS = [
-  /\bbash\s+-c\b/,
-  /\bsh\s+-c\b/,
-  /\bpython[23]?\s+-c\b/,
-];
+// `ps -o comm` carries the executable name only — never its arguments — so
+// parents are judged by name (a `bash -c` wrapper can't be told from a shell).
 
 interface ProcessInfo {
   ppid: number;
@@ -83,20 +80,10 @@ export const run005 = defineCheck({
             file: 'ps',
             detail: `Agent process "${agentComm}" (PID ${agentPid}) has suspicious parent "${parent.comm}" (PID ${proc.ppid})`,
           });
+          // one finding per agent process; the other processes are still walked
           break;
         }
 
-        for (const pattern of SUSPICIOUS_PARENT_PATTERNS) {
-          if (pattern.test(parent.comm)) {
-            evidence.push({
-              file: 'ps',
-              detail: `Agent process "${agentComm}" (PID ${agentPid}) has suspicious parent "${parent.comm}" (PID ${proc.ppid})`,
-            });
-            break;
-          }
-        }
-
-        if (evidence.length > 0) break;
         currentPid = proc.ppid;
       }
     }

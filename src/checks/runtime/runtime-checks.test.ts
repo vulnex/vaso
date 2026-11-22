@@ -218,6 +218,23 @@ describe('RUN-005: Process Ancestry Analysis', () => {
     expect(run005.supportedPlatforms).toEqual(['darwin', 'linux']);
   });
 
+  it('walks every agent process — a first hit no longer hides the next one', async () => {
+    const ps = [
+      '  PID  PPID COMM',
+      '  100     1 python3',
+      '  200   100 openclaw',
+      '  300     1 curl',
+      '  400   300 openclaw-gateway',
+    ].join('\n');
+    const fs = makeMockedFs({});
+    (fs.execSync as ReturnType<typeof vi.fn>).mockReturnValue(ps);
+    const r = await run005.run({ installation: { agent: 'openclaw', installDir: '/h', configFiles: [] }, configs: [], platform: 'linux', fs });
+    expect(r.evidence?.map(e => e.detail)).toEqual([
+      'Agent process "openclaw" (PID 200) has suspicious parent "python3" (PID 100)',
+      'Agent process "openclaw-gateway" (PID 400) has suspicious parent "curl" (PID 300)',
+    ]);
+  });
+
   it("reports only the scanned installation's own processes", async () => {
     const ps = [
       '  PID  PPID COMM',
