@@ -45,7 +45,7 @@ export const cfg011 = defineCheck({
     const runtime = agentNodeVersion(ctx.installation, ctx.fs);
     if (!runtime) {
       return h.passed(ctx.fs.kind === 'snapshot'
-        ? 'Not checked — the scanned host\'s Node.js version is not collected on remote/snapshot scans'
+        ? 'Not checked on remote/snapshot scans — the scanned host\'s Node.js version is not collected'
         : 'Could not determine the agent\'s Node.js version');
     }
     const [major, minor] = runtime.version.split('.').map(n => parseInt(n, 10));
