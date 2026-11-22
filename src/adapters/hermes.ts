@@ -13,6 +13,7 @@ import { envPath } from './env-path.js';
 import { byHermesPrecedence, hermesDeepMerge, hermesManagedDir, managedFilePaths, HERMES_MANAGED_DEFAULT_DIR } from './hermes-managed.js';
 import { prepareHermesYaml } from './hermes-config.js';
 import { parsePythonDotenv } from './dotenv-python.js';
+import { hermesSkillRoots } from './hermes-skills.js';
 
 // $HERMES_HOME/config.yaml and .env. A cli-config.yaml there is never read:
 // the CLI's fallback (only without config.yaml) is the checkout's own
@@ -112,11 +113,17 @@ export const hermesAdapter: AgentAdapter = {
       ? undefined
       : hermesGateway(configFiles, version);
 
+    // skills/, skills.external_dirs and every profile's skills (hermes-skills.ts)
+    const userYaml = configFiles.find(c => c.format === 'yaml' && !c.managed);
+    const { roots: skillsDirs, unscanned } = await hermesSkillRoots(hermesHome, userYaml?.data, fs, home);
+
     return [{
       agent: 'hermes',
       installDir: hermesHome,
       configFiles,
       skillsDir: this.getSkillsDir(hermesHome),
+      skillsDirs: skillsDirs.length > 1 ? skillsDirs : undefined,
+      ...(unscanned.length > 0 ? { unscannedSkillsDirs: unscanned } : {}),
       version,
       gateway,
       models: await this.getModels?.(configFiles, fs),
@@ -314,6 +321,10 @@ export const hermesAdapter: AgentAdapter = {
       globPatterns: [
         '~/.hermes/skills/**',
         '~/.hermes/optional-skills/**',
+        // Profiles (`hermes -p <name>`): data roots of their own; their
+        // config.yaml names their external skill dirs
+        '~/.hermes/profiles/*/skills/**',
+        '~/.hermes/profiles/*/config.yaml',
       ],
       commands: [
         { id: 'hermes-which', cmd: 'which', args: ['hermes'], timeout: 3000 },
@@ -323,6 +334,7 @@ export const hermesAdapter: AgentAdapter = {
         '~/.hermes',
         '~/.hermes/skills',
         '~/.hermes/optional-skills',
+        '~/.hermes/profiles',
         // Managed-scope dir mode (HM-011)
         '${HERMES_MANAGED_DIR}',
       ],
@@ -337,6 +349,16 @@ export const hermesAdapter: AgentAdapter = {
       // What config.yaml launches or runs (HM-010 MCP commands and absolute
       // paths in their args, HM-009 tirith_path): mode and owner only
       configRoots: [{
+        // skills.external_dirs (a string or a list): ${VAR} and ~ expanded,
+        // relative entries against the data root (hermes-skills.ts)
+        configs: ['~/.hermes/config.yaml', '~/.hermes/profiles/*/config.yaml'],
+        format: 'yaml',
+        kind: 'tree',
+        keys: [['skills', 'external_dirs'], ['skills', 'external_dirs', '*']],
+        globs: ['**'],
+        relative: 'config',
+        expandEnv: true,
+      }, {
         configs: HERMES_YAML_CONFIGS,
         format: 'yaml',
         kind: 'stat',
