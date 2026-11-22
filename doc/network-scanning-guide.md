@@ -316,7 +316,7 @@ vaso scan --snapshot ./snapshots/agent-01.json --all-users
 vaso scan --snapshot ./snapshots/agent-02.json --diff
 ```
 
-`--save-snapshot <dir>` writes one file per host to the named directory, named after the **hostname the host reports** (sanitized to `[A-Za-z0-9._-]`), not the inventory label, with the same `<hostname>--<label>.json` rule for duplicate hostnames as `--output-dir`. The directory is created if it doesn't exist. Snapshot files are written **owner-only (mode 0600)** because they contain collected file contents — see [Privacy](#privacy). Report files are written with your normal umask.
+`--save-snapshot <dir>` writes one file per host to the named directory, named after the **hostname the host reports** (sanitized to `[A-Za-z0-9._-]`), not the inventory label, with the same `<hostname>--<label>.json` rule for duplicate hostnames as `--output-dir`. The directory is created if it doesn't exist. Snapshot files are written **owner-only (mode 0600)** because they contain collected file contents — see [Privacy](#privacy). Report files are written with your normal umask. With `-f json`, give `--save-snapshot` and `--output-dir` different directories — both would name a host's file `<hostname>.json`, so VASO refuses the pair (exit 2).
 
 The same flag exists on `vaso detect`, useful for inventorying agent installs across a fleet without running checks.
 

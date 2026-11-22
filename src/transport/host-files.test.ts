@@ -1,5 +1,8 @@
 import { describe, it, expect } from 'vitest';
-import { HostFileNames, hostFileBase, safeHostname } from './host-files.js';
+import { HostFileNames, hostFileBase, safeHostname, sameDirectory } from './host-files.js';
+import { mkdtemp, mkdir, rm, symlink } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 
 describe('HostFileNames', () => {
   it('names a file after the hostname', () => {
@@ -63,5 +66,22 @@ describe('long hostnames', () => {
 
   it('leaves ordinary hostnames as they were', () => {
     expect(hostFileBase('build-01.example.com')).toBe('build-01.example.com');
+  });
+});
+
+describe('sameDirectory', () => {
+  it('sees the same directory through a link and a .. path, but not a sibling', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'vaso-hf-'));
+    try {
+      await mkdir(join(root, 'out'));
+      await mkdir(join(root, 'other'));
+      await symlink(join(root, 'out'), join(root, 'link'));
+      expect(await sameDirectory(join(root, 'out'), join(root, 'link'))).toBe(true);
+      expect(await sameDirectory(join(root, 'out'), join(root, 'other', '..', 'out'))).toBe(true);
+      expect(await sameDirectory(join(root, 'out'), join(root, 'other'))).toBe(false);
+      expect(await sameDirectory(join(root, 'out'), join(root, 'missing'))).toBe(false);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
   });
 });

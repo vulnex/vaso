@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { stat } from 'node:fs/promises';
 
 /**
  * File names for per-host output (`--output-dir`, `--save-snapshot`).
@@ -51,3 +52,21 @@ export class HostFileNames {
     }
   }
 }
+
+/**
+ * Whether `--save-snapshot` and `--output-dir` name the same existing
+ * directory (through a link, `..`, or a different case on a case-insensitive
+ * file system too). Both name a host's file `<hostname>.json`, so a JSON
+ * report would overwrite that host's snapshot.
+ */
+export async function sameDirectory(a: string, b: string): Promise<boolean> {
+  try {
+    const [sa, sb] = await Promise.all([stat(a), stat(b)]);
+    return sa.dev === sb.dev && sa.ino === sb.ino;
+  } catch {
+    return false;
+  }
+}
+
+export const SNAPSHOT_REPORT_CLASH =
+  '--save-snapshot and --output-dir name the same directory: a JSON report would overwrite the host\'s snapshot. Use two directories.';
