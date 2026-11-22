@@ -50,3 +50,29 @@ func TestCommandOutputCapped(t *testing.T) {
 		t.Error("empty buffer")
 	}
 }
+
+// dt24 g9: a dotenv value the shell glues from several quoted pieces
+// (an escaped quote between single-quoted pieces, "a"'b', 'a'b) shipped every
+// piece after the first.
+func TestScrubDotenvGluedPieces(t *testing.T) {
+	doc := "OPENROUTER_API_KEY='sk-or-v1-Zq8Wv3Lm5Np2'\\''Rx7Tk4Hs9Jd6Fb1Gc0Ny'\n" +
+		"DB_PASSWORD=\"Pq8Wo3\"'Ie7Ru2TyXc'\n" +
+		"API_TOKEN='Hh4Jj5Kk'\"Ll6Mm7Nn8\"Oo9Pp0Qq # note Vv1\n" +
+		"SECRET_KEY='Ab3dEf9hIj\\'Kl8mNo7pQr'\n" +
+		"export AUTH_TOKEN=`Bb2Cc3Dd`'Ee4Ff5Gg6Hh'\n" +
+		"PLAIN_NAME='hello'\"world\"\n" +
+		"MODEL=\"gpt-4o\" # comment\n"
+	out := string((&collector{}).scrubSecrets("/h/.hermes/.env", []byte(doc)))
+	for _, s := range []string{"Rx7Tk4Hs9Jd6Fb1Gc0Ny", "Ie7Ru2TyXc", "Ll6Mm7Nn8", "Oo9Pp0Qq", "Kl8mNo7pQr", "Ee4Ff5Gg6Hh"} {
+		if strings.Contains(out, s) {
+			t.Errorf("%s shipped:\n%s", s, out)
+		}
+	}
+	// not a secret: kept; comments and quotes kept
+	for _, s := range []string{"PLAIN_NAME='hello'\"world\"", "MODEL=\"gpt-4o\" # comment", "# note Vv1", "'\\''"} {
+		if !strings.Contains(out, s) {
+			t.Errorf("%q changed:\n%s", s, out)
+		}
+	}
+	sameShape(t, doc, out)
+}

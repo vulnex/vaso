@@ -2216,7 +2216,7 @@ func (c *collector) scrubText(path, s string) string {
 				return m.text()
 			}
 			g := func(n int) string { v, _ := m.group(n); return v }
-			return g(1) + g(2) + g(3) + c.dotenvEscapedTail(g(2), c.keyedValue(g(2), g(4))) + g(5)
+			return g(1) + g(2) + g(3) + c.dotenvGluedTail(g(2), g(4), c.dotenvEscapedTail(g(2), c.keyedValue(g(2), g(4)))) + g(5)
 		})
 	}
 	if jsonish || yaml || toml || dotenv {
