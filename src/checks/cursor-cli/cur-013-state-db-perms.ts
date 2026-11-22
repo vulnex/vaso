@@ -39,7 +39,7 @@ export const cur013 = defineCheck({
       if (readableByOthers(facts)) {
         evidence.push({
           file: dbPath,
-          snippet: facts.octal,
+          snippet: `mode 0${facts.octal}`,
           detail: 'Readable by other local users — contains cursorAuth/accessToken + refreshToken in plaintext (ItemTable) and full chat history',
         });
       }
