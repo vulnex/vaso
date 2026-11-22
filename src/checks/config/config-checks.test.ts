@@ -551,28 +551,43 @@ describe('CFG-015: mDNS Broadcast', () => {
 });
 
 describe('CFG-011: Node.js CVE-2026-21636', () => {
-  it('returns a CheckResult that reflects the running Node version', async () => {
-    const result = await cfg011.run(makeContext([makeConfig({})]));
-    expect(result.id).toBe('CFG-011');
-    expect(result.category).toBe('config');
-    expect(result.severity).toBe('warning');
-    expect(typeof result.passed).toBe('boolean');
-    // Message names the version regardless of pass/fail.
-    expect(result.message).toContain(process.version);
+  const withCli = (cliBinary: string | undefined, node = 'v24.11.0', kind?: 'snapshot') => {
+    const c = makeContext([makeConfig({})]);
+    c.installation.cliBinary = cliBinary;
+    c.fs = Object.assign(Object.create(c.fs) as typeof c.fs, {
+      ...(kind ? { kind } : {}),
+      execSync: (cmd: string) => { if (cmd !== 'node') throw new Error('unexpected'); return `${node}\n`; },
+    });
+    return c;
+  };
+
+  it.each([
+    ['v25.2.1', false],
+    ['v25.0.0', false],
+    ['v25.3.0', true],
+    // no LTS line is affected (OSV: introduced 25.0.0, fixed 25.3.0)
+    ['v22.12.0', true],
+    ['v20.18.0', true],
+    ['v18.20.0', true],
+  ])('judges the agent\'s node on PATH %s → passed %s', async (node, passed) => {
+    const r = await cfg011.run(withCli(undefined, node));
+    expect(r.passed).toBe(passed);
+    expect(r.message).toContain(node);
   });
 
-  it('does not flag patched current Node versions', async () => {
-    // The vulnerable ranges are 18.x ≤ 18.20, 20.x ≤ 20.18, 22.x ≤ 22.12.
-    // CI and our dev machines run Node ≥ 20.19, so this should pass.
-    const major = parseInt(process.version.slice(1).split('.')[0], 10);
-    const minor = parseInt(process.version.slice(1).split('.')[1], 10);
-    const knownPatched =
-      (major === 20 && minor > 18) ||
-      (major === 22 && minor > 12) ||
-      major > 22;
-    if (!knownPatched) return; // skip silently on older test environments
-    const result = await cfg011.run(makeContext([makeConfig({})]));
-    expect(result.passed).toBe(true);
+  it('takes the version from the version-manager tree the CLI is installed in (same on snapshots)', async () => {
+    const cli = '/home/alice/.nvm/versions/node/v25.1.0/bin/openclaw';
+    for (const kind of [undefined, 'snapshot'] as const) {
+      const r = await cfg011.run(withCli(cli, 'v24.11.0', kind));
+      expect(r.passed).toBe(false);
+      expect(r.evidence?.[0].file).toBe(cli);
+    }
+    // a snapshot collects no `node --version`
+    expect((await cfg011.run(withCli('/usr/bin/openclaw', 'v25.1.0', 'snapshot'))).message).toContain('not collected');
+  });
+
+  it('runs only for Node-based frameworks', () => {
+    expect(cfg011.supportedAgents).toEqual(['openclaw', 'nanoclaw', 'nemoclaw']);
   });
 });
 
