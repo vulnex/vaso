@@ -690,6 +690,19 @@ func (c *collector) collectGlob(snapshot *ProbeSnapshot, pattern string) {
 // it — and collects nothing it points to.
 func (c *collector) recordSkillLink(snapshot *ProbeSnapshot, pattern, match string) {
 	if !isSymlink(match) {
+		// …and a hard link there to a credential-store file, as present
+		// with no content (HardLinkOf naming the store file), as SKL-013
+		// reports it locally
+		info, err := os.Lstat(match)
+		if err != nil || !info.Mode().IsRegular() {
+			return
+		}
+		if _, exists := snapshot.Files[match]; exists {
+			return
+		}
+		if sink := c.hardLinkedSink(match, globBase(pattern), info); sink != "" {
+			snapshot.Files[match] = FileEntry{Exists: true, Mode: int(info.Mode().Perm()), ContentOmitted: true, Omitted: "sensitive", HardLinkOf: sink}
+		}
 		return
 	}
 	recordSymlink(snapshot.Symlinks, match)
