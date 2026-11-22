@@ -3,18 +3,33 @@ import { defineCheck } from '../../core/check-builder.js';
 import { markUntrustedWorkspace } from '../../adapters/folder-trust.js';
 import { serverOffPredicate } from '../../mcp/off-lists.js';
 import { geminiWorkspaceTrusted } from '../../adapters/gemini.js';
-import { isPolicyFile, policyEvidence } from './policy-rules.js';
+import { broadPrefix, isPolicyFile, policyEvidence } from './policy-rules.js';
 
-// Patterns under tools.allowed that effectively grant unbounded shell access.
-// `run_shell_command` without parens (catch-all for any shell command) and
-// the dangerous-shell forms below.
-const OVERBROAD_PATTERNS = [
-  /^run_shell_command$/,
-  /^run_shell_command\s*\(\s*\*\s*\)$/,
-  /^run_shell_command\s*\(\s*(bash|sh|zsh|fish|cmd|powershell|pwsh)\s*\)$/i,
-  /^run_shell_command\s*\(\s*(rm|sudo|curl|wget|nc|ncat)\s*\)$/i,
-  /^\*$/,
-];
+/** Shell tool aliases Gemini maps to `run_shell_command` (core `SHELL_TOOL_NAMES`). */
+const SHELL_TOOL_NAMES = new Set(['run_shell_command', 'ShellTool']);
+/** Legacy `toolName(args)` form, parsed as Gemini's policy config does. */
+const TOOL_WITH_ARGS = /^([a-zA-Z0-9_-]+)\((.*)\)$/s;
+
+/**
+ * Why a tools.allowed entry auto-approves far more than one command, or
+ * undefined. Gemini turns `run_shell_command(<prefix>)` (alias `ShellTool`)
+ * into a shell allow rule with that command prefix (policy/config.ts
+ * `mapToolsToRules`), so the prefix is judged like a policy-file
+ * commandPrefix; a bare shell tool name allows every shell command. An empty
+ * `run_shell_command()` adds no allow rule.
+ */
+function overbroadEntry(entry: string): string | undefined {
+  const e = entry.trim();
+  if (e === '*') return 'Auto-approves every tool, shell commands included';
+  if (SHELL_TOOL_NAMES.has(e)) return 'Auto-approves every shell command';
+  const m = TOOL_WITH_ARGS.exec(e);
+  if (!m || !SHELL_TOOL_NAMES.has(m[1])) return undefined;
+  const args = m[2].trim();
+  if (args === '') return undefined;
+  if (args === '*') return 'Auto-approves arbitrary shell commands — covers far more than intended';
+  const reason = broadPrefix(args);
+  return reason ? `Shell commands run without confirmation: the prefix ${reason}` : undefined;
+}
 
 export const gem003 = defineCheck({
   id: 'GEM-003',
@@ -61,12 +76,9 @@ export const gem003 = defineCheck({
       for (const entry of allowed) {
         if (typeof entry !== 'string') continue;
         if (confirmList.has(entry)) continue; // confirmationRequired wins
-        if (!OVERBROAD_PATTERNS.some(p => p.test(entry))) continue;
-        evidence.push({
-          file: config.filePath,
-          snippet: `tools.allowed: "${entry}"`,
-          detail: 'Auto-approves arbitrary shell commands — covers far more than intended',
-        });
+        const detail = overbroadEntry(entry);
+        if (!detail) continue;
+        evidence.push({ file: config.filePath, snippet: `tools.allowed: "${entry}"`, detail });
       }
     }
 
