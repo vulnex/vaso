@@ -89,30 +89,41 @@ function asRecord(v: unknown): Record<string, unknown> | undefined {
 const ENV_SCALARS: Array<[path: string, type: EnvValueType]> = [
   ['gateway.host', 'string'],
   ['gateway.port', 'int'],
-  ['gateway.require_pairing', 'bool'],
-  ['gateway.allow_public_bind', 'bool'],
+  ['gateway.require_pairing', 'rust-bool'],
+  ['gateway.allow_public_bind', 'rust-bool'],
   ['gateway.webhook_secret', 'string'],
-  ['gateway.tls.enabled', 'bool'],
+  ['gateway.tls.enabled', 'rust-bool'],
   ['tunnel.tunnel_provider', 'string'],
-  ['secrets.encrypt', 'bool'],
-  ['skills.open_skills_enabled', 'bool'],
-  ['skills.allow_scripts', 'bool'],
+  ['secrets.encrypt', 'rust-bool'],
+  ['skills.open_skills_enabled', 'rust-bool'],
+  ['skills.allow_scripts', 'rust-bool'],
   ['skills.registry_url', 'string'],
-  ['browser.enabled', 'bool'],
-  ['composio.enabled', 'bool'],
-  ['http_request.allow_private_hosts', 'bool'],
+  ['browser.enabled', 'rust-bool'],
+  ['composio.enabled', 'rust-bool'],
+  ['http_request.allow_private_hosts', 'rust-bool'],
+  // ZC-016
+  ['gateway.allow_self_upgrade', 'rust-bool'],
+  ['gateway.trust_forwarded_headers', 'rust-bool'],
+  ['gateway.allow_remote_admin', 'rust-bool'],
+  ['gateway.pair_rate_limit_per_minute', 'int'],
+  ['gateway.webhook_rate_limit_per_minute', 'int'],
 ];
 const ENV_PROFILE_FIELDS: Array<[field: string, type: EnvValueType]> = [
   ['level', 'string'],
-  ['workspace_only', 'bool'],
-  ['sandbox_enabled', 'bool'],
+  ['workspace_only', 'rust-bool'],
+  ['sandbox_enabled', 'rust-bool'],
   ['sandbox_backend', 'string'],
-  ['block_high_risk_commands', 'bool'],
+  ['block_high_risk_commands', 'rust-bool'],
+  // ZC-005/006/011/015
+  ['auto_approve', 'list'],
+  ['always_ask', 'list'],
+  ['allowed_commands', 'list'],
+  ['allowed_roots', 'list'],
 ];
 const ENV_AGENT_FIELDS: Array<[field: string, type: EnvValueType]> = [
-  ['enabled', 'bool'],
+  ['enabled', 'rust-bool'],
   ['risk_profile', 'string'],
-  ['workspace.unrestricted_filesystem', 'bool'],
+  ['workspace.unrestricted_filesystem', 'rust-bool'],
 ];
 
 /** The release that made `ZEROCLAW_<path>` the only env override form. */

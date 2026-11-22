@@ -10,7 +10,11 @@ import { keySegments, type KeyPath } from '../core/utils.js';
  * leaks into a written config.
  */
 
-export type EnvValueType = 'bool' | 'int' | 'string';
+/** `bool`: Go strconv.ParseBool (PicoClaw); `rust-bool`: Rust's
+ *  `bool::from_str`, exactly `true`/`false` (ZeroClaw refuses to load on any
+ *  other spelling, so such a value sets nothing); `list`: a JSON array of
+ *  strings or a comma-separated list (ZeroClaw's Vec<String> overrides). */
+export type EnvValueType = 'bool' | 'rust-bool' | 'int' | 'string' | 'list';
 
 export interface EnvOverrideSpec {
   env: string;
@@ -38,6 +42,18 @@ function parseBool(v: string): boolean | undefined {
 
 function parseValue(raw: string, type: EnvValueType): unknown {
   if (type === 'bool') return parseBool(raw);
+  if (type === 'rust-bool') return raw === 'true' ? true : raw === 'false' ? false : undefined;
+  if (type === 'list') {
+    if (raw.startsWith('[')) {
+      try {
+        const v: unknown = JSON.parse(raw);
+        return Array.isArray(v) && v.every(x => typeof x === 'string') ? v : undefined;
+      } catch {
+        return undefined;
+      }
+    }
+    return raw.split(',').map(s => s.trim()).filter(s => s !== '');
+  }
   if (type === 'int') return /^-?\d+$/.test(raw) ? Number(raw) : undefined;
   return raw;
 }
