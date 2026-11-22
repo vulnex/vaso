@@ -10,7 +10,8 @@ export const pol004 = defineCheck({
   severity: 'warning',
   description: 'Verify that enabled sandboxes have substantive constraints (exec, filesystem, network)',
   // IronClaw's sandbox keys are IC-005/006/011/012's.
-  excludedAgents: [...CODING_AGENTS, 'ironclaw'],
+  // OpenClaw's sandbox is agents.defaults/entries.<id>.sandbox (CFG-008); it has no root sandbox key.
+  excludedAgents: [...CODING_AGENTS, 'ironclaw', 'openclaw'],
 
   async run(ctx, h) {
     const evidence: Evidence[] = [];

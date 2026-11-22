@@ -94,6 +94,11 @@ const ENV_OVERRIDES: EnvOverrideSpec[] = [
   { env: 'PICOCLAW_TOOLS_EXEC_ALLOW_REMOTE', path: ['tools', 'exec', 'allow_remote'], type: 'bool' },
   { env: 'PICOCLAW_TOOLS_EXEC_ENABLE_DENY_PATTERNS', path: ['tools', 'exec', 'enable_deny_patterns'], type: 'bool' },
   { env: 'PICOCLAW_GATEWAY_PORT', path: ['gateway', 'port'], type: 'int' },
+  // []string fields: comma-separated, replacing the file's list
+  { env: 'PICOCLAW_TOOLS_ALLOW_READ_PATHS', path: ['tools', 'allow_read_paths'], type: 'list' },
+  { env: 'PICOCLAW_TOOLS_ALLOW_WRITE_PATHS', path: ['tools', 'allow_write_paths'], type: 'list' },
+  { env: 'PICOCLAW_TOOLS_EXEC_CUSTOM_ALLOW_PATTERNS', path: ['tools', 'exec', 'custom_allow_patterns'], type: 'list' },
+  { env: 'PICOCLAW_TOOLS_WEB_PRIVATE_HOST_WHITELIST', path: ['tools', 'web', 'private_host_whitelist'], type: 'list' },
 ];
 
 function literalPath(p: string): string {

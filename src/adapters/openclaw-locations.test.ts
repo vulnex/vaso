@@ -127,4 +127,12 @@ describe('/etc/openclaw', () => {
     expect(found.flatMap(i => i.configFiles.map(c => c.filePath)).some(f => f.startsWith('/etc/openclaw'))).toBe(false);
     expect(openclawAdapter.getConfigPaths().some(p => p.startsWith('/etc/openclaw'))).toBe(false);
   });
+
+  it('declares the main config (gateway token, provider keys) as a credential path', () => {
+    const fs = fsFor({ OPENCLAW_CONFIG_PATH: '~/cfg/oc.json' });
+    const paths = openclawAdapter.getCredentialPaths!(join(home, '.openclaw'), fs);
+    expect(paths).toEqual(expect.arrayContaining([join(home, '.openclaw', 'openclaw.json'), join(home, '.openclaw', 'clawdbot.json'), join(home, 'cfg', 'oc.json')]));
+    // a --profile dir reads its own openclaw.json, never OPENCLAW_CONFIG_PATH
+    expect(openclawAdapter.getCredentialPaths!(join(home, '.openclaw-work'), fs)).not.toContain(join(home, 'cfg', 'oc.json'));
+  });
 });

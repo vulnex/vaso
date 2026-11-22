@@ -10,7 +10,9 @@ export const cfg007 = defineCheck({
   severity: 'warning',
   description: 'Check if webhooks are configured without authentication',
   // Atomic Agent webhooks are a name-keyed map with their own secret check (AT-008).
-  excludedAgents: [...CODING_AGENTS, 'atomic-agent'],
+  // OpenClaw's webhooks are hooks.* — the gateway refuses hooks.enabled
+  // without hooks.token, and OC-008 judges the hook settings.
+  excludedAgents: [...CODING_AGENTS, 'atomic-agent', 'openclaw'],
 
   async run(ctx, h) {
     const evidence: Evidence[] = [];

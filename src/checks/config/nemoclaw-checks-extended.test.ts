@@ -153,28 +153,34 @@ describe('CFG-021: NemoClaw GPU Isolation', () => {
     expect(result.passed).toBe(true);
   });
 
-  it('fails when GPU enabled without NIM container', async () => {
+  it('reports (without failing) a sandbox that gets the host GPU', async () => {
     allowPath('/mock-home/.nemoclaw');
     mockReadFile.mockResolvedValue(SANDBOXES_VALID);
     const result = await cfg021.run(makeContext());
-    expect(result.passed).toBe(false);
-    expect(result.message).toContain('GPU passthrough without NIM container');
+    expect(result.passed).toBe(true);
+    expect(result.message).toContain('host GPU passed through');
     expect(result.evidence!.some(e => e.detail!.includes('my-assistant'))).toBe(true);
   });
 
-  it('passes when GPU enabled with NIM container', async () => {
+  // nimContainer is the local NIM inference server, not GPU isolation
+  it('reports GPU passthrough whatever nimContainer says (it is the NIM inference server)', async () => {
     allowPath('/mock-home/.nemoclaw');
     mockReadFile.mockResolvedValue(JSON.stringify({
-      sandboxes: {
-        'secure-box': {
-          gpuEnabled: true,
-          nimContainer: 'nvcr.io/nim/nemotron:0.1.0',
-        },
-      },
+      sandboxes: { box: { gpuEnabled: true, sandboxGpuEnabled: true, sandboxGpuMode: '1', nimContainer: 'nvcr.io/nim/nemotron:0.1.0' } },
     }));
-    const result = await cfg021.run(makeContext());
-    expect(result.passed).toBe(true);
-    expect(result.evidence!.some(e => e.detail!.includes('NIM container'))).toBe(true);
+    const r = await cfg021.run(makeContext());
+    expect(r.passed).toBe(true);
+    expect(r.evidence?.[0].detail).toBe('Sandbox "box": host GPU passed into the sandbox, sandboxGpuMode "1"');
+  });
+
+  it('reads the effective sandboxGpuEnabled (NemoClaw status: sandboxGpuEnabled ?? gpuEnabled)', async () => {
+    allowPath('/mock-home/.nemoclaw');
+    mockReadFile.mockResolvedValue(JSON.stringify({
+      sandboxes: { box: { gpuEnabled: false, hostGpuDetected: true, sandboxGpuEnabled: false, sandboxGpuMode: '0', nimContainer: null } },
+    }));
+    const r = await cfg021.run(makeContext());
+    expect(r.passed).toBe(true);
+    expect(r.evidence ?? []).toEqual([]);
   });
 
   it('passes when no sandboxes defined', async () => {
@@ -207,31 +213,18 @@ describe('CFG-022: NemoClaw Policy Scope', () => {
     expect(result.passed).toBe(true);
   });
 
-  it('fails when sandbox only has package policies', async () => {
+  // NemoClaw presets are egress allowances (npm, pypi, docker, slack, …):
+  // there is no filesystem/network/syscall preset to be "missing"
+  it('reports recorded presets as egress allowances, without failing', async () => {
     allowPath('/mock-home/.nemoclaw');
     mockReadFile.mockResolvedValue(SANDBOXES_VALID);
     const result = await cfg022.run(makeContext());
-    expect(result.passed).toBe(false);
-    expect(result.message).toContain('narrow policy scope');
-    expect(result.evidence!.some(e => e.detail!.includes('missing'))).toBe(true);
-    expect(result.evidence!.some(e => e.detail!.includes('filesystem'))).toBe(true);
-  });
-
-  it('passes when all recommended policies present', async () => {
-    allowPath('/mock-home/.nemoclaw');
-    mockReadFile.mockResolvedValue(JSON.stringify({
-      sandboxes: {
-        'full-box': {
-          policies: ['filesystem', 'network', 'syscall', 'pypi', 'npm'],
-        },
-      },
-    }));
-    const result = await cfg022.run(makeContext());
     expect(result.passed).toBe(true);
-    expect(result.message).toContain('comprehensive');
+    expect(result.evidence!.every(e => e.detail!.includes('egress presets'))).toBe(true);
+    expect(result.evidence!.some(e => e.detail!.includes('missing'))).toBe(false);
   });
 
-  it('fails when sandbox has no policies', async () => {
+  it('an empty preset list (default-deny egress) passes', async () => {
     allowPath('/mock-home/.nemoclaw');
     mockReadFile.mockResolvedValue(JSON.stringify({
       sandboxes: {
@@ -239,8 +232,8 @@ describe('CFG-022: NemoClaw Policy Scope', () => {
       },
     }));
     const result = await cfg022.run(makeContext());
-    expect(result.passed).toBe(false);
-    expect(result.evidence!.some(e => e.detail!.includes('none'))).toBe(true);
+    expect(result.passed).toBe(true);
+    expect(result.evidence![0].detail).toContain('[none]');
   });
 
   it('has correct metadata', () => {
@@ -352,15 +345,15 @@ describe('CFG-024: NemoClaw Default Sandbox', () => {
     expect(result.evidence!.some(e => e.detail!.includes('Dangling'))).toBe(true);
   });
 
-  it('fails when defaultSandbox set but no sandboxes defined', async () => {
+  it('passes (CFG-017 reports it) when no sandbox is registered, even with a defaultSandbox', async () => {
     allowPath('/mock-home/.nemoclaw');
     mockReadFile.mockResolvedValue(JSON.stringify({
       sandboxes: {},
       defaultSandbox: 'orphan',
     }));
     const result = await cfg024.run(makeContext());
-    expect(result.passed).toBe(false);
-    expect(result.message).toContain('no sandboxes are defined');
+    expect(result.passed).toBe(true);
+    expect(result.message).toContain('CFG-017');
   });
 
   it('handles corrupt JSON', async () => {

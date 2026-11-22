@@ -19,11 +19,10 @@ export const cfg018 = defineCheck({
     const stateFile = join(ctx.fs.homedir(), '.nemoclaw', 'state', 'nemoclaw.json');
     const hasState = await ctx.fs.access(stateFile);
     const registry = hasState ? undefined : await registeredSandboxes(ctx.fs);
+    // Installed but never deployed: CFG-017 reports it; repeating it here
+    // counted one condition twice
     if (!hasState && !(registry && registry.sandboxes.length > 0)) {
-      return h.result({
-        passed: false,
-        message: 'NemoClaw not deployed — no network policy enforcement',
-      });
+      return h.passed('No NemoClaw sandbox deployed — nothing to enforce a network policy on (CFG-017 reports the missing deployment)');
     }
     const deploymentRecord = hasState ? stateFile : registry!.file;
 

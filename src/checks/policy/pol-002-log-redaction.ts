@@ -9,7 +9,9 @@ export const pol002 = defineCheck({
   category: 'policy',
   severity: 'warning',
   description: 'Verify logging has secret redaction configured when logging is enabled',
-  excludedAgents: CODING_AGENTS,
+  // OpenClaw 2026.11.2 always redacts (logging.redactSensitive is a legacy,
+  // migrated-away key) and rejects the generic keys read here
+  excludedAgents: [...CODING_AGENTS, 'openclaw'],
 
   async run(ctx, h) {
     const evidence: Evidence[] = [];

@@ -1,6 +1,6 @@
 import { join } from 'node:path';
 import { defineCheck } from '../../core/check-builder.js';
-import { markUnreachable, queryPermissions } from '../../core/permissions.js';
+import { queryPermissions } from '../../core/permissions.js';
 import { checkoutDir, Findings, groupOnlyNote } from './shared.js';
 
 /**
@@ -42,7 +42,7 @@ export const nc005 = defineCheck({
       }
     }
 
-    await markUnreachable(ctx.fs, findings.evidence);
+    await findings.markUnreachable(ctx.fs);
     return h.fromEvidence(findings.evidence, {
       passed: 'NanoClaw skills directories are not writable by other users',
       failed: (n) => `${n} NanoClaw skills director${n === 1 ? 'y is' : 'ies are'} writable by other users`,

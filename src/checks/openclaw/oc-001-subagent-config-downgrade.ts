@@ -1,52 +1,44 @@
-import type { Evidence, ParsedConfig } from '../../core/types.js';
+import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
 import { extractPosture, findDowngrades, mergeConfigData } from './posture.js';
 import { containerEnvironment } from '../../adapters/openclaw-bind.js';
+import { openclawAgentEntries } from '../config/openclaw-agents.js';
 
+/**
+ * OpenClaw's per-agent overrides are `agents.entries.<id>` (earlier 2026.x:
+ * `agents.list[]`) in openclaw.json — `sandbox`, `tools.exec` and the rest
+ * beat `agents.defaults` / root `tools` for that agent. No release reads a
+ * config file from agents/<id>/ (that directory holds the agent's runtime
+ * state), so an entry is what can quietly weaken one agent.
+ */
 export const oc001 = defineCheck({
   id: 'OC-001',
   name: 'Sub-Agent Config Security Downgrade',
   category: 'openclaw',
   severity: 'critical',
-  description: 'Detect when an OpenClaw sub-agent (agents/<name>/agent.{yaml,json,env}, or its agents.entries.<name> entry) overrides the global config to weaken security: disable TLS or sandbox, re-bind the gateway publicly, drop tool approval, or downgrade auth.',
+  description: 'Detect when an OpenClaw agent entry (agents.entries.<id>) overrides the defaults to weaken security: disable the sandbox or drop tool approval.',
   supportedAgents: ['openclaw'],
 
   async run(ctx, h) {
-    const installation = ctx.installation;
-    if (!installation.agentName) {
-      return h.passed('Not a sub-agent installation; OC-001 does not apply');
+    const policyConfigs = ctx.configs.filter(c => c.format !== 'env');
+    const entries = openclawAgentEntries(policyConfigs);
+    if (entries.length === 0) {
+      return h.passed('No agent entries (agents.entries.<id>) override the defaults');
     }
 
-    const subAgentDir = installation.installDir;
-    const globalConfigs: ParsedConfig[] = [];
-    const subAgentConfigs: ParsedConfig[] = [];
-    for (const c of ctx.configs) {
-      if (c.filePath.startsWith(subAgentDir + '/') || c.filePath.startsWith(subAgentDir + '\\')) {
-        subAgentConfigs.push(c);
-      } else {
-        globalConfigs.push(c);
+    const inContainer = await containerEnvironment(ctx.fs);
+    const merged = mergeConfigData(policyConfigs);
+    const base = extractPosture(merged, undefined, inContainer);
+    const evidence: Evidence[] = [];
+    for (const entry of entries) {
+      for (const detail of findDowngrades(base, extractPosture(merged, entry.id, inContainer))) {
+        evidence.push({ file: entry.config.filePath, detail: `agents.entries.${entry.id}: ${detail}` });
       }
     }
 
-    if (subAgentConfigs.length === 0 || globalConfigs.length === 0) {
-      return h.passed('No sub-agent override configs to compare against global');
-    }
-
-    // The override side also applies the agent's own agents.entries.<name>
-    // entry (2026.x per-agent sandbox / tools.exec overrides)
-    const inContainer = await containerEnvironment(ctx.fs);
-    const basePosture = extractPosture(mergeConfigData(globalConfigs), undefined, inContainer);
-    const overridePosture = extractPosture(mergeConfigData([...globalConfigs, ...subAgentConfigs]), installation.agentName, inContainer);
-    const issues = findDowngrades(basePosture, overridePosture);
-
-    const evidence: Evidence[] = issues.map(detail => ({
-      file: subAgentConfigs[0].filePath,
-      detail: `Sub-agent "${installation.agentName}": ${detail}`,
-    }));
-
     return h.fromEvidence(evidence, {
-      passed: `Sub-agent "${installation.agentName}" config does not weaken global security posture`,
-      failed: (n) => `Sub-agent "${installation.agentName}" weakens ${n} global security setting${n === 1 ? '' : 's'}`,
+      passed: 'No agent entry weakens the default security posture',
+      failed: (n) => `Agent entries weaken ${n} default security setting${n === 1 ? '' : 's'}`,
     });
   },
 });

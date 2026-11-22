@@ -551,28 +551,43 @@ describe('CFG-015: mDNS Broadcast', () => {
 });
 
 describe('CFG-011: Node.js CVE-2026-21636', () => {
-  it('returns a CheckResult that reflects the running Node version', async () => {
-    const result = await cfg011.run(makeContext([makeConfig({})]));
-    expect(result.id).toBe('CFG-011');
-    expect(result.category).toBe('config');
-    expect(result.severity).toBe('warning');
-    expect(typeof result.passed).toBe('boolean');
-    // Message names the version regardless of pass/fail.
-    expect(result.message).toContain(process.version);
+  const withCli = (cliBinary: string | undefined, node = 'v24.11.0', kind?: 'snapshot') => {
+    const c = makeContext([makeConfig({})]);
+    c.installation.cliBinary = cliBinary;
+    c.fs = Object.assign(Object.create(c.fs) as typeof c.fs, {
+      ...(kind ? { kind } : {}),
+      execSync: (cmd: string) => { if (cmd !== 'node') throw new Error('unexpected'); return `${node}\n`; },
+    });
+    return c;
+  };
+
+  it.each([
+    ['v25.2.1', false],
+    ['v25.0.0', false],
+    ['v25.3.0', true],
+    // no LTS line is affected (OSV: introduced 25.0.0, fixed 25.3.0)
+    ['v22.12.0', true],
+    ['v20.18.0', true],
+    ['v18.20.0', true],
+  ])('judges the agent\'s node on PATH %s → passed %s', async (node, passed) => {
+    const r = await cfg011.run(withCli(undefined, node));
+    expect(r.passed).toBe(passed);
+    expect(r.message).toContain(node);
   });
 
-  it('does not flag patched current Node versions', async () => {
-    // The vulnerable ranges are 18.x ≤ 18.20, 20.x ≤ 20.18, 22.x ≤ 22.12.
-    // CI and our dev machines run Node ≥ 20.19, so this should pass.
-    const major = parseInt(process.version.slice(1).split('.')[0], 10);
-    const minor = parseInt(process.version.slice(1).split('.')[1], 10);
-    const knownPatched =
-      (major === 20 && minor > 18) ||
-      (major === 22 && minor > 12) ||
-      major > 22;
-    if (!knownPatched) return; // skip silently on older test environments
-    const result = await cfg011.run(makeContext([makeConfig({})]));
-    expect(result.passed).toBe(true);
+  it('takes the version from the version-manager tree the CLI is installed in (same on snapshots)', async () => {
+    const cli = '/home/alice/.nvm/versions/node/v25.1.0/bin/openclaw';
+    for (const kind of [undefined, 'snapshot'] as const) {
+      const r = await cfg011.run(withCli(cli, 'v24.11.0', kind));
+      expect(r.passed).toBe(false);
+      expect(r.evidence?.[0].file).toBe(cli);
+    }
+    // a snapshot collects no `node --version`
+    expect((await cfg011.run(withCli('/usr/bin/openclaw', 'v25.1.0', 'snapshot'))).message).toContain('not collected');
+  });
+
+  it('runs only for Node-based frameworks', () => {
+    expect(cfg011.supportedAgents).toEqual(['openclaw', 'nanoclaw', 'nemoclaw']);
   });
 });
 
@@ -701,6 +716,44 @@ describe('deep-test 2026-10-15: OpenClaw 2026.9.4 schema', () => {
     const r = await cfg005.run(makeContext([global, sub]));
     expect(r.passed).toBe(false);
     expect(r.evidence?.[0].file).toBe('/h/.openclaw/agents/x/agent.json');
+  });
+
+  // OpenClaw 2026.11.2 tool policy: minimal/messaging profiles carry no
+  // runtime or fs tools; deny wins; group:runtime / group:fs expand
+  it.each([
+    [{ tools: { profile: 'messaging' } }, true, true],
+    [{ tools: { profile: 'minimal' } }, true, true],
+    [{ tools: { deny: ['group:runtime', 'group:fs'] } }, true, true],
+    [{ tools: { deny: ['*'] } }, true, true],
+    [{ tools: { deny: ['bash'] } }, true, false],
+    [{ tools: { allow: ['web_search', 'message'] } }, true, true],
+    // alsoAllow widens the profile
+    [{ tools: { profile: 'messaging', alsoAllow: ['exec'] } }, false, true],
+    [{ tools: { profile: 'coding' } }, false, false],
+    [{ tools: { profile: 'full' } }, false, false],
+    // an allowlist of plugin tools only is dropped by OpenClaw: core tools stay
+    [{ tools: { allow: ['my_plugin_tool'] } }, false, false],
+    // an agent's own profile replaces the root one
+    [{ tools: { profile: 'messaging' }, agents: { entries: { ops: { tools: { profile: 'coding' } } } } }, false, false],
+    [{ tools: { profile: 'coding' }, agents: { entries: { ops: { tools: { profile: 'messaging' } } } } }, false, false],
+  ])('CFG-005/006 on %j: exec removed %s, fs removed %s', async (data, noExec, noFs) => {
+    expect((await cfg005.run(oc(data))).passed).toBe(noExec);
+    expect((await cfg006.run(oc(data))).passed).toBe(noFs);
+  });
+
+  it('CFG-005 judges only the agents that keep exec', async () => {
+    const data = { tools: { profile: 'messaging', exec: { mode: 'full' } }, agents: { entries: { ops: { tools: { profile: 'coding', exec: { mode: 'ask' } } } } } };
+    expect((await cfg005.run(oc(data))).passed).toBe(true);
+    const weak = { tools: { profile: 'messaging' }, agents: { entries: { ops: { tools: { profile: 'coding', exec: { mode: 'full' } } } } } };
+    const r = await cfg005.run(oc(weak));
+    expect(r.passed).toBe(false);
+    expect(r.evidence?.map(e => e.detail)).toEqual(['agents.entries.ops.tools.exec.mode: full']);
+  });
+
+  it('CFG-005/006 pass a gateway.mode "remote" client (tools run on the remote gateway)', async () => {
+    const data = { gateway: { mode: 'remote', remote: { url: 'wss://gw.example.com' } } };
+    expect((await cfg005.run(oc(data))).passed).toBe(true);
+    expect((await cfg006.run(oc(data))).passed).toBe(true);
   });
 
   it('CFG-013 flags a per-account dmPolicy "open"', async () => {

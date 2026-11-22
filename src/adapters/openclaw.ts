@@ -5,7 +5,7 @@ import type { ProbeManifest } from '../core/snapshot-types.js';
 import type { FSProvider } from '../core/fs-provider.js';
 import { LocalFSProvider } from '../core/local-fs-provider.js';
 import { loadConfig } from '../core/config-loader.js';
-import { deepMerge, getNestedValue } from '../core/utils.js';
+import { getNestedValue } from '../core/utils.js';
 import { discoverCliInstalls } from './cli-installs.js';
 import { npmPackageJsonGlobs } from './nvm-binary.js';
 import { queryCliVersion, readPackageVersion } from './version-query.js';
@@ -38,10 +38,6 @@ const USER_CLI_RELATIVE_PATHS = [
   '.nvm/current/bin/openclaw',
   '.npm-global/bin/openclaw',
   'bin/openclaw',
-];
-
-const AGENT_CONFIG_FILENAMES = [
-  'agent.yaml', 'agent.json', 'config.yaml', 'config.json', '.env',
 ];
 
 const APP_BUNDLE_PATH = '/Applications/OpenClaw.app';
@@ -267,8 +263,40 @@ export async function openclawMcpServerMaps(home: string, fs: FSProvider): Promi
   return out;
 }
 
+/** OpenClaw's DEFAULT_GATEWAY_PORT (2026.11.2). */
+export const OPENCLAW_DEFAULT_GATEWAY_PORT = 18789;
+
+/** OpenClaw's parseGatewayPortEnvValue: `<port>`, `<host>:<port>` or `[v6]:<port>`. */
+function envGatewayPort(raw: string | undefined): number | undefined {
+  const v = raw?.trim();
+  if (!v) return undefined;
+  const m = /^(?:\d+|\[[^\]]+\]:(\d+)|[^:]+:(\d+))$/.exec(v);
+  if (!m) return undefined;
+  const port = Number(m[1] ?? m[2] ?? v);
+  return Number.isInteger(port) && port > 0 && port <= 65535 ? port : undefined;
+}
+
+/**
+ * The port OpenClaw's resolveGatewayPort picks: OPENCLAW_GATEWAY_PORT, then
+ * gateway.port, then 18789 — or, for a `--profile <name>` gateway, a port
+ * derived from the name (FNV-1a, 20000–59999).
+ */
+export function openclawGatewayPort(configPort: unknown, envPort: string | undefined, profile: string | undefined): number {
+  const fromEnv = envGatewayPort(envPort);
+  if (fromEnv !== undefined) return fromEnv;
+  if (typeof configPort === 'number' && Number.isFinite(configPort) && configPort > 0) return configPort;
+  if (!profile || profile.toLowerCase() === 'default') return OPENCLAW_DEFAULT_GATEWAY_PORT;
+  let hash = 2166136261;
+  for (const byte of Buffer.from(profile, 'utf8')) hash = Math.imul(hash ^ byte, 16777619) >>> 0;
+  return 20000 + (hash % 40000);
+}
+
 /** The gateway listener a merged OpenClaw config describes on this host. */
-function openclawGatewayInfo(config: Record<string, unknown>, inContainer: boolean | undefined): GatewayInfo | undefined {
+function openclawGatewayInfo(
+  config: Record<string, unknown>,
+  inContainer: boolean | undefined,
+  where: { envPort?: string; profile?: string } = {},
+): GatewayInfo | undefined {
   const gw = config.gateway;
   if (!gw || typeof gw !== 'object' || Array.isArray(gw)) return undefined;
   const g = gw as Record<string, unknown>;
@@ -288,7 +316,7 @@ function openclawGatewayInfo(config: Record<string, unknown>, inContainer: boole
 
   return {
     host,
-    port: typeof g.port === 'number' ? g.port : undefined,
+    port: openclawGatewayPort(g.port, where.envPort, where.profile),
     authMode: typeof auth?.mode === 'string' ? auth.mode : undefined,
     tls,
   };
@@ -388,7 +416,12 @@ export const openclawAdapter: AgentAdapter = {
           skillsDir,
           skillsDirs: skillsDirs.length > 1 ? skillsDirs : undefined,
           ...(unscanned.length > 0 ? { unscannedSkillsDirs: unscanned } : {}),
-          gateway: openclawGatewayInfo(merged, inContainer),
+          // The scan's OPENCLAW_GATEWAY_PORT is the default gateway's (a
+          // --profile gateway's service sets its own environment)
+          gateway: openclawGatewayInfo(merged, inContainer, {
+            envPort: home === fs.homedir() && !profile ? fs.getEnv('OPENCLAW_GATEWAY_PORT') : undefined,
+            profile,
+          }),
           models: await this.getModels?.(configFiles),
           profile,
           user: options?.allUsers ? user : undefined,
@@ -398,70 +431,10 @@ export const openclawAdapter: AgentAdapter = {
         };
         installations.push(globalInstallation);
 
-        // Discover per-agent subdirectories
-        const agentsDir = join(dir, 'agents');
-        if (await fs.access(agentsDir)) {
-          try {
-            const agentEntries = await fs.readdirEntries(agentsDir);
-            for (const entry of agentEntries) {
-              if (!entry.isDirectory) continue;
-              const agentSubDir = join(agentsDir, entry.name);
-
-              // Load agent-specific config files
-              const agentConfigFiles = [];
-              for (const filename of AGENT_CONFIG_FILENAMES) {
-                const filePath = join(agentSubDir, filename);
-                try {
-                  const config = await loadConfig(filePath, fs);
-                  agentConfigFiles.push(config);
-                } catch {
-                  // File doesn't exist or can't be parsed
-                }
-              }
-
-              // 2026.x keeps per-agent runtime state in agents/<id>/ too
-              // (agents/main/agent/auth-profiles.json, sessions/) — only a
-              // directory with its own config file is a sub-agent install;
-              // the rest are state dirs of agents configured in openclaw.json.
-              if (agentConfigFiles.length === 0) continue;
-
-              // Merge global config data with agent-specific data
-              let agentMerged = { ...merged };
-              for (const c of agentConfigFiles) {
-                agentMerged = deepMerge(agentMerged, c.data) as Record<string, unknown>;
-              }
-
-              // Per-agent skills only: the shared dir is the parent
-              // installation's, scanned (and reported) there once — analysing
-              // it again per sub-agent only repeated the work, since
-              // inherited findings are dropped from sub-agents anyway
-              const agentSkillsDirs: string[] = [];
-              const agentSkillsDir = join(agentSubDir, 'skills');
-              if (await fs.access(agentSkillsDir)) {
-                agentSkillsDirs.push(agentSkillsDir);
-              }
-
-              installations.push({
-                agent: 'openclaw',
-                agentName: entry.name,
-                version,
-                installDir: agentSubDir,
-                configFiles: [...configFiles, ...agentConfigFiles],
-                skillsDir: agentSkillsDirs.length > 0 ? agentSkillsDirs[agentSkillsDirs.length - 1] : undefined,
-                skillsDirs: agentSkillsDirs.length > 0 ? agentSkillsDirs : undefined,
-                gateway: openclawGatewayInfo(agentMerged, inContainer),
-                models: await this.getModels?.([...configFiles, ...agentConfigFiles]),
-                profile,
-                user: options?.allUsers ? user : undefined,
-                appBundle,
-                cliBinary,
-                otherInstalls: installs.others.length > 0 ? installs.others : undefined,
-              });
-            }
-          } catch {
-            // agents/ directory not readable
-          }
-        }
+        // No OpenClaw release reads a config from agents/<id>/ (2026.11.2:
+        // only runtime state — auth profiles, sessions — lives there); an
+        // agent's overrides are agents.entries.<id> in this config, judged on
+        // this installation (OC-001, CFG-005/006/008).
 
         foundForUser = true;
       }
@@ -536,8 +509,17 @@ export const openclawAdapter: AgentAdapter = {
 
   /** Fixed-name credential files; OC-006 also walks credentials/, the
    *  per-agent auth stores and the state databases. */
-  getCredentialPaths(installDir: string): string[] {
+  getCredentialPaths(installDir: string, fs?: FSProvider): string[] {
+    // The main config holds the gateway token and provider apiKeys
+    // (`openclaw security audit` reports fs.config.perms_world_readable);
+    // CFG-003/POL-003 count it only while it holds a secret. A relocated
+    // OPENCLAW_CONFIG_PATH is the main config of the non-profile location.
+    const configPath = fs && !PROFILE_DIR.test(basename(installDir))
+      ? openclawEnvPaths(fs.homedir(), fs).configPath
+      : undefined;
     return [
+      ...MAIN_CONFIG_NAMES.map(n => join(installDir, n)),
+      ...(configPath ? [configPath] : []),
       join(installDir, '.env'),
       join(installDir, 'credentials.json'),
       join(installDir, 'auth.json'),
@@ -609,14 +591,8 @@ export const openclawAdapter: AgentAdapter = {
         '~/.openclaw-*/skills/**',
         // a profile's default workspace skills/ (as for ~/.openclaw)
         '~/.openclaw-*/workspace/skills/**',
-        '~/.openclaw/agents/*/agent.yaml',
-        '~/.openclaw/agents/*/agent.json',
-        '~/.openclaw/agents/*/config.yaml',
-        '~/.openclaw/agents/*/config.json',
-        '~/.openclaw/agents/*/.env',
-        '~/.openclaw/agents/*/skills/**',
         // Legacy dirs load skills the same way
-        ...['~/.clawdbot', '~/.moltbot'].flatMap(d => [`${d}/skills/**`, `${d}/agents/*/skills/**`, `${d}/workspace/skills/**`]),
+        ...['~/.clawdbot', '~/.moltbot'].flatMap(d => [`${d}/skills/**`, `${d}/workspace/skills/**`]),
       ],
       commands: [
         { id: 'openclaw-which', cmd: 'which', args: ['openclaw'], timeout: 3000 },

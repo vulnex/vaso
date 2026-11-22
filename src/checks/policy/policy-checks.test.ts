@@ -63,37 +63,14 @@ describe('POL-001: Exec Approval Required', () => {
     expect(result.passed).toBe(true);
   });
 
-  it('fails when AGENT_AUTO_APPROVE_TOOLS env var is set', async () => {
+  it('ignores AGENT_AUTO_APPROVE_TOOLS (IronClaw 0.x\'s own variable, judged by IC-007 from its .env)', async () => {
     process.env['AGENT_AUTO_APPROVE_TOOLS'] = 'true';
-    const result = await pol001.run(makeContext([]));
-    expect(result.passed).toBe(false);
-    expect(result.evidence!.some(e => e.detail?.includes('AGENT_AUTO_APPROVE_TOOLS'))).toBe(true);
+    const result = await pol001.run({ ...makeContext([]), installation: { agent: 'nanobot', installDir: '/x', configFiles: [] } });
+    expect(result.passed).toBe(true);
   });
 
-  it('reads AGENT_AUTO_APPROVE_TOOLS from ctx.fs.getEnv (not process.env), so snapshot scans work', async () => {
-    delete process.env['AGENT_AUTO_APPROVE_TOOLS'];
-    const installation: AgentInstallation = {
-      agent: 'openclaw',
-      installDir: '/snap/openclaw',
-      configFiles: [],
-    };
-    const base = new LocalFSProvider();
-    const fs: FSProvider = new Proxy(base, {
-      get(target, prop, receiver) {
-        if (prop === 'getEnv') {
-          return (key: string) => (key === 'AGENT_AUTO_APPROVE_TOOLS' ? 'true' : undefined);
-        }
-        return Reflect.get(target, prop, receiver);
-      },
-    });
-    const result = await pol001.run({
-      installation,
-      configs: [],
-      platform: 'linux',
-      fs,
-    });
-    expect(result.passed).toBe(false);
-    expect(result.evidence!.some(e => e.detail?.includes('AGENT_AUTO_APPROVE_TOOLS'))).toBe(true);
+  it('does not run on OpenClaw (its exec policy is CFG-005\'s; these keys are not in its schema)', () => {
+    expect(pol001.excludedAgents).toContain('openclaw');
   });
 });
 

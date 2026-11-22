@@ -87,54 +87,31 @@ describe('OpenClaw checks', () => {
 
 describe('OC-001: Sub-Agent Config Security Downgrade', () => {
   const check = openclawChecks.find(c => c.id === 'OC-001')!;
+  const main = (data: Record<string, unknown>) => [makeConfig('/home/test/.openclaw/openclaw.json', data)];
 
-  it('skips when not a sub-agent', async () => {
-    const result = await check.run(makeCtx({}));
-    expect(result.passed).toBe(true);
+  it('passes when no agent entry overrides the defaults', async () => {
+    expect((await check.run(makeCtx({}))).passed).toBe(true);
+    expect((await check.run(makeCtx({ configs: main({ agents: { defaults: { sandbox: { mode: 'all' } } } }) }))).passed).toBe(true);
   });
 
-  it('flags when sub-agent re-binds gateway from loopback to 0.0.0.0', async () => {
-    const installDir = '/home/test/.openclaw/agents/foo';
-    const configs = [
-      makeConfig('/home/test/.openclaw/openclaw.json', { gateway: { host: '127.0.0.1', port: 8080 } }),
-      makeConfig(join(installDir, 'agent.json'), { gateway: { host: '0.0.0.0' } }),
-    ];
-    const result = await check.run(makeCtx({ configs, installDir, agentName: 'foo' }));
+  it('flags an agents.entries.<id> entry that turns the default sandbox off', async () => {
+    const configs = main({ agents: { defaults: { sandbox: { mode: 'all' } }, entries: { worker: { sandbox: { mode: 'off' } } } } });
+    const result = await check.run(makeCtx({ configs }));
     expect(result.passed).toBe(false);
     expect(result.severity).toBe('critical');
-    expect(result.evidence?.[0].detail).toMatch(/Gateway re-bound/);
+    expect(result.evidence?.[0].detail).toBe('agents.entries.worker: Sandbox disabled (base had sandbox enabled)');
   });
 
-  it('flags when sub-agent disables sandbox', async () => {
-    const installDir = '/home/test/.openclaw/agents/bar';
-    const configs = [
-      makeConfig('/home/test/.openclaw/openclaw.json', { sandbox: { enabled: true } }),
-      makeConfig(join(installDir, 'agent.json'), { sandbox: { enabled: false } }),
-    ];
-    const result = await check.run(makeCtx({ configs, installDir, agentName: 'bar' }));
+  it('flags an entry that drops exec approval (agents.list[] form too)', async () => {
+    const configs = main({ tools: { exec: { mode: 'ask' } }, agents: { list: [{ id: 'ops', tools: { exec: { mode: 'full' } } }] } });
+    const result = await check.run(makeCtx({ configs }));
     expect(result.passed).toBe(false);
-    expect(result.evidence?.[0].detail).toMatch(/Sandbox disabled/);
+    expect(result.evidence?.[0].detail).toMatch(/^agents\.entries\.ops: Tool approval no longer required/);
   });
 
-  it('passes when sub-agent matches global posture', async () => {
-    const installDir = '/home/test/.openclaw/agents/baz';
-    const configs = [
-      makeConfig('/home/test/.openclaw/openclaw.json', { gateway: { host: '127.0.0.1', tls: true } }),
-      makeConfig(join(installDir, 'agent.json'), { tools: { allow: ['fetch'] } }),
-    ];
-    const result = await check.run(makeCtx({ configs, installDir, agentName: 'baz' }));
-    expect(result.passed).toBe(true);
-  });
-
-  it('flags auth mode downgrade (oauth -> none)', async () => {
-    const installDir = '/home/test/.openclaw/agents/qux';
-    const configs = [
-      makeConfig('/home/test/.openclaw/openclaw.json', { gateway: { auth: { mode: 'oauth2' } } }),
-      makeConfig(join(installDir, 'agent.json'), { gateway: { auth: { mode: 'none' } } }),
-    ];
-    const result = await check.run(makeCtx({ configs, installDir, agentName: 'qux' }));
-    expect(result.passed).toBe(false);
-    expect(result.evidence?.[0].detail).toMatch(/Auth mode downgraded/);
+  it('passes an entry that keeps or tightens the defaults', async () => {
+    const configs = main({ agents: { defaults: { sandbox: { mode: 'non-main' } }, entries: { a: { sandbox: { mode: 'all' } }, b: { tools: { exec: { mode: 'ask' } } } } } });
+    expect((await check.run(makeCtx({ configs }))).passed).toBe(true);
   });
 });
 
@@ -240,49 +217,15 @@ describe('OC-004: OPENCLAW_HOME Redirect', () => {
 describe('OC-001/OC-005 posture: OpenClaw 2026.x keys', () => {
   const check = openclawChecks.find(c => c.id === 'OC-001')!;
 
-  it('reads gateway.bind, gateway.tls.enabled, gateway.auth.mode, agents.defaults.sandbox.mode and tools.exec', async () => {
-    const installDir = '/home/test/.openclaw/agents/ops';
-    const configs = [
-      makeConfig('/home/test/.openclaw/openclaw.json', {
-        gateway: { bind: 'loopback', tls: { enabled: true }, auth: { mode: 'token' } },
-        agents: { defaults: { sandbox: { mode: 'all' } } },
-        tools: { exec: { mode: 'ask' } },
-      }),
-      makeConfig(join(installDir, 'agent.json'), {
-        gateway: { bind: 'lan', tls: { enabled: false }, auth: { mode: 'none' } },
-        agents: { defaults: { sandbox: { mode: 'off' } } },
-        tools: { exec: { mode: 'full' } },
-      }),
-    ];
-    const result = await check.run(makeCtx({ configs, installDir, agentName: 'ops' }));
+  it('reads agents.defaults.sandbox.mode and tools.exec against an entry\'s overrides', async () => {
+    const configs = [makeConfig('/home/test/.openclaw/openclaw.json', {
+      agents: { defaults: { sandbox: { mode: 'all' } }, entries: { ops: { sandbox: { mode: 'off' }, tools: { exec: { mode: 'full' } } } } },
+      tools: { exec: { mode: 'ask' } },
+    })];
+    const result = await check.run(makeCtx({ configs }));
     const details = (result.evidence ?? []).map(e => e.detail).join('\n');
-    expect(details).toMatch(/TLS disabled/);
-    expect(details).toMatch(/re-bound from 127\.0\.0\.1 to 0\.0\.0\.0/);
     expect(details).toMatch(/Sandbox disabled/);
     expect(details).toMatch(/approval no longer required/);
-    expect(details).toMatch(/Auth mode downgraded from token to none/);
-  });
-
-  it("applies the sub-agent's own agents.entries.<name> override", async () => {
-    const installDir = '/home/test/.openclaw/agents/worker';
-    const configs = [
-      makeConfig('/home/test/.openclaw/openclaw.json', {
-        agents: { defaults: { sandbox: { mode: 'all' } }, entries: { worker: { sandbox: { mode: 'off' } } } },
-      }),
-      makeConfig(join(installDir, 'agent.json'), { name: 'worker' }),
-    ];
-    const result = await check.run(makeCtx({ configs, installDir, agentName: 'worker' }));
-    expect(result.passed).toBe(false);
-    expect(result.evidence?.[0].detail).toMatch(/Sandbox disabled/);
-  });
-
-  it('does not treat token -> password as an auth downgrade', async () => {
-    const installDir = '/home/test/.openclaw/agents/pw';
-    const configs = [
-      makeConfig('/home/test/.openclaw/openclaw.json', { gateway: { auth: { mode: 'token' } } }),
-      makeConfig(join(installDir, 'agent.json'), { gateway: { auth: { mode: 'password' } } }),
-    ];
-    expect((await check.run(makeCtx({ configs, installDir, agentName: 'pw' }))).passed).toBe(true);
   });
 });
 

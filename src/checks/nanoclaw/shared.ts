@@ -1,6 +1,8 @@
 import { dirname, join } from 'node:path';
 import type { Evidence, ParsedConfig, ScanContext, Severity } from '../../core/types.js';
 import { isNanoclawCheckout, nanoclawConfigDir } from '../../adapters/nanoclaw.js';
+import type { FSProvider } from '../../core/fs-provider.js';
+import { markUnreachable } from '../../core/permissions.js';
 
 /** `<checkout>` when the installation is a NanoClaw v2 checkout, else undefined. */
 export function checkoutDir(ctx: ScanContext): string | undefined {
@@ -51,6 +53,18 @@ export class Findings {
   add(e: Evidence, severity: Severity): void {
     this.evidence.push(e);
     this.severities.push(severity);
+  }
+
+  /**
+   * Apply the parent-directory barrier (markUnreachable): an item whose world
+   * access an ancestor blocks, with group access left, is group-only exposure
+   * and takes the group tier ('info') instead of its world severity.
+   */
+  async markUnreachable(fs: FSProvider): Promise<void> {
+    const worldBlocked = await markUnreachable(fs, this.evidence);
+    this.evidence.forEach((e, i) => {
+      if (worldBlocked.has(e)) this.severities[i] = 'info';
+    });
   }
 
   /** Highest severity among un-mitigated items (all mitigated → fromEvidence drops to info). */

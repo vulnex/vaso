@@ -1,13 +1,12 @@
 {
   "agent": "nemoclaw",
-  "source": "NemoClaw with a plaintext NVIDIA key and GPU passthrough — schema verified on a live install (deep test 2026-10-13/15 fixture); credentials.json 0600 in a 0700 dir as NemoClaw writes it, so the key is at-rest exposure (warning), not readable by others",
+  "source": "NemoClaw with a plaintext NVIDIA key and GPU passthrough (CFG-021 reports passthrough without failing it: nimContainer is the NIM inference server, not isolation) — schema verified on a live install (deep test 2026-10-13/15 fixture); credentials.json 0600 in a 0700 dir as NemoClaw writes it, so the key is at-rest exposure (warning), not readable by others",
   "modes": {
     ".nemoclaw": "700",
     ".nemoclaw/credentials.json": "600"
   },
   "fail": {
-    "CFG-020": "warning",
-    "CFG-021": "warning"
+    "CFG-020": "warning"
   },
   "fix": {
     "resolves": []

@@ -40,7 +40,8 @@ export function dedupePermissionFindings(results: CheckResult[]): CheckResult[] 
     if (own.length < r.evidence.length) {
       const owners = [...new Set(r.evidence.filter(e => e.file && reportedBy.has(e.file)).map(e => reportedBy.get(e.file)!))];
       deduped.set(id, own.length > 0
-        ? { ...r, evidence: own, message: `${r.message} (other files reported by ${owners.join(', ')})` }
+        // CFG-003/POL-003 messages lead with the file count: recount it
+        ? { ...r, evidence: own, message: `${r.message.replace(new RegExp(`^${r.evidence.length}\\b`), String(own.length))} (other files reported by ${owners.join(', ')})` }
         // Folded: counted once, under the owner — but this check's fix (chmod)
         // still covers exactly these files, so it stays available to `vaso fix`.
         : { ...r, passed: true, foldedInto: owners.join(', '), message: `Reported by ${owners.join(', ')}` });

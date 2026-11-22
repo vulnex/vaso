@@ -62,7 +62,7 @@ export const pcl002 = defineCheck({
           catchAll = true;
           evidence.push({
             file: config.filePath,
-            snippet: `tools.exec.custom_allow_patterns: ${JSON.stringify(p)}`,
+            snippet: `tools.exec.custom_allow_patterns: ${JSON.stringify(p)}${envNote(config.data, 'tools.exec.custom_allow_patterns')}`,
             detail: 'This allow pattern matches every command, so no command is checked against the deny list',
           });
         } else if (verdict === 'budget') {
@@ -70,7 +70,7 @@ export const pcl002 = defineCheck({
         } else if (verdict) {
           evidence.push({
             file: config.filePath,
-            snippet: `tools.exec.custom_allow_patterns: ${JSON.stringify(p)}`,
+            snippet: `tools.exec.custom_allow_patterns: ${JSON.stringify(p)}${envNote(config.data, 'tools.exec.custom_allow_patterns')}`,
             detail: notEvaluatedDetail(verdict, 'exempts dangerous commands from the deny list'),
           });
         }

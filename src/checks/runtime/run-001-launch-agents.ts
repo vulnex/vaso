@@ -4,12 +4,14 @@ import { defineCheck } from '../../core/check-builder.js';
 import { CODING_AGENTS } from '../../core/types.js';
 import { agentsNamedIn } from './agent-names.js';
 
-const SUSPICIOUS_KEYWORDS = [
+export const SUSPICIOUS_KEYWORDS = [
   'claw',          // catches openclaw, nanoclaw, picoclaw, ironclaw, zeroclaw, nemoclaw, clawdbot
   'nanobot',
   'moltbot',
   'hermes-agent',  // specific enough to avoid Facebook Hermes / unrelated tooling
   'lyrie',
+  'atomic-agent',
+  'openshell',
 ];
 
 const INTERPRETERS = new Set(['node', 'nodejs', 'bun', 'deno', 'python', 'python3', 'uv', 'uvx', 'npx', 'bunx', 'tsx', 'ts-node']);
@@ -50,8 +52,26 @@ export function launchdCommand(plist: string): string[] | undefined {
  * agent-named program/package under a standard install root. A keyword-named
  * binary in /tmp or ~/Downloads is still suspicious.
  */
-function agentExecutable(parts: string[], keyword: string, ctx: ScanContext): string | undefined {
+/**
+ * The command a service line runs: systemd's `%h` specifier expanded to the
+ * home, and a leading `/usr/bin/env [-S] [-i] [VAR=value…]` dropped (it
+ * starts the program named after it).
+ */
+export function effectiveCommand(parts: string[], home: string): string[] {
+  let out = parts.map(p => p.replace(/%h/g, home));
+  if (out.length > 0 && basename(out[0]) === 'env') {
+    let i = 1;
+    while (i < out.length && (out[i].startsWith('-') || /^[A-Za-z_][A-Za-z0-9_]*=/.test(out[i]))) i++;
+    // `env -S "node /x.js"`: the split string is one argument
+    out = out.slice(i).flatMap(a => a.split(/\s+/)).filter(Boolean);
+  }
+  return out;
+}
+
+export function agentExecutable(rawParts: string[], keyword: string, ctx: ScanContext): string | undefined {
   const home = ctx.fs.homedir();
+  const parts = effectiveCommand(rawParts, home);
+  if (parts.length === 0) return undefined;
   const roots = [...installRoots(home), ctx.installation.installDir];
   const underRoot = (p: string) => roots.some(r => normalize(p).startsWith(`${normalize(r)}/`));
   const exe = parts[0];
@@ -79,15 +99,18 @@ async function classify(
     parts = parse(await ctx.fs.readFile(file));
   } catch {}
   const own = parts ? agentExecutable(parts, keyword, ctx) : undefined;
+  // the framework the unit names ("claw" alone would say little)
+  const name = agentsNamedIn(basename(file))[0] ?? keyword;
   if (own) {
     return {
       file,
-      detail: `${kind} for an installed agent ("${keyword}") — runs ${own}`,
+      detail: `${kind} for an installed agent ("${name}") — runs ${own}`,
       mitigated: true,
     };
   }
-  const runs = parts ? ` — runs ${parts.slice(0, 2).join(' ')}` : '';
-  return { file, detail: `${kind} references "${keyword}"${runs}, not a recognized agent install location` };
+  const shown = parts ? effectiveCommand(parts, ctx.fs.homedir()) : undefined;
+  const runs = shown && shown.length > 0 ? ` — runs ${shown.slice(0, 2).join(' ')}` : '';
+  return { file, detail: `${kind} references "${name}"${runs}, not a recognized agent install location` };
 }
 
 /**
@@ -96,7 +119,7 @@ async function classify(
  * on the host. Suspicious units (not running a recognized install) and units
  * naming no known framework are reported under each agent.
  */
-function keep(evidence: Evidence[], entry: string, ctx: ScanContext, item: Evidence): void {
+export function keep(evidence: Evidence[], entry: string, ctx: ScanContext, item: Evidence): void {
   const owners = agentsNamedIn(entry);
   if (item.mitigated && owners.length > 0 && !owners.includes(ctx.installation.agent)) return;
   evidence.push(item);

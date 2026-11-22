@@ -1,6 +1,6 @@
 import { join } from 'node:path';
 import { defineCheck } from '../../core/check-builder.js';
-import { markUnreachable, queryPermissions } from '../../core/permissions.js';
+import { queryPermissions } from '../../core/permissions.js';
 import { restrictFilesToOwner } from '../../remediation/config-writer.js';
 import { NANOCLAW_HOST_SECRET_FILES } from '../../adapters/nanoclaw.js';
 import { Findings, groupOnlyNote, hostConfigDir } from './shared.js';
@@ -60,7 +60,7 @@ export const nc002 = defineCheck({
       }
     }
 
-    await markUnreachable(ctx.fs, findings.evidence);
+    await findings.markUnreachable(ctx.fs);
     return h.fromEvidence(findings.evidence, {
       passed: 'NanoClaw host config (mount allowlist, identity files) is owner-only',
       failed: (n) => `${n} NanoClaw host config path${n === 1 ? ' is' : 's are'} accessible to other users`,

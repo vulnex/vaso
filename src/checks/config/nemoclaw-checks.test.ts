@@ -161,11 +161,11 @@ describe('CFG-018: NemoClaw Network Policy', () => {
     expect((await cfg018.run(makeContext())).passed).toBe(true);
   });
 
-  it('fails when NemoClaw not deployed', async () => {
+  it('passes (CFG-017 reports it) when NemoClaw is installed but not deployed', async () => {
     allowExact('/mock-home/.nemoclaw');
     const result = await cfg018.run(makeContext());
-    expect(result.passed).toBe(false);
-    expect(result.message).toContain('not deployed');
+    expect(result.passed).toBe(true);
+    expect(result.message).toContain('CFG-017');
   });
 
   it('passes when deployed even without local blueprint', async () => {

@@ -63,7 +63,7 @@ export function exposesCredentials(config: { filePath: string; data: unknown }):
 }
 
 /** An agent's ordinary settings file (as opposed to a token store). */
-const SETTINGS_FILE_NAME = /^(?:\.claude|settings(?:\.local)?|config|cli-config)\.(?:json[c5]?|toml|ya?ml)$/i;
+const SETTINGS_FILE_NAME = /^(?:\.claude|settings(?:\.local)?|config|cli-config|openclaw|clawdbot)\.(?:json[c5]?|toml|ya?ml)$/i;
 
 /**
  * A declared credential path that isn't a loaded config: token stores and

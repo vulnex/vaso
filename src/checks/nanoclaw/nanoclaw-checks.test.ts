@@ -269,6 +269,14 @@ describe('NC-002: Mount Allowlist / Host Config Exposed', () => {
     expect(r.evidence?.[0].mitigated).toBe(true);
   });
 
+  it('a world-writable allowlist whose world access a 0750 home blocks keeps only the group tier (info)', async () => {
+    const fs = snapFs({ [ALLOWLIST_PATH]: { content: '{}', mode: 0o100666 } }, { [HOME]: 0o750, [`${HOME}/.config`]: 0o755, [CONFIG_DIR]: 0o755 });
+    const r = await check.run(ctx({ configs: cfg, fs }));
+    expect(r.passed).toBe(false);
+    expect(r.severity).toBe('info');
+    expect(r.evidence?.[0].detail).toMatch(/world access blocked by parent .*group access remains/);
+  });
+
   describe('fix', () => {
     let root: string;
     beforeEach(() => { root = realpathSync(mkdtempSync(join(tmpdir(), 'vaso-nc002-'))); });

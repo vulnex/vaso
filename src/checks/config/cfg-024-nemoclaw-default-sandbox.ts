@@ -41,6 +41,12 @@ export const cfg024 = defineCheck({
 
     const evidence: Evidence[] = [];
 
+    // No sandbox registered at all: CFG-017 reports the missing deployment;
+    // a default (or its absence) means nothing until a sandbox exists
+    if (Object.keys(config.sandboxes ?? {}).length === 0) {
+      return h.passed('No NemoClaw sandbox registered — CFG-017 reports the missing deployment');
+    }
+
     if (!config.defaultSandbox) {
       return h.result({
         passed: false,
@@ -50,14 +56,6 @@ export const cfg024 = defineCheck({
     }
 
     const sandboxNames = Object.keys(config.sandboxes ?? {});
-
-    if (sandboxNames.length === 0) {
-      return h.result({
-        passed: false,
-        message: `defaultSandbox "${config.defaultSandbox}" is set but no sandboxes are defined`,
-        evidence: [{ file: sandboxesPath, detail: `Dangling reference: "${config.defaultSandbox}" → no sandboxes exist` }],
-      });
-    }
 
     if (!sandboxNames.includes(config.defaultSandbox)) {
       return h.result({

@@ -186,10 +186,26 @@ describe('RUN-002: Suspicious Cron Entries', () => {
     expect(result.evidence?.[0].snippet).toContain('openclaw');
   });
 
-  it('flags cron entries that reference nanobot', async () => {
-    const crontab = '*/10 * * * * /usr/local/bin/nanobot heartbeat';
+  it('flags cron entries that run an agent-named program outside the install roots', async () => {
+    const crontab = '*/10 * * * * /tmp/.cache/nanobot heartbeat';
     const result = await run002.run(makeCronCtx(crontab));
     expect(result.passed).toBe(false);
+    expect(result.severity).toBe('warning');
+  });
+
+  it("reports an installed agent's own job as info, under that agent only", async () => {
+    const ctx = makeCronCtx('*/10 * * * * /usr/local/bin/nanobot heartbeat\n@reboot /home/test/.local/bin/openclaw gateway');
+    const r = await run002.run(ctx);
+    // the nanobot job belongs to nanobot's installation; openclaw's own job is info
+    expect(r.evidence?.map(e => e.detail)).toEqual(['Cron entry runs an installed agent — /home/test/.local/bin/openclaw']);
+    expect(r.severity).toBe('info');
+    expect(r.message).toContain('all run an installed agent');
+  });
+
+  it('covers Lyrie, Atomic Agent and OpenShell too', async () => {
+    for (const name of ['lyrie', 'atomic-agent', 'openshell']) {
+      expect((await run002.run(makeCronCtx(`0 3 * * * /tmp/${name}-sync`))).passed).toBe(false);
+    }
   });
 
   it('passes when crontab is unavailable', async () => {
@@ -216,6 +232,23 @@ describe('RUN-005: Process Ancestry Analysis', () => {
 
   it('is limited to darwin and linux platforms', () => {
     expect(run005.supportedPlatforms).toEqual(['darwin', 'linux']);
+  });
+
+  it('walks every agent process — a first hit no longer hides the next one', async () => {
+    const ps = [
+      '  PID  PPID COMM',
+      '  100     1 python3',
+      '  200   100 openclaw',
+      '  300     1 curl',
+      '  400   300 openclaw-gateway',
+    ].join('\n');
+    const fs = makeMockedFs({});
+    (fs.execSync as ReturnType<typeof vi.fn>).mockReturnValue(ps);
+    const r = await run005.run({ installation: { agent: 'openclaw', installDir: '/h', configFiles: [] }, configs: [], platform: 'linux', fs });
+    expect(r.evidence?.map(e => e.detail)).toEqual([
+      'Agent process "openclaw" (PID 200) has suspicious parent "python3" (PID 100)',
+      'Agent process "openclaw-gateway" (PID 400) has suspicious parent "curl" (PID 300)',
+    ]);
   });
 
   it("reports only the scanned installation's own processes", async () => {
@@ -250,14 +283,26 @@ describe('RUN-005: Process Ancestry Analysis', () => {
 describe('RUN-003: VS Code Extension Trojans', () => {
   it('flags a known malicious VS Code extension directory', async () => {
     const fs = makeMockedFs({
-      '/home/test/.vscode/extensions': ['clawhavoc.malicious-skill-loader-1.0.0'],
+      '/home/test/.vscode/extensions': ['clawdbot.clawdbot-agent-0.0.1'],
       '/home/test/.vscode-insiders/extensions': [],
-      '/home/test/.cursor/extensions': [],
+      '/home/test/.cursor/extensions': ['anthropic.claude-code-2.1.313-darwin-arm64', 'anthropic.claude-code-2.1.314-darwin-arm64'],
     });
     const result = await run003.run(makeRunCtx(fs));
     expect(result.passed).toBe(false);
     expect(result.severity).toBe('critical');
-    expect(result.evidence![0].detail).toContain('clawhavoc');
+    expect(result.evidence!.map(e => e.file)).toEqual([
+      '/home/test/.vscode/extensions/clawdbot.clawdbot-agent-0.0.1',
+      '/home/test/.cursor/extensions/anthropic.claude-code-2.1.313-darwin-arm64',
+    ]);
+  });
+
+  it('matches the whole extension id, not a prefix and a substring', async () => {
+    const fs = makeMockedFs({
+      '/home/test/.vscode/extensions': ['clawdbot.clawdbot-agent-helper-1.0.0', 'clawdbotx.clawdbot-agent-1.0.0'],
+      '/home/test/.vscode-insiders/extensions': [],
+      '/home/test/.cursor/extensions': [],
+    });
+    expect((await run003.run(makeRunCtx(fs))).passed).toBe(true);
   });
 
   it('passes when no extension directory contains a known malicious ID', async () => {
@@ -368,6 +413,15 @@ describe('RUN-001: agent services vs. suspicious persistence', () => {
     expect(result.message).toBe('Found 1 suspicious persistence mechanism(s)');
     const bad = result.evidence!.find(e => !e.mitigated)!;
     expect(bad.detail).toContain('/tmp/.x/clawbot');
+  });
+
+  it('reads `/usr/bin/env node <script>` and systemd %h, and names the agent rather than the keyword', async () => {
+    const fs = linuxFs({
+      'openclaw-gateway.service': '[Service]\nExecStart=/usr/bin/env NODE_ENV=production node %h/.nvm/versions/node/v22.22.1/lib/node_modules/openclaw/dist/index.js gateway\n',
+    });
+    const result = await run001.run(makeRunCtx(fs, 'linux'));
+    expect(result.evidence?.[0].mitigated).toBe(true);
+    expect(result.evidence?.[0].detail).toBe('Systemd service for an installed agent ("openclaw") — runs /home/test/.nvm/versions/node/v22.22.1/lib/node_modules/openclaw/dist/index.js');
   });
 
   it('parses ExecStart prefixes/quotes and launchd Program/ProgramArguments', () => {
