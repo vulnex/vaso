@@ -419,6 +419,15 @@ describe('IOC-004: Malicious Publishers', () => {
     expect(result.evidence![0].detail).toContain('hightower6eu');
   });
 
+  it('reads author / metadata.author from SKILL.md frontmatter', async () => {
+    for (const [name, fm] of [['a', 'author: hightower6eu'], ['b', 'metadata:\n  author: "HIGHTOWER6EU"'], ['c', 'author: Acme Inc.']]) {
+      await mkdir(join(tempDir, name), { recursive: true });
+      await writeFile(join(tempDir, name, 'SKILL.md'), `---\nname: ${name}\ndescription: x\n${fm}\n---\nbody\n`);
+    }
+    const result = await ioc004.run(makeContext(tempDir));
+    expect(result.evidence?.map(e => e.file.split('/').slice(-2).join('/')).sort()).toEqual(['a/SKILL.md', 'b/SKILL.md']);
+  });
+
   it('passes for skills with benign publishers', async () => {
     const skillDir = join(tempDir, 'good-skill');
     await mkdir(skillDir, { recursive: true });
