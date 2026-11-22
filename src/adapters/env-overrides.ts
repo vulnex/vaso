@@ -10,7 +10,7 @@ import { keySegments, type KeyPath } from '../core/utils.js';
  * leaks into a written config.
  */
 
-export type EnvValueType = 'bool' | 'int' | 'string';
+export type EnvValueType = 'bool' | 'int' | 'string' | 'list';
 
 export interface EnvOverrideSpec {
   env: string;
@@ -39,6 +39,8 @@ function parseBool(v: string): boolean | undefined {
 function parseValue(raw: string, type: EnvValueType): unknown {
   if (type === 'bool') return parseBool(raw);
   if (type === 'int') return /^-?\d+$/.test(raw) ? Number(raw) : undefined;
+  // caarlos0/env slices: split on the default "," separator, entries kept as written
+  if (type === 'list') return raw.split(',');
   return raw;
 }
 

@@ -179,6 +179,28 @@ describe('PicoClaw adapter', () => {
     expect(prefixes.some(p => 'PICOCLAW_KEY_PASSPHRASE'.startsWith(p))).toBe(false);
   });
 
+  it('overlays the comma-separated list overrides (allow paths, exec allow patterns, web host whitelist)', async () => {
+    const fs = makeFs({
+      files: onboardFiles(),
+      env: {
+        PICOCLAW_TOOLS_ALLOW_READ_PATHS: '^/etc/.*,^/home/alice/\\.ssh/.*',
+        PICOCLAW_TOOLS_ALLOW_WRITE_PATHS: '.*',
+        PICOCLAW_TOOLS_EXEC_CUSTOM_ALLOW_PATTERNS: '.*',
+        PICOCLAW_TOOLS_WEB_PRIVATE_HOST_WHITELIST: '169.254.169.254',
+      },
+    });
+    const [inst] = await picoclawAdapter.detect({ fs });
+    const data = inst.configFiles[0].data as Record<string, any>;
+    expect(data.tools.allow_read_paths).toEqual(['^/etc/.*', '^/home/alice/\\.ssh/.*']);
+    expect(data.tools.allow_write_paths).toEqual(['.*']);
+    expect(data.tools.exec.custom_allow_patterns).toEqual(['.*']);
+    expect(data.tools.web.private_host_whitelist).toEqual(['169.254.169.254']);
+    const prefixes = picoclawAdapter.getProbeManifest!().envPrefixes;
+    for (const name of ['PICOCLAW_TOOLS_ALLOW_READ_PATHS', 'PICOCLAW_TOOLS_ALLOW_WRITE_PATHS', 'PICOCLAW_TOOLS_EXEC_CUSTOM_ALLOW_PATTERNS', 'PICOCLAW_TOOLS_WEB_PRIVATE_HOST_WHITELIST']) {
+      expect(prefixes).toContain(name);
+    }
+  });
+
   it('never reports the config schema version ("version": 3) as the app version', async () => {
     const fs = makeFs({ files: onboardFiles() });
     const [inst] = await picoclawAdapter.detect({ fs });

@@ -4,6 +4,7 @@ import { defineCheck } from '../../core/check-builder.js';
 import { regexBudget, runSampleBatch, type SampleRun } from '../../analyzers/bounded-regex.js';
 import { compileForeignRegex, notEvaluatedDetail, unjudgedEvidence } from '../../analyzers/foreign-regex.js';
 import { asRecord, picoMainConfigs, stringList } from './shared.js';
+import { envNote } from '../../adapters/env-overrides.js';
 import { riskyWhitelistEntry } from '../nanobot/nb-005-ssrf-webfetch.js';
 
 /** Sensitive files a path allowance must not reach. `.security.yml` lives
@@ -49,7 +50,7 @@ export const pcl007 = defineCheck({
         if (!why) continue;
         evidence.push({
           file: config.filePath,
-          snippet: `tools.web.private_host_whitelist: ${JSON.stringify(entry)}`,
+          snippet: `tools.web.private_host_whitelist: ${JSON.stringify(entry)}${envNote(config.data, 'tools.web.private_host_whitelist')}`,
           detail: `web_fetch SSRF allowance ${why}`,
         });
       }
@@ -63,7 +64,7 @@ export const pcl007 = defineCheck({
         runSampleBatch(ok.map(({ re }) => ({ re, samples: targets })), { budget: budgets[key] })
           .forEach((run, j) => { runs[ok[j].k] = run; });
         for (const [k, pattern] of patterns.entries()) {
-          const snippet = `tools.${key}: ${JSON.stringify(pattern)}`;
+          const snippet = `tools.${key}: ${JSON.stringify(pattern)}${envNote(config.data, `tools.${key}`)}`;
           // PicoClaw rejects a pattern Go can't compile: it allows nothing
           if (compiled[k].kind === 'invalid') continue;
           const run = runs[k];
