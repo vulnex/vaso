@@ -16,9 +16,18 @@ const PROTECTED_FILES = [
   'providers.json',
   'command-history-state.json',
   'session-store.db',
+  // SQLite write-ahead log and shared-memory index: the WAL holds the newest
+  // rows until a checkpoint (often most of the data)
+  'session-store.db-wal',
+  'session-store.db-shm',
 ];
 /** Always private whatever they hold: the user's own history and session data. */
-const PRIVATE_FILES = new Set(['command-history-state.json', 'session-store.db']);
+const PRIVATE_FILES = new Set(['command-history-state.json', 'session-store.db', 'session-store.db-wal', 'session-store.db-shm']);
+/**
+ * Folder levels judged below a store: session-state/<id>/checkpoints/index.md
+ * is three deep; the probe manifest collects the same depth.
+ */
+const STORE_DEPTH = 4;
 /**
  * Directories of private files (config-dir reference): session transcripts,
  * command history (a directory since it replaced command-history-state.json),
@@ -143,8 +152,9 @@ async function linkTarget(ctx: ScanContext, path: string): Promise<{ kind: 'dir'
 }
 
 /**
- * A store's files: its entries and the entries of its subdirectories, one
- * level deep (session-state/<session id>/events.jsonl). Symlinks count — a
+ * A store's files: its entries and the entries of its subdirectories, down
+ * to STORE_DEPTH levels (session-state/<session id>/events.jsonl,
+ * session-state/<session id>/checkpoints/index.md). Symlinks count — a
  * store file's data is wherever it points, and its mode is the target's; a
  * link to a directory is a subdirectory like any other (its own mode is not a
  * store file's). A link leaving the store and the home for a file that isn't
@@ -211,7 +221,7 @@ async function storeFiles(ctx: ScanContext, storeDir: string): Promise<StoreList
     }
   }
 
-  const subdirFiles = async (dir: string) => {
+  const subdirFiles = async (dir: string, depth = 1) => {
     let entries: Awaited<ReturnType<ScanContext['fs']['readdirEntries']>>;
     try {
       entries = await ctx.fs.readdirEntries(dir);
@@ -225,9 +235,11 @@ async function storeFiles(ctx: ScanContext, storeDir: string): Promise<StoreList
         add(path);
       } else if (sub.isSymbolicLink) {
         const link = await linkTarget(ctx, path);
-        // a directory two levels down is not judged (like a real one)
+        // a linked folder below the store's top level is not walked
         if (link?.kind === 'file') addLink(path, link.target);
         else if (!link) add(path);
+      } else if (sub.isDirectory && depth < STORE_DEPTH) {
+        await subdirFiles(path, depth + 1);
       }
     }
   };

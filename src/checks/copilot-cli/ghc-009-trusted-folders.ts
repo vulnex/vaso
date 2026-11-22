@@ -11,6 +11,10 @@ export const ghc009 = defineCheck({
   supportedAgents: ['copilot-cli'],
 
   async run(ctx, h) {
+    // Trusted folders are the CLI's own state in ~/.copilot/config.json
+    // (config-dir reference); a repository's .github/copilot/settings.json
+    // cannot grant trust
+    if (ctx.installation.profile === 'project') return h.passed('Project configuration — trusted folders are read from ~/.copilot/config.json only');
     const evidence: Evidence[] = [];
     const home = ctx.fs.homedir();
     const broadPaths = buildBroadPaths(home);
@@ -20,7 +24,7 @@ export const ghc009 = defineCheck({
       if (!Array.isArray(folders)) continue;
       for (const path of folders) {
         if (typeof path !== 'string') continue;
-        const broad = isBroadPath(path, broadPaths, home);
+        const broad = isBroadPath(path, broadPaths, home, { ancestors: true });
         if (broad) {
           evidence.push({
             file: config.filePath,

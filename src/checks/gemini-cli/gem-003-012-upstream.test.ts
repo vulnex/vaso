@@ -87,3 +87,13 @@ describe('GEM-012 honours hooksConfig.enabled / hooksConfig.disabled', () => {
     expect((await check.run(makeCtx([settings(undefined)], fs))).severity).toBe('info');
   });
 });
+
+describe('GEM-011 flags a folder above a broad path (Gemini trusts every subpath)', () => {
+  const check = geminiCliChecks.find(c => c.id === 'GEM-011')!;
+  it('flags /home and /private/tmp, passes a project folder', async () => {
+    const trust = (data: Record<string, unknown>) => makeConfig('/home/test/.gemini/trustedFolders.json', data);
+    const r = await check.run(makeCtx([trust({ '/home': 'TRUST_FOLDER', '/private/tmp': 'TRUST_FOLDER', '/home/test/code/app': 'TRUST_FOLDER' })]));
+    expect(r.passed).toBe(false);
+    expect(r.evidence?.map(e => e.snippet)).toEqual(['"/home": "TRUST_FOLDER"', '"/private/tmp": "TRUST_FOLDER"']);
+  });
+});

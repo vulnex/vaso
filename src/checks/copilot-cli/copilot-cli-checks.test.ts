@@ -338,6 +338,14 @@ describe('GHC-008: Instruction File Secrets', () => {
 describe('GHC-009: Trusted Folder Too Broad', () => {
   const check = copilotCliChecks.find(c => c.id === 'GHC-009')!;
 
+  it('flags a folder above the home (trust covers everything below) and ignores repo settings', async () => {
+    const r = await check.run(makeCtx([makeConfig('config.json', { trustedFolders: ['/home', '/home/test/code/app'] })]));
+    expect(r.passed).toBe(false);
+    expect(r.evidence?.map(e => e.snippet)).toEqual(['/home']);
+    const repo = await check.run(makeCtx([makeConfig('/home/test/repo/.github/copilot/settings.json', { trustedFolders: ['/'] })], undefined, true));
+    expect(repo.passed).toBe(true);
+  });
+
   it('flags home directory in trustedFolders', async () => {
     const result = await check.run(makeCtx([makeConfig('config.json', {
       trustedFolders: ['/home/test'],
@@ -594,6 +602,26 @@ describe.skipIf(process.platform === 'win32')('GHC-001 store files', () => {
       expect(many.evidence?.[1].file).toBe(join(dir, 'mcp-oauth-config', 'github.tokens.json'));
       expect(many.evidence).toHaveLength(43);
       expect(many.evidence?.[42]).toMatchObject({ file: join(dir, 'session-state'), snippet: '+205 more file(s)' });
+    });
+  });
+
+  it('judges the database WAL/SHM and store files below a session folder', async () => {
+    await withHome(async (dir, ctx) => {
+      const { join } = await import('node:path');
+      await put(join(dir, 'session-store.db'), 0o600);
+      await put(join(dir, 'session-state', 's1', 'events.jsonl'), 0o600);
+      await put(join(dir, 'session-state', 's1', 'checkpoints', 'deep', 'x.md'), 0o600);
+      expect((await check.run(ctx)).passed).toBe(true);
+      await put(join(dir, 'session-store.db-wal'), 0o644);
+      await put(join(dir, 'session-state', 's1', 'checkpoints', 'index.md'), 0o644);
+      const r = await check.run(ctx);
+      expect(r.passed).toBe(false);
+      expect(r.evidence?.map(e => e.file).sort()).toEqual([
+        join(dir, 'session-state', 's1', 'checkpoints', 'index.md'),
+        join(dir, 'session-store.db-wal'),
+      ].sort());
+      await check.fix!(ctx);
+      expect((await check.run(ctx)).passed).toBe(true);
     });
   });
 

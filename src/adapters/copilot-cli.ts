@@ -253,6 +253,8 @@ export const copilotCliAdapter: AgentAdapter = {
       join(installDir, 'command-history-state'),
       join(installDir, 'session-state'),
       join(installDir, 'session-store.db'),
+      join(installDir, 'session-store.db-wal'),
+      join(installDir, 'session-store.db-shm'),
       join(installDir, 'mcp-oauth-config'),
       join(installDir, 'mcp-secrets'),
     ];
@@ -272,6 +274,8 @@ export const copilotCliAdapter: AgentAdapter = {
         '~/.copilot/command-history-state/*',
         '~/.copilot/session-state/*',
         '~/.copilot/session-store.db',
+        '~/.copilot/session-store.db-wal',
+        '~/.copilot/session-store.db-shm',
         '~/.copilot/mcp-oauth-config/*',
         '~/.copilot/mcp-secrets/*',
         // …and one folder level down (session-state/<session id>/events.jsonl)
@@ -279,6 +283,15 @@ export const copilotCliAdapter: AgentAdapter = {
         '~/.copilot/session-state/*/*',
         '~/.copilot/mcp-oauth-config/*/*',
         '~/.copilot/mcp-secrets/*/*',
+        // …down to the depth GHC-001 judges (session-state/<id>/checkpoints/index.md)
+        '~/.copilot/command-history-state/*/*/*',
+        '~/.copilot/session-state/*/*/*',
+        '~/.copilot/mcp-oauth-config/*/*/*',
+        '~/.copilot/mcp-secrets/*/*/*',
+        '~/.copilot/command-history-state/*/*/*/*',
+        '~/.copilot/session-state/*/*/*/*',
+        '~/.copilot/mcp-oauth-config/*/*/*/*',
+        '~/.copilot/mcp-secrets/*/*/*/*',
       ],
       filePaths: [
         '~/.copilot/config.json',
