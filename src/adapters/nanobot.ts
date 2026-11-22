@@ -10,6 +10,7 @@ import { loadConfigIfPresent } from './load-if-present.js';
 import { getUserHomeDirs } from './openclaw.js';
 import { discoverCliInstalls } from './cli-installs.js';
 import { queryCliVersion } from './version-query.js';
+import { applyEnvDefaults } from './env-overrides.js';
 
 /*
  * Nanobot (HKUDS/nanobot, PyPI `nanobot-ai`) — a Python agent framework.
@@ -27,9 +28,12 @@ import { queryCliVersion } from './version-query.js';
  *                                    plugins/, cron/jobs.json
  *
  * The data dir is the config file's parent; the only relocation is the
- * `--config` / `--workspace` CLI flags (there is no NANOBOT_HOME). NANOBOT_*
- * env overrides only apply when no config file exists (the loader uses
- * Config.model_validate, which bypasses pydantic-settings sources).
+ * `--config` / `--workspace` CLI flags (there is no NANOBOT_HOME). `Config` is
+ * a pydantic-settings model (env_prefix NANOBOT_, nested delimiter `__`), so
+ * NANOBOT_* variables fill every setting config.json leaves unset, at any
+ * depth; a value the file sets wins (verified with nanobot-ai 0.4.1's
+ * load_config: NANOBOT_TOOLS__EXEC__ALLOW_PATTERNS='[".*"]' fills
+ * tools.exec.allow_patterns under a file that sets tools.exec.enable).
  *
  * Nanobot is not an npm package — the npm `nanobot` name belongs to an
  * unrelated project, so no package.json version lookups.
@@ -74,6 +78,39 @@ export function nanobotWebsocketHost(raw: unknown): string | undefined {
 
 function asRecord(v: unknown): Record<string, unknown> | undefined {
   return v && typeof v === 'object' && !Array.isArray(v) ? v as Record<string, unknown> : undefined;
+}
+
+const NANOBOT_ENV = /^NANOBOT_(.+)$/i;
+
+const toCamel = (snake: string): string => snake.replace(/_([a-z0-9])/g, (_m, c: string) => c.toUpperCase());
+const toSnake = (camel: string): string => camel.replace(/[A-Z]/g, c => `_${c.toLowerCase()}`);
+
+/**
+ * config.json data with the NANOBOT_* environment filling what the file
+ * leaves unset (see the header). pydantic-settings matches names
+ * case-insensitively and JSON-decodes values of list/dict/model fields; a
+ * scalar stays the string pydantic would coerce (the NB checks read bools
+ * through `pyBool`). Variables set by env are recorded (`envOverridesOf`), so
+ * NB-002 doesn't call an env-supplied secret a plaintext config value.
+ */
+export function applyNanobotEnv(data: Record<string, unknown>, fs: FSProvider): Record<string, unknown> {
+  const entries: Array<{ env: string; path: string[]; value: unknown }> = [];
+  for (const name of [...(fs.envNames?.() ?? [])].sort()) {
+    const m = NANOBOT_ENV.exec(name);
+    if (!m) continue;
+    const raw = fs.getEnv(name);
+    if (raw === undefined) continue;
+    const parts = m[1].toLowerCase().split('__');
+    if (parts.some(p => p === '')) continue;
+    let value: unknown = raw;
+    if (/^\s*[[{]/.test(raw)) {
+      try { value = JSON.parse(raw); } catch { continue; } // nanobot refuses to load an undecodable value
+    }
+    entries.push({ env: name, path: parts.map(toCamel), value });
+  }
+  if (entries.length === 0) return data;
+  return applyEnvDefaults(data, entries, (rec, key) =>
+    key in rec ? key : toSnake(key) in rec ? toSnake(key) : undefined);
 }
 
 /** The user's home for an install: the parent of a default `~/.nanobot` data dir. */
@@ -182,6 +219,8 @@ export const nanobotAdapter: AgentAdapter = {
       const configPath = join(dataDir, 'config.json');
       {
         const loaded = await loadConfigIfPresent(configPath, fs);
+        // The environment describes the scanning user's process only.
+        if (loaded && home === fs.homedir() && asRecord(loaded.data)) loaded.data = applyNanobotEnv(loaded.data, fs);
         if (loaded) configFiles.push(loaded);
       }
 

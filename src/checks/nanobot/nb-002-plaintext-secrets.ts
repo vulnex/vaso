@@ -3,6 +3,7 @@ import { defineCheck } from '../../core/check-builder.js';
 import { queryPermissions } from '../../core/permissions.js';
 import { secretShape } from '../../core/patterns.js';
 import { asRecord, nanobotConfigs, worldTraversalBarrier } from './shared.js';
+import { envOverridesOf } from '../../adapters/env-overrides.js';
 
 // Secret-bearing leaf keys in nanobot's schema: providers.<p>.apiKey,
 // api.apiKey, tools.web.search.apiKey, channel credentials (telegram.token,
@@ -57,8 +58,11 @@ export const nb002 = defineCheck({
     let exposed = false;
 
     for (const config of nanobotConfigs(ctx.configs)) {
-      const hits: Hit[] = [];
+      let hits: Hit[] = [];
       findSecrets(config.data, '', hits);
+      // a NANOBOT_* variable is the recommended home for a secret, not config.json
+      const fromEnv = new Set(envOverridesOf(config.data).map(o => o.path));
+      hits = hits.filter(hit => !fromEnv.has(hit.path));
       if (hits.length === 0) continue;
 
       let exposure = '';

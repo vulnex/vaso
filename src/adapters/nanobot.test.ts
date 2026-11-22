@@ -2,7 +2,8 @@ import { describe, it, expect, vi } from 'vitest';
 import { dirname } from 'node:path';
 import type { FSProvider } from '../core/fs-provider.js';
 import type { ParsedConfig } from '../core/types.js';
-import { nanobotAdapter, nanobotWorkspaceDir } from './nanobot.js';
+import { applyNanobotEnv, nanobotAdapter, nanobotWorkspaceDir } from './nanobot.js';
+import { envOverridesOf } from './env-overrides.js';
 
 interface FakeFs {
   files?: Record<string, string>;
@@ -41,6 +42,7 @@ function makeFs(o: FakeFs = {}): FSProvider {
       throw new Error('not found');
     }),
     getEnv: vi.fn((k: string) => o.env?.[k]),
+    envNames: () => Object.keys(o.env ?? {}),
   } as unknown as FSProvider;
 }
 
@@ -239,5 +241,37 @@ describe('Nanobot adapter', () => {
       { id: 'anthropic/claude-sonnet-4-5', provider: 'openrouter', via: 'preset:deep' },
       { id: 'gpt-4o-mini', provider: 'openai', via: 'fallback' },
     ]);
+  });
+});
+
+describe('NANOBOT_* environment (pydantic-settings, file wins)', () => {
+  const file = { tools: { exec: { enable: true }, restrict_to_workspace: false }, api: { port: 8900 } };
+  const fs = makeFs({ env: {
+    NANOBOT_TOOLS__EXEC__ALLOW_PATTERNS: '[".*"]',
+    NANOBOT_API__HOST: '10.0.0.9',
+    NANOBOT_TOOLS__RESTRICT_TO_WORKSPACE: 'true',
+    nanobot_channels__websocket__token: 'tok',
+    NANOBOT_TOOLS__BROKEN: '[not json',
+    OTHER_VAR: 'x',
+  } });
+
+  it('fills unset keys at any depth (camelCase), keeps what the file sets', () => {
+    const out = applyNanobotEnv(file, fs) as any;
+    expect(out.tools.exec).toEqual({ enable: true, allowPatterns: ['.*'] });
+    expect(out.api).toEqual({ port: 8900, host: '10.0.0.9' });
+    expect(out.tools.restrict_to_workspace).toBe(false);
+    expect(out.channels.websocket.token).toBe('tok');
+    expect(out.tools.broken).toBeUndefined();
+    expect(file.tools.exec).toEqual({ enable: true }); // not mutated
+    expect(envOverridesOf(out).map(o => o.path).sort())
+      .toEqual(['api.host', 'channels.websocket.token', 'tools.exec.allowPatterns']);
+  });
+
+  it('is applied to the detected config.json', async () => {
+    const env = { NANOBOT_API__HOST: '10.0.0.9' };
+    const [inst] = await nanobotAdapter.detect({ fs: makeFs({ env, files: { '/home/test/.nanobot/config.json': CONFIG } }) });
+    expect((inst.configFiles[0].data as any).api.host).toBe('127.0.0.1');
+    const [inst2] = await nanobotAdapter.detect({ fs: makeFs({ env, files: { '/home/test/.nanobot/config.json': '{"api":{"port":8900}}' } }) });
+    expect((inst2.configFiles[0].data as any).api.host).toBe('10.0.0.9');
   });
 });

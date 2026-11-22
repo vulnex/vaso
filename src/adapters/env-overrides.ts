@@ -78,6 +78,50 @@ export function applyEnvOverrides(
   return out;
 }
 
+/**
+ * Fill settings the file leaves unset from environment values, the way
+ * pydantic-settings merges `env_prefix` variables under the file's own
+ * values (`Config.model_validate(file)` on a BaseSettings model): a value the
+ * file sets, at any depth, wins. `isSet(record, key)` says whether the file
+ * already holds `key` (in whatever spellings the agent accepts). Recorded like
+ * `applyEnvOverrides`, so `envOverridesOf` / `envNote` see these too.
+ */
+export function applyEnvDefaults(
+  data: Record<string, unknown>,
+  entries: Array<{ env: string; path: string[]; value: unknown }>,
+  isSet: (record: Record<string, unknown>, key: string) => string | undefined,
+): Record<string, unknown> {
+  let out = data;
+  const applied: AppliedEnvOverride[] = [...envOverridesOf(data)];
+  const before = applied.length;
+  for (const entry of entries) {
+    // walk down the file's own tables; stop where the file sets the value
+    let rec: Record<string, unknown> | undefined = out;
+    const segments: string[] = [];
+    let blocked = false;
+    for (let i = 0; i < entry.path.length; i++) {
+      const key = entry.path[i];
+      const existing = rec ? isSet(rec, key) : undefined;
+      if (existing === undefined) {
+        segments.push(key, ...entry.path.slice(i + 1));
+        break;
+      }
+      segments.push(existing);
+      const next: Record<string, unknown> | undefined = asRecord(rec![existing]);
+      if (i === entry.path.length - 1 || !next) {
+        blocked = true;
+        break;
+      }
+      rec = next;
+    }
+    if (blocked) continue;
+    out = setPath(out, segments, entry.value);
+    applied.push({ env: entry.env, path: segments.join('.'), segments, value: entry.value });
+  }
+  if (applied.length > before) overlays.set(out, applied);
+  return out;
+}
+
 /** The env overrides that shaped this parsed config object, if any. */
 export function envOverridesOf(data: unknown): AppliedEnvOverride[] {
   return (data && typeof data === 'object' ? overlays.get(data) : undefined) ?? [];

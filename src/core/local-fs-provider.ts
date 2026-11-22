@@ -321,4 +321,8 @@ export class LocalFSProvider implements FSProvider {
   getEnv(key: string): string | undefined {
     return process.env[key];
   }
+
+  envNames(): string[] {
+    return Object.keys(process.env);
+  }
 }
