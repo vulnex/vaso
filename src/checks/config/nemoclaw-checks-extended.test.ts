@@ -207,31 +207,18 @@ describe('CFG-022: NemoClaw Policy Scope', () => {
     expect(result.passed).toBe(true);
   });
 
-  it('fails when sandbox only has package policies', async () => {
+  // NemoClaw presets are egress allowances (npm, pypi, docker, slack, …):
+  // there is no filesystem/network/syscall preset to be "missing"
+  it('reports recorded presets as egress allowances, without failing', async () => {
     allowPath('/mock-home/.nemoclaw');
     mockReadFile.mockResolvedValue(SANDBOXES_VALID);
     const result = await cfg022.run(makeContext());
-    expect(result.passed).toBe(false);
-    expect(result.message).toContain('narrow policy scope');
-    expect(result.evidence!.some(e => e.detail!.includes('missing'))).toBe(true);
-    expect(result.evidence!.some(e => e.detail!.includes('filesystem'))).toBe(true);
-  });
-
-  it('passes when all recommended policies present', async () => {
-    allowPath('/mock-home/.nemoclaw');
-    mockReadFile.mockResolvedValue(JSON.stringify({
-      sandboxes: {
-        'full-box': {
-          policies: ['filesystem', 'network', 'syscall', 'pypi', 'npm'],
-        },
-      },
-    }));
-    const result = await cfg022.run(makeContext());
     expect(result.passed).toBe(true);
-    expect(result.message).toContain('comprehensive');
+    expect(result.evidence!.every(e => e.detail!.includes('egress presets'))).toBe(true);
+    expect(result.evidence!.some(e => e.detail!.includes('missing'))).toBe(false);
   });
 
-  it('fails when sandbox has no policies', async () => {
+  it('an empty preset list (default-deny egress) passes', async () => {
     allowPath('/mock-home/.nemoclaw');
     mockReadFile.mockResolvedValue(JSON.stringify({
       sandboxes: {
@@ -239,8 +226,8 @@ describe('CFG-022: NemoClaw Policy Scope', () => {
       },
     }));
     const result = await cfg022.run(makeContext());
-    expect(result.passed).toBe(false);
-    expect(result.evidence!.some(e => e.detail!.includes('none'))).toBe(true);
+    expect(result.passed).toBe(true);
+    expect(result.evidence![0].detail).toContain('[none]');
   });
 
   it('has correct metadata', () => {

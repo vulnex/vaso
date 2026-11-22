@@ -4,7 +4,6 @@ import { defineCheck } from '../../core/check-builder.js';
 
 const SANDBOXES_FILE = 'sandboxes.json';
 
-const RECOMMENDED_POLICIES = ['filesystem', 'network', 'syscall', 'pypi', 'npm'] as const;
 
 interface SandboxEntry {
   name?: string;
@@ -20,7 +19,7 @@ export const cfg022 = defineCheck({
   name: 'NemoClaw Policy Scope',
   category: 'config',
   severity: 'warning',
-  description: 'Check if NemoClaw sandbox policies cover filesystem, network, and syscall restrictions beyond package management',
+  description: 'Report the NemoClaw policy presets (egress allowances) a legacy sandbox registry records; the effective sandbox policy is judged by the OpenShell checks',
   supportedAgents: ['openclaw', 'nemoclaw'],
 
   async run(ctx, h) {
@@ -53,32 +52,18 @@ export const cfg022 = defineCheck({
       return h.passed('NemoClaw policy presets are held by the OpenShell gateway, not on disk — evaluated by the OpenShell checks (OSH-011–OSH-014)');
     }
 
-    const evidence: Evidence[] = [];
-    let narrowCount = 0;
-
-    for (const [name, sandbox] of withPolicies) {
-      const policies = sandbox.policies ?? [];
-      const missing = RECOMMENDED_POLICIES.filter(p => !policies.includes(p));
-
-      if (missing.length > 0) {
-        narrowCount++;
-        evidence.push({
-          file: sandboxesPath,
-          detail: `Sandbox "${name}": active policies [${policies.join(', ') || 'none'}] — missing: [${missing.join(', ')}]`,
-        });
-      } else {
-        evidence.push({
-          file: sandboxesPath,
-          detail: `Sandbox "${name}": full policy coverage [${policies.join(', ')}]`,
-        });
-      }
-    }
-
+    // NemoClaw presets (nemoclaw-blueprint/policies/presets: npm, pypi,
+    // docker, huggingface, slack, discord, telegram, jira, outlook, …) are
+    // network egress allowances layered on the default-deny sandbox policy —
+    // each one widens what the sandbox reaches. There are no filesystem /
+    // network / syscall presets: a short (or empty) list is the narrow one.
+    const evidence: Evidence[] = withPolicies.map(([name, sandbox]) => ({
+      file: sandboxesPath,
+      detail: `Sandbox "${name}": egress presets [${(sandbox.policies ?? []).join(', ') || 'none'}]`,
+    }));
     return h.result({
-      passed: narrowCount === 0,
-      message: narrowCount === 0
-        ? 'All sandboxes have comprehensive policy coverage'
-        : `${narrowCount} sandbox(es) have narrow policy scope — missing filesystem, network, or syscall restrictions`,
+      passed: true,
+      message: 'NemoClaw policy presets only add egress to the default-deny sandbox policy — the effective policy is judged by the OpenShell checks (OSH-011–OSH-014)',
       evidence,
     });
   },
