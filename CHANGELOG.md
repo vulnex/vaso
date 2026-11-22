@@ -6,6 +6,8 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.4.2] - 2026-11-22
+
 ### Security
 
 - **Padding a skill file past the size limit no longer hides findings.** A skill file over the 5 MiB content-scan limit is now an SKL-002 warning ("not scanned"), not a mitigated info. Padding a malicious script past the limit used to turn its critical findings into a single info. Large legitimate bundles (a skill's `dist/` output) now show this warning too.

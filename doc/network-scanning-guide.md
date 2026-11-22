@@ -538,7 +538,7 @@ Published probe binaries cover Linux and macOS (amd64/arm64), and remote scans d
 ### Probe download failed
 
 ```
-Failed to download vaso-probe for linux/amd64 from https://github.com/vulnex/vaso/releases/download/v1.4.1/vaso-probe-linux-amd64: ...
+Failed to download vaso-probe for linux/amd64 from https://github.com/vulnex/vaso/releases/download/v1.4.2/vaso-probe-linux-amd64: ...
   Build it locally instead: cd probe && make
 ```
 
@@ -547,7 +547,7 @@ The scanning machine couldn't reach GitHub. Retry with network access, or, for o
 ### Probe asset not found (HTTP 404)
 
 ```
-vaso-probe asset for linux/amd64 not found (HTTP 404 at https://github.com/vulnex/vaso/releases/download/v1.4.1/vaso-probe-linux-amd64).
+vaso-probe asset for linux/amd64 not found (HTTP 404 at https://github.com/vulnex/vaso/releases/download/v1.4.2/vaso-probe-linux-amd64).
   This VASO release may not publish probe binaries; build one locally: cd probe && make
 ```
 

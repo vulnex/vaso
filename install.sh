@@ -250,7 +250,7 @@ install_vaso() {
     info "Download a release tarball and install it from the file:"
     echo "    curl -fLO https://github.com/${REPO}/releases/download/<tag>/vaso-<version>.tgz"
     echo "    npm install -g ./vaso-<version>.tgz"
-    echo "  for example <tag> = v1.4.1 and <version> = 1.4.1. Releases: https://github.com/${REPO}/releases"
+    echo "  for example <tag> = v1.4.2 and <version> = 1.4.2. Releases: https://github.com/${REPO}/releases"
     echo ""
     info "Or re-run this script for a published release:"
     echo "    curl -fsSL https://raw.githubusercontent.com/${REPO}/main/install.sh | VASO_VERSION=<tag> bash"
