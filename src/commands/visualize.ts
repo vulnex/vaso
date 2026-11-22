@@ -9,6 +9,8 @@ import type { ScanResult, ScanOptions } from '../core/types.js';
 import { emitBundle, ALL_DIAGRAMS, type DiagramKind } from '../visualizations/bundle.js';
 import { isValidVisFormat, type VisFormat } from '../visualizations/serializers/format.js';
 import { logError } from '../core/debug.js';
+import { escapeControlChars } from '../reporting/text-safety.js';
+import { shortenFileBase } from '../transport/host-files.js';
 
 export interface VisualizeCommandOptions {
   input?: string;
@@ -43,7 +45,7 @@ export async function runVisualize(options: VisualizeCommandOptions): Promise<vo
       : [{ result: await runFreshScan(options) }];
   } catch (err) {
     logError('visualize: scan-result', err);
-    console.error(chalk.red(`Failed to obtain scan result: ${(err as Error).message}`));
+    console.error(chalk.red(`Failed to obtain scan result: ${escapeControlChars((err as Error).message, { lineBreaks: true })}`));
     process.exitCode = 2;
     return;
   }
@@ -52,20 +54,23 @@ export async function runVisualize(options: VisualizeCommandOptions): Promise<vo
   for (const a of adapterRegistry.getAdapters()) adapters.set(a.agent, a);
 
   const baseDir = resolve(options.output ?? DEFAULT_OUTPUT_DIR);
+  const show = (s: string) => escapeControlChars(s, { lineBreaks: true });
+  // Several hosts (a --host/--inventory report): one bundle per host, each in
+  // its own directory below the output directory.
+  const dirNames = hostDirNames(results.map(r => r.label ?? 'host'));
   try {
-    for (const { label, result } of results) {
-      // Several hosts (a --host/--inventory report): one bundle per host
-      const outputDir = results.length > 1 ? join(baseDir, safeDirName(label!)) : baseDir;
+    for (const [i, { result }] of results.entries()) {
+      const outputDir = results.length > 1 ? join(baseDir, dirNames[i]) : baseDir;
       const bundle = await emitBundle(result, { outputDir, format, diagrams, adapters });
-      console.log(chalk.green(`Wrote ${bundle.files.length} file(s) to ${bundle.outputDir}`));
+      console.log(chalk.green(`Wrote ${bundle.files.length} file(s) to ${show(bundle.outputDir)}`));
       for (const f of bundle.files) {
         const tag = f.diagram === 'readme' ? 'readme' : f.diagram;
-        console.log(chalk.dim(`  ${tag.padEnd(20)} ${f.path}`));
+        console.log(chalk.dim(`  ${tag.padEnd(20)} ${show(f.path)}`));
       }
     }
   } catch (err) {
     logError('visualize: emit-bundle', err);
-    console.error(chalk.red(`Failed to write bundle: ${(err as Error).message}`));
+    console.error(chalk.red(`Failed to write bundle: ${escapeControlChars((err as Error).message, { lineBreaks: true })}`));
     process.exitCode = 2;
   }
 }
@@ -104,7 +109,10 @@ async function loadScanResults(path: string): Promise<HostScan[]> {
     for (const entry of parsed) {
       const label = entry?.target?.label ?? entry?.target?.host ?? `host-${hosts.length + 1}`;
       if (entry?.result && Array.isArray(entry.result.agents)) hosts.push({ label: String(label), result: entry.result });
-      else if (entry?.error) console.error(chalk.yellow(`Skipping ${label}: it was not scanned (${entry.error})`));
+      else if (entry?.error) {
+        const show = (v: unknown) => escapeControlChars(String(v), { lineBreaks: true });
+        console.error(chalk.yellow(`Skipping ${show(label)}: it was not scanned (${show(entry.error)})`));
+      }
     }
     if (hosts.length > 0) return hosts;
     throw new Error(`File "${path}" has no scanned host to visualize`);
@@ -112,8 +120,23 @@ async function loadScanResults(path: string): Promise<HostScan[]> {
   throw new Error(`File "${path}" does not look like a VASO scan result (missing 'agents' array)`);
 }
 
-function safeDirName(label: string): string {
-  return label.replace(/[^A-Za-z0-9._@-]+/g, '_') || 'host';
+/**
+ * One directory name per host label: only `[A-Za-z0-9._@-]`, never empty,
+ * `.` or `..` (which would write into the output directory or its parent),
+ * never too long for a file name, and unique — labels that sanitize to the
+ * same name (`a b`, `a_b`, or `Box`/`box` on a case-insensitive file system)
+ * get `-2`, `-3`… instead of overwriting each other's bundle.
+ */
+export function hostDirNames(labels: string[]): string[] {
+  const taken = new Set<string>();
+  return labels.map(label => {
+    const safe = label.replace(/[^A-Za-z0-9._@-]+/g, '_');
+    const base = shortenFileBase(safe === '' ? 'host' : /^\.+$/.test(safe) ? `host${safe.replace(/\./g, '_')}` : safe);
+    let name = base;
+    for (let n = 2; taken.has(name.toLowerCase()); n++) name = `${base}-${n}`;
+    taken.add(name.toLowerCase());
+    return name;
+  });
 }
 
 async function runFreshScan(options: VisualizeCommandOptions): Promise<ScanResult> {
