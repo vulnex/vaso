@@ -35,6 +35,28 @@ function docTier(line: string): 'critical' | 'warning' | 'info' {
   return KNOWN_INSTALLERS.test(host) ? 'info' : 'warning';
 }
 
+/**
+ * A script line that only shows the command: a `#` comment (not `#!`), or a
+ * message printed for the user (`echo "Install it: curl … | bash"`) — the
+ * whole command inside one quoted string, nothing run from it (no `$(`,
+ * backticks) and the output going only to the terminal (`echo "…" | sh`
+ * runs it, `echo "…" > run.sh` saves it to run).
+ */
+export function hintLine(line: string): boolean {
+  const t = line.trimStart();
+  if (t.startsWith('#') && !t.startsWith('#!')) return true;
+  const m = /^(?:echo(?:\s+-[neE]+)*|printf|print|puts|console\.(?:log|error|warn|info))\s*\(?\s*(["'])/.exec(t);
+  if (!m) return false;
+  const close = t.indexOf(m[1], m[0].length);
+  if (close < 0) return false;
+  const body = t.slice(m[0].length, close);
+  const rest = t.slice(close + 1);
+  if (m[1] === '"' && (/\$\(|`/.test(body))) return false;
+  // only to the terminal: nothing more on the line but a redirect to
+  // stderr/stdout, a closing `)` or `;`, or a comment (`> run.sh` saves it)
+  return /^\s*\)?\s*(?:[12]?>&[12]|>\s*\/dev\/(?:stderr|stdout|tty))?\s*;?\s*(?:#.*)?$/.test(rest);
+}
+
 export const skl004 = defineCheck({
   id: 'SKL-004',
   name: 'Curl-Pipe Execution',
@@ -79,10 +101,12 @@ export const skl004 = defineCheck({
         // Documentation and data files are instructions, not code that runs
         // on its own — except the `!`cmd`` spans Claude Code runs on load
         const doc = src.kind !== 'script';
-        const lines = doc ? src.text.split('\n') : [];
+        const lines = src.text.split('\n');
         for (const match of matches) {
           const onLoad = loadFormAt(src, match.line, cmd => scanWithPatterns(cmd, CURL_PIPE_RULES).length > 0);
-          let tier = doc && !onLoad ? docTier(lines[match.line - 1] ?? match.snippet) : 'critical';
+          // …and in a script, a comment or a printed hint shows the command, as documentation does
+          const hint = !doc && hintLine(lines[match.line - 1] ?? '');
+          let tier = (doc && !onLoad) || hint ? docTier(lines[match.line - 1] ?? match.snippet) : 'critical';
           // A sentence (no code block, no inline code) installing from a
           // named https host describes the install; an opaque source stays critical
           const sentence = tier === 'warning' && src.proseLines?.has(match.line) === true;
@@ -95,6 +119,8 @@ export const skl004 = defineCheck({
             detail: onLoad
               ? `${match.description} in a ${onLoad} command — Claude Code runs it when it loads the skill, before the model reads it`
               : sentence ? `${match.description} in a sentence of skill documentation — installer from a named https host`
+                : hint && tier !== 'critical'
+                  ? `${match.description} in a comment or printed hint of a script${tier === 'info' ? ' (no download URL, or a well-known vendor installer)' : ' — installer from a named https host'}`
                 : doc && tier !== 'critical'
                   ? `${match.description} in skill documentation${tier === 'info' ? ' (no download URL, or a well-known vendor installer)' : ' — installer from a named https host'}`
                   : match.description,

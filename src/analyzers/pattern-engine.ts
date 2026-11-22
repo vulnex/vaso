@@ -145,9 +145,11 @@ export function scanWithPatterns(code: string, rules?: PatternRule[]): PatternMa
     const trimmed = lines[i].trimStart();
     if (trimmed.startsWith('//') || trimmed.startsWith('*')) continue;
     // A shell command continued with a trailing `\` is one command
-    // (`curl … \` / `  | bash`), matched as one line at its first line
+    // (`curl … \` / `  | bash`), matched as one line at its first line — not
+    // a `#` comment, which a trailing `\` does not continue
     let line = lines[i];
-    while (i + 1 < lines.length && i - first < MAX_CONTINUED_LINES && CONTINUED.test(line)) {
+    const comment = trimmed.startsWith('#');
+    while (!comment && i + 1 < lines.length && i - first < MAX_CONTINUED_LINES && CONTINUED.test(line)) {
       line = line.replace(CONTINUED, ' ') + lines[++i];
     }
     line = normalizeForPatterns(line);

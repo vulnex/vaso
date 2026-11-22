@@ -2192,6 +2192,36 @@ const DIRECT_EXEC = /^(?:subprocess\.(?:run|call|check_call|check_output|Popen)|
  * request's headers and `auth`; file contents and the whole environment,
  * anywhere.
  */
+/** The script's own folder spelled inline: `Path(__file__).resolve().parent`, `os.path.dirname(os.path.abspath(__file__))`. */
+const OWN_DIR_EXPR = String.raw`(?:(?:pathlib\.)?Path\(\s*__file__\s*\)(?:\.(?:resolve|absolute)\(\s*\))?\.parent|os\.path\.dirname\(\s*(?:os\.path\.(?:abspath|realpath)\(\s*__file__\s*\)|__file__)\s*\))`;
+
+/**
+ * A rewriter of a call's arguments that writes a path into the script's own
+ * folder (`SCRIPT_DIR / "capture.sh"`, `os.path.join(HERE, "x.sh")`, also
+ * under `str(…)`) as the literal `"<skill>/capture.sh"`: running a helper
+ * the skill ships is a fixed command, not one built at runtime. Names bound
+ * once at module level to the folder count; a name with `..` never does.
+ */
+function ownPathArgs(stmts: ReadonlyArray<{ text: string }>): (args: string) => string {
+  const names = new Map<string, number>();
+  const bind = new RegExp(String.raw`^([A-Za-z_]\w*)[ \t]*(?::[^=\n]+)?=[ \t]*${OWN_DIR_EXPR}[ \t]*$`);
+  const any = /^([A-Za-z_]\w*)[ \t]*(?::[^=\n]+)?=(?!=)/;
+  for (const { text } of stmts) {
+    const t = text.trim();
+    const own = bind.exec(t)?.[1];
+    if (own) names.set(own, (names.get(own) ?? 0) + 1);
+    else {
+      const other = any.exec(t)?.[1];
+      if (other) names.set(other, 2); // rebound to something else: not the folder
+    }
+  }
+  const own = [...names].filter(([, n]) => n === 1).map(([k]) => k);
+  const dir = own.length > 0 ? `(?:${OWN_DIR_EXPR}|${own.join('|')})` : OWN_DIR_EXPR;
+  const lit = String.raw`["']((?![^"']*\.\.)[\w./-]{1,200})["']`;
+  const joined = new RegExp(String.raw`(?:\bstr\(\s*)?(?<![\w.])${dir}\s*\/\s*${lit}(?:\s*\))?|\bos\.path\.join\(\s*${dir}\s*,\s*${lit}\s*\)`, 'g');
+  return (args: string) => args.slice(0, 2000).replace(joined, (_m, a?: string, b?: string) => `"<skill>/${a ?? b}"`);
+}
+
 export function analyzePythonDataFlow(code: string): DataFlowResult[] {
   const out: DataFlowResult[] = [];
   const rewrite = aliasRewriter(code);
@@ -2200,6 +2230,7 @@ export function analyzePythonDataFlow(code: string): DataFlowResult[] {
   const fns = functionsOf(stmts);
   const constants = stringConstantNames(stmts, fns);
   const urlConstants = scopedConstants(stmts, fns);
+  const ownPaths = ownPathArgs(stmts);
   // the file redirects every request (patched client, proxy settings): no request is the vendor's own
   const rewritten = stmts.map((st) => rewrite(st.text, st.line));
   const redirectsAll = PY_GLOBAL_REDIRECT.test(rewritten.join('\n'));
@@ -2263,7 +2294,7 @@ export function analyzePythonDataFlow(code: string): DataFlowResult[] {
       if (!m) continue;
       const args = callArgs(text, (m.index ?? 0) + m[0].length - 1);
       const sink = name(m);
-      const { command, dynamic } = commandOf(args);
+      const { command, dynamic } = commandOf(ownPaths(args));
       const { positional, keywords } = splitArgs(args);
       const shell = /^True\b/.test(keywords.get('shell')?.trim() ?? '');
       const program = literalProgram(positional[0]);

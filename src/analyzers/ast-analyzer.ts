@@ -1196,7 +1196,13 @@ function analyzeUncached(code: string): DataFlowResult[] {
             ...commandText(node.arguments),
           });
         }
-        if (node.callee.type === 'Identifier' && node.callee.name === 'WebSocket') {
+        // (not one to this machine or over TLS: `ws://127.0.0.1:9222/devtools`,
+        // `ws://localhost:${port}`, `wss://…` — as fetch() skips localhost and https)
+        const wsArg = node.arguments[0];
+        const wsUrl = wsArg?.type === 'StringLiteral' ? wsArg.value
+          : wsArg?.type === 'TemplateLiteral' ? wsArg.quasis[0]?.value.cooked ?? '' : '';
+        const localOrTls = /^wss:\/\/|^ws:\/\/(?:localhost|127(?:\.\d{1,3}){3}|\[::1\])(?=[:/]|$)/i.test(wsUrl);
+        if (node.callee.type === 'Identifier' && node.callee.name === 'WebSocket' && !localOrTls) {
           const line = node.loc?.start.line ?? 0;
           const snippet = lineText(line);
           results.push({
