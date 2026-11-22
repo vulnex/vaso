@@ -9,6 +9,24 @@ import { defineCheck } from '../../core/check-builder.js';
 // browser and can steer it (extension-stomping / AI-hijack research, 2026-09).
 // This check inventories installed extensions so reviewers can spot
 // unexpected ones; it is informational by design.
+/** Compare dotted numeric versions part by part (`9.0.0` < `10.0.0`). */
+export function compareDottedVersions(a: string, b: string): number {
+  const pa = a.split(/[._-]/);
+  const pb = b.split(/[._-]/);
+  for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+    const x = pa[i] ?? '';
+    const y = pb[i] ?? '';
+    const nx = /^\d+$/.test(x) ? Number(x) : NaN;
+    const ny = /^\d+$/.test(y) ? Number(y) : NaN;
+    if (!Number.isNaN(nx) && !Number.isNaN(ny)) {
+      if (nx !== ny) return nx - ny;
+    } else if (x !== y) {
+      return x < y ? -1 : 1;
+    }
+  }
+  return 0;
+}
+
 async function readManifestName(dir: string, fs: ScanContext['fs']): Promise<string | undefined> {
   try {
     const manifest = JSON.parse(await fs.readFile(join(dir, 'manifest.json'))) as Record<string, unknown>;
@@ -47,7 +65,8 @@ export const pc002 = defineCheck({
       const extDir = join(extensionsDir, id);
       let versions: string[] = [];
       try {
-        versions = (await ctx.fs.readdir(extDir)).filter(v => !v.startsWith('.'));
+        // Chromium version dirs (`10.0.1_0`): newest by number, not by name
+        versions = (await ctx.fs.readdir(extDir)).filter(v => !v.startsWith('.')).sort(compareDottedVersions);
       } catch {
         continue;
       }

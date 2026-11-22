@@ -58,7 +58,7 @@ export const cg005 = defineCheck({
         continue;
       }
       if (sig.state === 'adhoc') {
-        evidence.push({ file: bundle.path, snippet: 'Signature=adhoc', detail: `${name} is signed ad hoc, without a developer identity — this is not the official OpenAI build` });
+        evidence.push({ file: bundle.path, snippet: 'codesign: ad hoc signature', detail: `${name} is signed ad hoc, without a developer identity — this is not the official OpenAI build` });
         continue;
       }
       const { team, identifier: id } = sig;
