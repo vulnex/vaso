@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { mkdtemp, rm, writeFile, mkdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { loadUserPlugins, getLoadedPlugins, _resetForTesting } from './loader.js';
+import { loadUserPlugins, getLoadedPlugins, _resetForTesting, registeredAnything } from './loader.js';
 
 let tempDir: string;
 
@@ -254,5 +254,31 @@ describe('loadUserPlugins', () => {
     expect(result).toHaveLength(1);
     expect(result[0].status).toBe('error');
     expect(result[0].error).toContain('plugin init failed');
+  });
+});
+
+describe('plugin meta and partial registration', () => {
+  it('ignores non-string meta values and keeps the file name', async () => {
+    await writeFile(join(tempDir, 'odd-meta.mjs'), `
+      export default { meta: { name: { x: 1 }, version: 3, description: ['d'] }, register() {} };
+    `);
+    const [p] = await loadUserPlugins(tempDir);
+    expect(p.name).toBe('odd-meta');
+    expect(p.version).toBeUndefined();
+    expect(p.description).toBeUndefined();
+  });
+
+  it('records what a plugin registered before register() threw', async () => {
+    await writeFile(join(tempDir, 'half.mjs'), `
+      export default {
+        register(api) {
+          api.registerCheck({ id: 'HALF-001', name: 'h', category: 'config', severity: 'info', description: 'd', async run() { return []; } });
+          throw new Error('late failure');
+        },
+      };
+    `);
+    const [p] = await loadUserPlugins(tempDir);
+    expect(p.status).toBe('error');
+    expect(registeredAnything(p)).toBe(true);
   });
 });

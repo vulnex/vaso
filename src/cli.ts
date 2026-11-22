@@ -7,7 +7,7 @@ import { initIOCDatabase } from './ioc/database.js';
 import { isFeedStale } from './ioc/updater.js';
 import { initAdvisoryDatabase } from './advisory/database.js';
 import { isAdvisoryFeedStale } from './advisory/updater.js';
-import { loadUserPlugins } from './user-plugins/loader.js';
+import { loadUserPlugins, registeredAnything } from './user-plugins/loader.js';
 import { loadAndRegisterRules } from './rules/index.js';
 import { checkRegistry } from './core/check-registry.js';
 import { logError, setDebug } from './core/debug.js';
@@ -111,7 +111,9 @@ program
     if (!silent) {
       for (const p of userPlugins) {
         if (p.status === 'error') {
-          console.error(chalk.yellow(`  Warning: user plugin "${p.name}" failed to load: ${p.error}\n`));
+          const show = (v: string | undefined) => escapeControlChars(v ?? '', { lineBreaks: true });
+          const what = registeredAnything(p) ? 'loaded with errors' : 'failed to load';
+          console.error(chalk.yellow(`  Warning: user plugin "${show(p.name)}" ${what}: ${show(p.error)}\n`));
         }
       }
     }

@@ -8,7 +8,7 @@ import { logError } from '../core/debug.js';
 import { writeFileEnsureDir, writeFileOwnerOnly } from '../core/utils.js';
 import { VERSION } from '../version.js';
 import { parseRemoteOptions, type RemoteOptionValues } from './remote-options.js';
-import { HostFileNames, hostFileBase } from '../transport/host-files.js';
+import { HostFileNames, hostFileBase, sameDirectory, SNAPSHOT_REPORT_CLASH } from '../transport/host-files.js';
 import { join as joinPath } from 'node:path';
 import { maskCredentialsDeep, toReportJson } from '../reporting/serialize.js';
 import { attachSkillInventories } from '../inventory/skills.js';
@@ -219,6 +219,12 @@ async function detectRemoteHosts(options: DetectCommandOptions, remoteValues: Re
   if (options.outputDir) {
     const { mkdir } = await import('node:fs/promises');
     await mkdir(options.outputDir, { recursive: true });
+  }
+
+  if (options.saveSnapshot && options.outputDir && options.format === 'json' && await sameDirectory(options.saveSnapshot, options.outputDir)) {
+    console.error(chalk.red(SNAPSHOT_REPORT_CLASH));
+    process.exitCode = EXIT_USAGE;
+    return;
   }
 
   log(chalk.bold(`\n  Detecting agents on ${targets.length} remote host(s)...\n`));

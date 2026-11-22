@@ -37,6 +37,9 @@ var sensitiveSinkPatterns = []string{
 	`(^|\/)(\.grokbot|\.cursor\/sand|sand-data)\/(local-exec-daemon-credential|host-token)\.json$|(^|\/)Grok Bot\/(sand|user)-secrets\.json$`,
 	`(^|\/)\.ironclaw\/reborn\/(webui-token|([^/]+\/)?\.reborn-local-dev-secrets-master-key)$|(^|\/)\.?zeroclaw\/\.secret_key$`,
 	`(^|\/)openshell\/(gateway\/credentials|docker-sandbox-tokens|gateways\/[^/]+\/mtls)(\/|$)|(^|\/)openshell\/gateways\/[^/]+\/oidc_token\.json$`,
+	`(^|\/)\.(vault-token|my\.cnf|mylogin\.cnf|s3cfg|boto)$|(^|\/)\.cargo\/credentials(\.toml)?$|(^|\/)\.config\/rclone\/rclone\.conf$|(^|\/)\.terraform\.d\/credentials\.tfrc\.json$`,
+	`(^|\/)\.local\/share\/keyrings(\/|$)`,
+	`(^|\/)\.(bash|zsh|sh|python|psql|mysql|sqlite|node_repl|rediscli)_history$|(^|\/)\.zsh_sessions(\/|$)|(^|\/)\.local\/share\/fish\/fish_history$`,
 }
 
 var sensitiveSinks = func() []*regexp.Regexp {
@@ -50,9 +53,9 @@ var sensitiveSinks = func() []*regexp.Regexp {
 // credentialStoreSinks: the sinks (by index) that are other tools'
 // credential-store folders — ~/.ssh, ~/.aws, ~/.gnupg, ~/.kube, ~/.docker,
 // ~/.config/gh, ~/.config/gcloud, ~/.azure, ~/.password-store,
-// ~/Library/Keychains, browser profiles. Mirrors CREDENTIAL_STORE_SINKS in
+// ~/Library/Keychains, browser profiles, ~/.local/share/keyrings. Mirrors CREDENTIAL_STORE_SINKS in
 // src/analyzers/sensitive-paths.ts (its test reads this list).
-var credentialStoreSinks = []int{0, 2, 3, 4, 5, 8, 9, 10, 11, 12, 15}
+var credentialStoreSinks = []int{0, 2, 3, 4, 5, 8, 9, 10, 11, 12, 15, 25}
 
 // inCredentialStore: p, as written, lies in one of credentialStoreSinks. No
 // agent keeps its configuration there; an agent folder an environment

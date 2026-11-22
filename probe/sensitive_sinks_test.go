@@ -137,3 +137,40 @@ func TestEscapesToSinkOnlyForSinksTheBaseDoesNotName(t *testing.T) {
 		t.Fatal("an explicit path linking into ~/.aws is an escape")
 	}
 }
+
+// Agent configs linked to other tools' credential files, the GNOME keyring
+// or typed-command history are withheld like links into ~/.ssh: a bare token
+// there has no key for the disguising rules to recognise.
+func TestConfigLinkedToCredentialFilesAndHistoryNotShipped(t *testing.T) {
+	home := setupHome(t)
+	targets := map[string]string{
+		".vault-token":                        "CANARYVAULT9Zq8Wv3Lm5Np2\n",
+		".zsh_history":                        ": 1:0;mysql -pCANARYZSH7Tk4Hs9Jd6\n",
+		".my.cnf":                             "[client]\npassword=CANARYMYCNF\n",
+		".cargo/credentials.toml":             "[registry]\ntoken = \"CANARYCARGO\"\n",
+		".config/rclone/rclone.conf":          "[s3]\nsecret_access_key = CANARYRCLONE\n",
+		".terraform.d/credentials.tfrc.json":  "{\"credentials\":{\"app.terraform.io\":{\"token\":\"CANARYTF\"}}}\n",
+		".local/share/keyrings/login.keyring": "CANARYKEYRING\n",
+	}
+	links := []string{".claude/settings.json", ".claude/settings.local.json", ".claude/CLAUDE.md", ".copilot/config.json",
+		".codex/config.toml", ".gemini/settings.json", ".qwen/settings.json"}
+	var paths []string
+	i := 0
+	for rel, body := range targets {
+		write(t, filepath.Join(home, rel), body, 0o600)
+		link := links[i%len(links)]
+		if i >= len(links) {
+			link = ".cursor/mcp.json"
+		}
+		mustSymlink(t, filepath.Join(home, rel), filepath.Join(home, link))
+		paths = append(paths, "~/"+link)
+		i++
+	}
+	snap := Collect(ProbeManifest{FilePaths: paths}, false)
+	for _, p := range paths {
+		e := snap.Files[filepath.Join(home, p[2:])]
+		if !e.Exists || e.Omitted != "sensitive" || strings.Contains(e.Content, "CANARY") {
+			t.Errorf("%s: %+v, want present and omitted sensitive", p, e)
+		}
+	}
+}

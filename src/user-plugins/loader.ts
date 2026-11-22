@@ -154,9 +154,10 @@ export async function loadUserPlugins(dir?: string): Promise<LoadedPlugin[]> {
       const pluginExport: VasoPlugin = mod.default ?? mod;
 
       if (pluginExport.meta) {
-        if (pluginExport.meta.name) plugin.name = pluginExport.meta.name;
-        if (pluginExport.meta.version) plugin.version = pluginExport.meta.version;
-        if (pluginExport.meta.description) plugin.description = pluginExport.meta.description;
+        // meta comes from the plugin file: keep only string values
+        if (typeof pluginExport.meta.name === 'string' && pluginExport.meta.name) plugin.name = pluginExport.meta.name;
+        if (typeof pluginExport.meta.version === 'string' && pluginExport.meta.version) plugin.version = pluginExport.meta.version;
+        if (typeof pluginExport.meta.description === 'string' && pluginExport.meta.description) plugin.description = pluginExport.meta.description;
       }
 
       if (typeof pluginExport.register !== 'function') {
@@ -191,4 +192,10 @@ export function getLoadedPlugins(): LoadedPlugin[] {
  */
 export function _resetForTesting(): void {
   loadedPlugins = [];
+}
+
+/** Whether a plugin that reported an error still registered something (it ran partly). */
+export function registeredAnything(plugin: LoadedPlugin): boolean {
+  const r = plugin.registered;
+  return r.checks.length + r.adapters.length + r.reporters.length > 0;
 }

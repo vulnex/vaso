@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
-vi.mock('../user-plugins/loader.js', () => ({
+vi.mock('../user-plugins/loader.js', async importOriginal => ({
+  ...(await importOriginal<typeof import('../user-plugins/loader.js')>()),
   getLoadedPlugins: vi.fn(),
 }));
 
@@ -63,6 +64,28 @@ describe('runExtList', () => {
     await runExtList({});
     expect(consoleLogs.some(l => l.includes('error'))).toBe(true);
     expect(consoleLogs.some(l => l.includes('Load failed'))).toBe(true);
+  });
+
+  it('says "loaded with errors" when a failing plugin still registered checks', async () => {
+    mockGetLoadedPlugins.mockReturnValue([makePlugin({ status: 'error', error: 'boom' })]);
+    await runExtList({});
+    expect(consoleLogs.some(l => l.includes('loaded with errors'))).toBe(true);
+  });
+
+  it('escapes control characters in plugin-supplied text', async () => {
+    mockGetLoadedPlugins.mockReturnValue([makePlugin({
+      name: 'bad\u001b]0;T\u0007', version: '1\u001b[2J', description: 'd\u001b[31m',
+      status: 'error', error: 'e\u001b[2J\nfake line', path: '/home/alice/.vaso/plugins/p\u001b[1m.mjs',
+      registered: { checks: ['X\u001b[2J'], adapters: [], reporters: [] },
+    })]);
+    await runExtList({});
+    const out = consoleLogs.join('\n');
+    expect(out).not.toContain('\u0007');
+    expect(out).not.toContain('\u001b]0;');
+    expect(out).not.toContain('\u001b[2J');
+    expect(out).not.toContain('d\u001b[31m');
+    expect(out).not.toContain('p\u001b[1m');
+    expect(out).not.toMatch(/\nfake line/);
   });
 
   it('shows registered counts', async () => {

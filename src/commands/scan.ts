@@ -15,7 +15,7 @@ import type { CheckResult, ScanOptions, ScanResult } from '../core/types.js';
 import { shouldFailScan, isValidFailOn, incompleteResults, EXIT_FINDINGS, EXIT_INCOMPLETE, EXIT_USAGE, type FailOnLevel } from '../core/exit-criteria.js';
 import { logError } from '../core/debug.js';
 import { writeFileEnsureDir, writeFileOwnerOnly } from '../core/utils.js';
-import { HostFileNames, hostFileBase } from '../transport/host-files.js';
+import { HostFileNames, hostFileBase, sameDirectory, SNAPSHOT_REPORT_CLASH } from '../transport/host-files.js';
 import { writeFile } from 'node:fs/promises';
 import { maskCredentialsDeep, toReportJson } from '../reporting/serialize.js';
 
@@ -179,8 +179,6 @@ export async function runScan(options: ScanCommandOptions): Promise<void> {
     const manifest = buildProbeManifest(adapterRegistry.getAdapters());
     const timeout = sshTimeoutSec * 1000;
 
-    log(chalk.bold(`\n  Scanning ${targets.length} remote host(s)...\n`));
-
     let saveSnapshotDir: string | undefined;
     if (options.saveSnapshot) {
       const { mkdir } = await import('node:fs/promises');
@@ -195,6 +193,13 @@ export async function runScan(options: ScanCommandOptions): Promise<void> {
 
     const reporter = getReporter(options.format as any ?? 'terminal');
     const ext = FORMAT_EXT[options.format] ?? 'txt';
+    if (saveSnapshotDir && options.outputDir && ext === 'json' && await sameDirectory(saveSnapshotDir, options.outputDir)) {
+      console.error(chalk.red(SNAPSHOT_REPORT_CLASH));
+      process.exitCode = 2;
+      return;
+    }
+
+    log(chalk.bold(`\n  Scanning ${targets.length} remote host(s)...\n`));
     // One name per target for its snapshot and its report
     const hostFiles = new HostFileNames();
     const targetLabel = (t: { label?: string; user: string; host: string }) => t.label ?? `${t.user}@${t.host}`;
