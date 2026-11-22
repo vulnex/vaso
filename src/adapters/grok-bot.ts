@@ -54,6 +54,11 @@ export const DATA_FILES = {
   // macOS (0.78+): mirrors the server flag that offers Reminders, Calendar,
   // Contacts, Notes and Mail to the cloud agent
   macDeviceToolsGate: 'mac-device-tools-gate.json',
+  // macOS (1.2+): Mail moved behind its own gate, mirrored from the server
+  // flag sand_mac_mail_drafts; the device-tools gate then covers Reminders,
+  // Calendar, Contacts and Notes only. Written at every start, so its
+  // presence tells the two layouts apart
+  macMailToolsGate: 'mac-mail-tools-gate.json',
   // Single-use send approvals already spent, and approvals withdrawn: the
   // daemon consults both before honouring an approval (0.78)
   spentSends: 'local-tool-spent-sends.json',
@@ -370,7 +375,7 @@ export const grokBotAdapter: AgentAdapter = {
     const root = `~/${GROK_BOT_DATA_DIR}`;
     const legacy = `~/${LEGACY_DATA_DIR.replace(/\\/g, '/')}`;
     const userDataDirs = [`~/.config/${USER_DATA_NAME}`, `~/Library/Application Support/${USER_DATA_NAME}`];
-    const settingsFiles = [DATA_FILES.settings, DATA_FILES.computerUseGate, DATA_FILES.macDeviceToolsGate];
+    const settingsFiles = [DATA_FILES.settings, DATA_FILES.computerUseGate, DATA_FILES.macDeviceToolsGate, DATA_FILES.macMailToolsGate];
     return {
       filePaths: [
         ...[root, legacy].flatMap(d => settingsFiles.map(f => `${d}/${f}`)),

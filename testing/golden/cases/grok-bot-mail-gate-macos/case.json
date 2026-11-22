@@ -1,0 +1,29 @@
+{
+  "agent": "grok-bot",
+  "source": "Grok Bot 1.2.3 macOS layout: Mail behind its own gate (mac-mail-tools-gate.json on, mode 0666 inside the 0700 data root), device-tools gate off, Mail sending on, Messages send-only \u2014 shapes from the 1.2.3 app.asar",
+  "fail": {
+    "GB-009": "info",
+    "GB-014": "info",
+    "GB-015": "info"
+  },
+  "skipOn": [
+    "linux",
+    "win32"
+  ],
+  "modes": {
+    ".grokbot": "700",
+    ".grokbot/settings.json": "600",
+    ".grokbot/local-exec-daemon-credential.json": "600",
+    ".grokbot/local-computer-use-gate.json": "600",
+    "Library/Application Support/Grok Bot": "700",
+    "Library/Application Support/Grok Bot/sand-secrets.json": "600",
+    "Library/Application Support/Grok Bot/desktop-status.json": "600",
+    ".grokbot/mac-device-tools-gate.json": "600",
+    ".grokbot/.grokbot-data-root-v1": "600",
+    ".grokbot/mac-mail-tools-gate.json": "666"
+  },
+  "pass": [
+    "GB-001",
+    "GB-010"
+  ]
+}

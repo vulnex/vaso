@@ -495,6 +495,31 @@ describe('GB-014 Mac device tools (0.78)', () => {
   });
 });
 
+describe('GB-014 separate Mail gate (1.2)', () => {
+  const gate = `${ROOT}/mac-device-tools-gate.json`;
+  const mail = `${ROOT}/mac-mail-tools-gate.json`;
+
+  it('device tools on, Mail gate off: Mail sending is inactive and Mail is not listed', async () => {
+    const r = await check('GB-014').run(ctx([cfg({ macMailSendEnabled: true })], makeFs({ platform: 'darwin', files: { [gate]: '{"isOn":true}', [mail]: '{"isOn":false}' } })));
+    expect(r.passed).toBe(false);
+    expect(r.evidence?.map(e => [e.snippet, !!e.mitigated])).toEqual([['isOn: true', false], ['macMailSendEnabled: true', true]]);
+    expect(r.evidence?.[1].detail).toContain('mac-mail-tools-gate.json');
+    expect(r.message).toBe('Grok Bot can use Notes, Contacts, Calendar and Reminders on this computer');
+  });
+
+  it('device tools off, Mail gate on: Mail and Mail sending are active', async () => {
+    const r = await check('GB-014').run(ctx([cfg({ macMailSendEnabled: true })], makeFs({ platform: 'darwin', files: { [gate]: '{"isOn":false}', [mail]: '{"isOn":true}' } })));
+    expect(r.evidence?.map(e => [e.file, !!e.mitigated])).toEqual([[mail, false], [`${ROOT}/settings.json`, false]]);
+    expect(r.message).toBe('Grok Bot can use Mail, and send email, on this computer');
+  });
+
+  it('GB-015 reports a writable Mail gate', async () => {
+    const fs = makeFs({ platform: 'darwin', files: { [mail]: '{"isOn":true}' }, modes: { [mail]: 0o666 } });
+    const r = await check('GB-015').run(ctx([], fs));
+    expect(r.evidence?.some(e => e.file === mail)).toBe(true);
+  });
+});
+
 describe('host-token.json (0.78 development builds)', () => {
   const token = `${ROOT}/host-token.json`;
 
