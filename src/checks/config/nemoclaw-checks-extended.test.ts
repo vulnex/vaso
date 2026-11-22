@@ -153,22 +153,24 @@ describe('CFG-021: NemoClaw GPU Isolation', () => {
     expect(result.passed).toBe(true);
   });
 
-  it('fails when the host GPU is passed into the sandbox', async () => {
+  it('reports (without failing) a sandbox that gets the host GPU', async () => {
     allowPath('/mock-home/.nemoclaw');
     mockReadFile.mockResolvedValue(SANDBOXES_VALID);
     const result = await cfg021.run(makeContext());
-    expect(result.passed).toBe(false);
+    expect(result.passed).toBe(true);
     expect(result.message).toContain('host GPU passed through');
     expect(result.evidence!.some(e => e.detail!.includes('my-assistant'))).toBe(true);
   });
 
   // nimContainer is the local NIM inference server, not GPU isolation
-  it('a NIM inference container does not make GPU passthrough safe', async () => {
+  it('reports GPU passthrough whatever nimContainer says (it is the NIM inference server)', async () => {
     allowPath('/mock-home/.nemoclaw');
     mockReadFile.mockResolvedValue(JSON.stringify({
       sandboxes: { box: { gpuEnabled: true, sandboxGpuEnabled: true, sandboxGpuMode: '1', nimContainer: 'nvcr.io/nim/nemotron:0.1.0' } },
     }));
-    expect((await cfg021.run(makeContext())).passed).toBe(false);
+    const r = await cfg021.run(makeContext());
+    expect(r.passed).toBe(true);
+    expect(r.evidence?.[0].detail).toBe('Sandbox "box": host GPU passed into the sandbox, sandboxGpuMode "1"');
   });
 
   it('reads the effective sandboxGpuEnabled (NemoClaw status: sandboxGpuEnabled ?? gpuEnabled)', async () => {
@@ -176,7 +178,9 @@ describe('CFG-021: NemoClaw GPU Isolation', () => {
     mockReadFile.mockResolvedValue(JSON.stringify({
       sandboxes: { box: { gpuEnabled: false, hostGpuDetected: true, sandboxGpuEnabled: false, sandboxGpuMode: '0', nimContainer: null } },
     }));
-    expect((await cfg021.run(makeContext())).passed).toBe(true);
+    const r = await cfg021.run(makeContext());
+    expect(r.passed).toBe(true);
+    expect(r.evidence ?? []).toEqual([]);
   });
 
   it('passes when no sandboxes defined', async () => {

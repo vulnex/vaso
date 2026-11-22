@@ -66,15 +66,18 @@ export const cfg021 = defineCheck({
       const device = typeof sandbox.sandboxGpuDevice === 'string' && sandbox.sandboxGpuDevice ? ` (device ${sandbox.sandboxGpuDevice})` : '';
       evidence.push({
         file: sandboxesPath,
-        detail: `Sandbox "${name}": host GPU passed into the sandbox${device}${sandbox.sandboxGpuMode ? `, sandboxGpuMode ${JSON.stringify(sandbox.sandboxGpuMode)}` : ''} — the host GPU driver is reachable from agent code`,
+        detail: `Sandbox "${name}": host GPU passed into the sandbox${device}${sandbox.sandboxGpuMode ? `, sandboxGpuMode ${JSON.stringify(sandbox.sandboxGpuMode)}` : ''}`,
       });
     }
 
+    // GPU passthrough is how NemoClaw runs local GPU workloads (sandboxGpuMode
+    // "auto" enables it on a GPU host) — reported, not failed: a missing
+    // nimContainer never meant missing isolation
     return h.result({
-      passed: unsafeCount === 0,
+      passed: true,
       message: unsafeCount === 0
         ? 'No sandbox has the host GPU passed through'
-        : `${unsafeCount} sandbox(es) have the host GPU passed through — enable it (sandboxGpuMode) only when the agent runs local GPU workloads`,
+        : `${unsafeCount} sandbox(es) have the host GPU passed through (sandboxGpuMode) — the host GPU driver is reachable from agent code; turn it off when the agent runs no local GPU workloads`,
       evidence,
     });
   },
