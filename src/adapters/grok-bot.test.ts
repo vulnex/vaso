@@ -170,6 +170,29 @@ describe('Grok Bot Windows user data (dt16)', () => {
   });
 });
 
+describe('Grok Bot macOS version', () => {
+  const APP = '/Applications/Grok Bot.app';
+  const STATUS = `${HOME}/Library/Application Support/Grok Bot/desktop-status.json`;
+  function macFs(files: Record<string, string>, plistVersion?: string): FSProvider {
+    const fs = makeFs({ [`${APP}/Contents/Info.plist`]: '', ...files }, { platform: 'darwin' });
+    (fs as { exec: unknown }).exec = async (cmd: string, args: string[]) =>
+      cmd === 'defaults' && args[1] === `${APP}/Contents/Info.plist` && plistVersion
+        ? { exitCode: 0, stdout: `${plistVersion}\n`, stderr: '' }
+        : { exitCode: 1, stdout: '', stderr: '' };
+    return fs;
+  }
+
+  it('prefers Info.plist over a desktop-status.json left by the previous version', async () => {
+    const [inst] = await grokBotAdapter.detect({ fs: macFs({ [STATUS]: '{"appVersion":"1.2.3"}' }, '1.3.0') });
+    expect(inst.version).toBe('1.3.0');
+  });
+
+  it('falls back to desktop-status.json when Info.plist has no usable version', async () => {
+    expect((await grokBotAdapter.detect({ fs: macFs({ [STATUS]: '{"appVersion":"1.2.3"}' }) }))[0].version).toBe('1.2.3');
+    expect((await grokBotAdapter.detect({ fs: macFs({ [STATUS]: '{"appVersion":"1.2.3"}' }, 'garbage') }))[0].version).toBe('1.2.3');
+  });
+});
+
 describe('Grok Bot .deb version (dt16)', () => {
   const STATUS = [
     'Package: grok-botanist\nStatus: install ok installed\nVersion: 9.9.9\n',

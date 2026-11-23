@@ -280,22 +280,24 @@ async function debVersion(fs: FSProvider): Promise<string | undefined> {
 }
 
 /**
- * Version: desktop-status.json (`appVersion`, written by the running app) or,
- * on macOS, the bundle's Info.plist; a .deb that never ran, from its package
- * metadata (local scans only).
+ * Version. macOS: the bundle's Info.plist — the version that runs next, while
+ * desktop-status.json (`appVersion`, written by the running app) goes stale
+ * after an update until a restart — then desktop-status.json. Linux:
+ * desktop-status.json, else (a .deb that never ran) its package metadata
+ * (local scans only — preferring dpkg would split local and remote scans).
  */
 async function readVersion(userData: string, app: string | undefined, fs: FSProvider): Promise<string | undefined> {
-  try {
-    const status = JSON.parse(await fs.readFile(join(userData, USER_DATA_FILES.status))) as { appVersion?: unknown };
-    if (typeof status.appVersion === 'string' && /^\d+\.\d+/.test(status.appVersion)) return status.appVersion;
-  } catch {}
   if (fs.platform === 'darwin' && app) {
     try {
       const r = await fs.exec('defaults', ['read', `${app}/Contents/Info.plist`, 'CFBundleShortVersionString'], { timeout: 3000 });
       const v = r.stdout.trim();
-      if (r.exitCode === 0 && v) return v;
+      if (r.exitCode === 0 && VERSION.test(v)) return v;
     } catch {}
   }
+  try {
+    const status = JSON.parse(await fs.readFile(join(userData, USER_DATA_FILES.status))) as { appVersion?: unknown };
+    if (typeof status.appVersion === 'string' && /^\d+\.\d+/.test(status.appVersion)) return status.appVersion;
+  } catch {}
   if (fs.platform === 'linux' && app === APP_LINUX) return debVersion(fs);
   return undefined;
 }

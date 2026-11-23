@@ -165,6 +165,23 @@ describe('bundled advisories carry every published feed advisory', () => {
   });
 });
 
+describe('the published advisory feed carries every bundled advisory', () => {
+  // The reverse direction: installs on an older release learn new advisories
+  // only from the feed, so a bundled advisory must be published too. Bundle-only
+  // entries predate every supported release (bundled since v0.4.13 or earlier).
+  const BUNDLE_ONLY = new Set(['CVE-2026-0755', 'VASO-CFG-2026-001']);
+  const published = new Set(readFeed<AdvisoryFeed>('advisory-feed.json').data.advisories.map((a) => a.id));
+
+  it('no bundled advisory is missing from the feed', () => {
+    const missing = buildBundledAdvisoryDatabase().advisories.map((a) => a.id).filter((id) => !published.has(id) && !BUNDLE_ONLY.has(id));
+    expect(missing).toEqual([]);
+  });
+
+  it('bundle-only exemptions are still bundle-only', () => {
+    for (const id of BUNDLE_ONLY) expect(published.has(id), `${id} is published now; drop it from BUNDLE_ONLY`).toBe(false);
+  });
+});
+
 describe('bundled IOC data carries every published feed indicator', () => {
   // Same contract as the advisories: offline installs see only the bundle, so
   // every indicator the signed IOC feed publishes must ship in it too.
@@ -183,6 +200,16 @@ describe('bundled IOC data carries every published feed indicator', () => {
     const bundled = new Set(db[key]);
     expect((feed.data[key] ?? []).filter((v) => !bundled.has(v))).toEqual([]);
   });
+
+  // Threat indicators go both ways: an install on an older release gets new
+  // ones only from the feed. Allowlists and patterns are code — not mirrored.
+  it.each(['c2Ips', 'maliciousDomains', 'fileHashes', 'maliciousPublishers'] as const)(
+    'no bundled %s entry is missing from the feed',
+    (key) => {
+      const published = new Set(feed.data[key] ?? []);
+      expect(db[key].filter((v) => !published.has(v))).toEqual([]);
+    }
+  );
 
   it('no feed maliciousSkillPatterns entry is missing from the bundle', () => {
     const bundled = new Set(db.maliciousSkillPatterns.map((re) => `${re.source}/${re.flags}`));
