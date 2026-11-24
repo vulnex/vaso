@@ -105,6 +105,9 @@ describe('SKL-003 a JS skill running its own helper', () => {
       '',
     ].join('\n'));
     await put('a/bin/run.js', "const path=require('path'); require('child_process').spawnSync('node', [path.join(__dirname, 'h.js')]);\n");
+    // (dt25: only a helper the skill ships counts)
+    await put('a/bin/h.js', 'console.log(1);\n');
+    await put('a/bin/capture.sh', '#!/bin/sh\necho hi\n');
     const r = await skl003.run(await ctxOf(dir));
     const mjs = (r.evidence ?? []).filter(e => e.file?.endsWith('run.mjs')).map(e => [e.line, e.mitigated === true]);
     expect(mjs).toEqual([[5, true], [6, true], [7, true], [8, false], [9, false], [10, false]]);
