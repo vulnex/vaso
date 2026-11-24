@@ -172,6 +172,18 @@ export async function linkedIntoSink(filePath: string, fs: FSProvider): Promise<
   // the probe ships no content from one either (credentialStoreSinks)
   if (credentialStoreOf(filePath)) return filePath;
   if (fs.kind === 'snapshot') return undefined;
+  return sinkLinkTarget(filePath, fs);
+}
+
+/**
+ * The link half of linkedIntoSink, on any provider: where a file that is a
+ * symlink, sits below a linked directory, or is a hard link really is when
+ * that place is sensitive (and not one its own path already names). A
+ * snapshot answers from the links and hard links the probe recorded
+ * (`symlinks`, `hardLinkOf`), so the memory-file checks name the same
+ * target on both sides.
+ */
+export async function sinkLinkTarget(filePath: string, fs: FSProvider): Promise<string | undefined> {
   const named = new Set(classifySensitivePath(filePath));
   const outside = (t: string) => classifySensitivePath(t).some(label => !named.has(label));
   let real: string | undefined;

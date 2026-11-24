@@ -14,6 +14,8 @@ import { opc007 } from '../checks/opencode/opc-007-memory-secret-leak.js';
 import { qc010 } from '../checks/qwen-code/qc-010-memory-secrets.js';
 import { ghc008 } from '../checks/copilot-cli/ghc-008-instructions-secrets.js';
 import { dev007 } from '../checks/devin/dev-007-agents-md-secrets.js';
+import { gem010 } from '../checks/gemini-cli/gem-010-memory-secrets.js';
+import { aba012 } from '../checks/abacus/aba-012-agents-md-secrets.js';
 
 const H = '/home/u';
 
@@ -65,15 +67,20 @@ describe('memory checks leave a memory file linked into a store unread (local)',
   });
   afterEach(() => rmSync(home, { recursive: true, force: true }));
 
-  it('a symlink to a history file and a hard link to a keyring', async () => {
+  // dt25 D3: such a link is a finding of its own (warning), its content never read
+  it('a symlink to a history file and a hard link to a keyring fail with a warning, unread', async () => {
     symlinkSync(join(home, '.zsh_history'), join(home, '.codex', 'AGENTS.md'));
     linkSync(join(home, '.local', 'share', 'keyrings', 'login.keyring'), join(home, '.claude', 'rules', 'h.md'));
     const fs = new HomeFS(home);
     const cdx = await cdx007.run({ installation: { agent: 'codex', installDir: join(home, '.codex'), configFiles: [] }, configs: [], platform: process.platform, fs });
-    expect(cdx.passed).toBe(true);
-    expect(cdx.message).toContain('not read — a link into a credential store or history file');
+    expect(cdx.passed).toBe(false);
+    expect(cdx.severity).toBe('warning');
+    expect(cdx.message).toBe(`${join(home, '.codex', 'AGENTS.md')} links into shell or REPL history (typed commands and passwords: any ~/.*history, .histfile, .lesshst); the agent loads its content`);
     const cc = await cc012.run({ installation: { agent: 'claude-code', installDir: join(home, '.claude'), configFiles: [] }, configs: [], platform: process.platform, fs });
-    expect(cc.passed).toBe(true);
+    expect(cc.passed).toBe(false);
+    expect(cc.severity).toBe('warning');
+    expect(cc.message).toContain(`${join(home, '.claude', 'rules', 'h.md')} links into GNOME keyring credentials`);
+    for (const r of [cdx, cc]) expect(JSON.stringify(r)).not.toMatch(/Q7xLm2|ghp_Ab3d/);
     // an ordinary memory file is still read
     rmSync(join(home, '.codex', 'AGENTS.md'));
     writeFileSync(join(home, '.codex', 'AGENTS.md'), SECRET);
@@ -106,4 +113,65 @@ describe('memory checks say a size-omitted file was not verified', () => {
       expect(result.message).toContain(`${file} (omitted: size) not verified`);
     });
   }
+});
+
+// dt25 D3: the same verdict from a probe snapshot — the probe records the link
+// (`symlinks`) or the hard link (`hardLinkOf`) and withholds the content
+describe('memory checks report a memory file linked into a store from a snapshot', () => {
+  const sensitive = { exists: true, mode: 0o644, content: '', contentOmitted: true, omitted: 'sensitive' as const };
+  const privilege = { uid: 501, username: 'u', isRoot: false, sudoAvailable: false, escalated: false, scannedUsers: ['u'], skippedPaths: [] };
+  function linkSnap(file: string, link: { symlink?: string; hardLinkOf?: string }): SnapshotFSProvider {
+    return new SnapshotFSProvider({
+      version: 1, probeVersion: '1.4.3', hostname: 'h', platform: 'linux', homedir: H, timestamp: '', privilege,
+      files: { [file]: { ...sensitive, ...(link.hardLinkOf ? { hardLinkOf: link.hardLinkOf } : {}) } },
+      directories: {}, commandOutputs: {}, env: {},
+      ...(link.symlink ? { symlinks: { [file]: link.symlink } } : {}),
+    } as ProbeSnapshot);
+  }
+  const cases: Array<[string, typeof cc012, AgentType, string, string]> = [
+    ['CC-012', cc012, 'claude-code', `${H}/.claude`, `${H}/.claude/CLAUDE.md`],
+    ['CDX-007', cdx007, 'codex', `${H}/.codex`, `${H}/.codex/AGENTS.md`],
+    ['OPC-007', opc007, 'opencode', `${H}/.config/opencode`, `${H}/.config/opencode/AGENTS.md`],
+    ['QC-010', qc010, 'qwen-code', `${H}/.qwen`, `${H}/.qwen/QWEN.md`],
+    ['GEM-010', gem010, 'gemini-cli', `${H}/.gemini`, `${H}/.gemini/GEMINI.md`],
+    ['GHC-008', ghc008, 'copilot-cli', `${H}/.copilot`, `${H}/.copilot/copilot-instructions.md`],
+    ['DEV-007', dev007, 'devin', `${H}/.config/devin`, `${H}/.config/devin/AGENTS.md`],
+    ['ABA-012', aba012, 'abacus', `${H}/.abacusai`, `${H}/.abacusai/AGENTS.md`],
+  ];
+  for (const [id, check, agent, installDir, file] of cases) {
+    it(`${id}: symlink to a history file, hard link to a credentials file`, async () => {
+      const run = (fs: SnapshotFSProvider) => check.run({ installation: { agent, installDir, configFiles: [] }, configs: [], platform: 'linux', fs });
+      const sym = await run(linkSnap(file, { symlink: `${H}/.bash_history` }));
+      expect(sym.passed).toBe(false);
+      expect(sym.severity).toBe('warning');
+      expect(sym.message).toBe(`${file} links into shell or REPL history (typed commands and passwords: any ~/.*history, .histfile, .lesshst); the agent loads its content`);
+      expect(sym.evidence).toEqual([{ file, detail: sym.message }]);
+      const hard = await run(linkSnap(file, { hardLinkOf: `${H}/.vault-token` }));
+      expect(hard.passed).toBe(false);
+      expect(hard.severity).toBe('warning');
+      expect(hard.message).toMatch(/links into credentials file \(\.vault-token/);
+    });
+  }
+
+  it('a withheld file whose link the snapshot does not name is "not verified" (a pass, as for other omitted content)', async () => {
+    const r = await cdx007.run({ installation: { agent: 'codex', installDir: `${H}/.codex`, configFiles: [] }, configs: [], platform: 'linux', fs: linkSnap(`${H}/.codex/AGENTS.md`, {}) });
+    expect(r.passed).toBe(true);
+    expect(r.message).toContain(`${H}/.codex/AGENTS.md (omitted: sensitive) not verified`);
+  });
+
+  it('secrets in another memory file keep their severity beside a link', async () => {
+    const fs = new SnapshotFSProvider({
+      version: 1, probeVersion: '1.4.3', hostname: 'h', platform: 'linux', homedir: H, timestamp: '', privilege,
+      files: {
+        [`${H}/.codex/AGENTS.override.md`]: { exists: true, mode: 0o644, content: 'export GITHUB_TOKEN=ghp_Ab3dE5gH7jK9mN1pQ3sT5vX7zB9dF1hJ3lN5\n' },
+        [`${H}/.codex/AGENTS.md`]: sensitive,
+      },
+      directories: {}, commandOutputs: {}, env: {}, symlinks: { [`${H}/.codex/AGENTS.md`]: `${H}/.zsh_history` },
+    } as ProbeSnapshot);
+    const r = await cdx007.run({ installation: { agent: 'codex', installDir: `${H}/.codex`, configFiles: [] }, configs: [], platform: 'linux', fs });
+    expect(r.passed).toBe(false);
+    expect(r.severity).toBe('critical');
+    expect(r.evidence).toHaveLength(2);
+    expect(r.message).toMatch(/^Found 1 potential secret\(s\) in Codex memory files; .*AGENTS\.md links into shell or REPL history/);
+  });
 });

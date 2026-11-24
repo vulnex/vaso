@@ -6,6 +6,7 @@ import { skillFilesOf, skillsDirsOf, noSkillsDirResult } from './skill-files.js'
 import { analyzeSkillSource, readSkillSource } from './skill-source.js';
 import { markTestCode } from '../../analyzers/test-paths.js';
 import { agentBypass } from '../../analyzers/agent-cli-flags.js';
+import { skillWriteFinder } from './skill-writes.js';
 
 export const skl003 = defineCheck({
   id: 'SKL-003',
@@ -46,13 +47,22 @@ export const skl003 = defineCheck({
     // A helper in the script's own folder is a fixed command only while the
     // skill ships it and none of its code writes it: one it downloads or
     // decodes there and runs is code chosen at runtime
-    const notShipped = (file: string, flow: DataFlowResult): string | undefined => {
-      for (const rel of flow.ownHelpers ?? []) {
+    const skillWrite = skillWriteFinder(ctx, files);
+    const notShipped = async (file: string, flow: DataFlowResult): Promise<string | undefined> => {
+      const helpers = flow.ownHelpers ?? [];
+      for (const rel of helpers) {
         const path = join(dirname(file), rel);
         if (writtenFiles.has(path) || writtenDirs.has(dirname(path))) {
           return `runs <skill>/${rel}, a file the skill writes itself (downloaded or decoded code, not a shipped helper)`;
         }
         if (!shipped.has(path)) return `runs <skill>/${rel}, which the skill doesn't ship`;
+      }
+      // dt25 D2 (strict): a shipped helper is a fixed command only while
+      // nothing in the skill can write or download a file — wherever to
+      // (paths aren't followed: a child process's `-o`, a script's redirect)
+      if (helpers.length > 0) {
+        const w = await skillWrite(file);
+        if (w) return `runs <skill>/${helpers[0]}, and the skill can write files (${w}): the helper may not be the one it ships`;
       }
       return undefined;
     };
@@ -81,7 +91,7 @@ export const skl003 = defineCheck({
           // A fixed command (`execFileSync('git', ['status'])`) is a skill doing
           // its job; only commands built at runtime or decoded are dynamic
           // execution. Constant ones stay listed, informationally (as MCP-004).
-          const helper = notShipped(file, flow);
+          const helper = await notShipped(file, flow);
           const constant = flow.command !== undefined && !flow.dynamic && !flow.decoded && !helper;
           // A program started directly (no shell, no interpreter given code)
           // runs with runtime arguments; it isn't code built at runtime

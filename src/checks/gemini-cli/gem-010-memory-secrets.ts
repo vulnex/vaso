@@ -1,7 +1,7 @@
 import { dirname, isAbsolute, join, normalize, relative } from 'node:path';
 import type { Evidence, ScanContext } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
-import { memorySecretSeverity, scanMemorySecrets } from '../../analyzers/memory-secrets.js';
+import { scanMemorySecrets } from '../../analyzers/memory-secrets.js';
 import { MemoryReader } from '../../analyzers/memory-read.js';
 import { recordListFailure } from '../../core/config-loader.js';
 import { relEscapes } from '../../core/utils.js';
@@ -99,8 +99,7 @@ export const gem010 = defineCheck({
         reader.unverified.push(`${file} (not collected: ${notCollectedReason(ctx, file)})`);
       }
     }
-    return h.fromEvidence(evidence, {
-      severity: memorySecretSeverity(evidence),
+    return reader.result(h, evidence, {
       passed: `No secrets detected in Gemini memory files${reader.note()}`,
       failed: (n) => `Found ${n} potential secret(s) in Gemini memory files`,
       fixDescription: 'Remove the secret from the memory file and rotate the credential — these files often end up in git or shared workspaces',

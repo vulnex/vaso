@@ -1,7 +1,7 @@
 import { dirname, extname, join } from 'node:path';
 import type { Evidence, ScanContext } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
-import { memorySecretSeverity, scanMemorySecrets } from '../../analyzers/memory-secrets.js';
+import { scanMemorySecrets } from '../../analyzers/memory-secrets.js';
 import { claudeProjectScope } from '../../adapters/claude-code.js';
 import { pathPresent } from '../../adapters/load-if-present.js';
 import { MemoryReader } from '../../analyzers/memory-read.js';
@@ -57,7 +57,7 @@ export const cc012 = defineCheck({
       found++;
       for (const e of scanMemorySecrets(memoryFile, content)) evidence.push(e);
     }
-    if (found === 0) {
+    if (found === 0 && reader.linked.length === 0) {
       // Omitted by the probe (size): not verified, rather than unreadable
       unread -= reader.unverified.length;
       return h.passed(reader.unverified.length > 0 ? reader.notVerified() : unread > 0
@@ -65,8 +65,7 @@ export const cc012 = defineCheck({
         : 'No CLAUDE.md memory file present');
     }
 
-    return h.fromEvidence(evidence, {
-      severity: memorySecretSeverity(evidence),
+    return reader.result(h, evidence, {
       passed: `No secrets detected in CLAUDE.md memory file${reader.note()}`,
       failed: (n) => `Found ${n} potential secret(s) in CLAUDE.md`,
       fixDescription: 'Remove the secret from CLAUDE.md and rotate the credential — memory files are often committed to git',
