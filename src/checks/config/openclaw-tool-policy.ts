@@ -102,6 +102,8 @@ function availableFor(root: Record<string, unknown>, agentTools: Record<string, 
 export interface OpenclawToolScope {
   /** undefined = the default agent; otherwise the agent entry id */
   agentId?: string;
+  /** The entry's config path (`agents.entries.<id>` / `agents.list[<i>]`); undefined for the default agent. */
+  entryPath?: string;
   config: ParsedConfig;
   /** the agent entry (undefined for the default agent) */
   entry?: Record<string, unknown>;
@@ -124,7 +126,7 @@ export function openclawToolScopes(configs: ParsedConfig[], names: string[]): Op
     const defaults = roster ? undefined : asRecord(getNestedValue(root, 'agents.defaults.tools'));
     out.push({ config, available: availableFor(root, defaults, names) });
     for (const e of entries.filter(x => x.config === config)) {
-      out.push({ agentId: e.id, config, entry: e.data, available: availableFor(root, asRecord(e.data.tools), names) });
+      out.push({ agentId: e.id, entryPath: e.path, config, entry: e.data, available: availableFor(root, asRecord(e.data.tools), names) });
     }
   }
   return out;

@@ -7,16 +7,24 @@ import { getIOCDatabase } from '../../ioc/database.js';
 import { noSkillsDirResult } from '../skills/skill-files.js';
 import { parseFrontmatter } from '../claude-code/subagents.js';
 
-/** Names a metadata object gives its author or publisher (`author`, `author.name`, `publisher`, `metadata.author`). */
-function authorsOf(data: unknown): string[] {
+/**
+ * Names a metadata object gives its author or publisher (`author`,
+ * `author.name`, `publisher`, `metadata.author`) — each a string, an object
+ * with a `name`, or a list of either (`author: [x]`, a YAML block list).
+ */
+export function authorsOf(data: unknown): string[] {
   if (!data || typeof data !== 'object' || Array.isArray(data)) return [];
   const rec = data as Record<string, unknown>;
   const out: string[] = [];
-  const take = (v: unknown) => {
+  const takeOne = (v: unknown) => {
     if (typeof v === 'string') out.push(v);
     else if (v && typeof v === 'object' && !Array.isArray(v) && typeof (v as { name?: unknown }).name === 'string') {
       out.push((v as { name: string }).name);
     }
+  };
+  const take = (v: unknown) => {
+    if (Array.isArray(v)) v.forEach(takeOne);
+    else takeOne(v);
   };
   take(rec.author);
   take(rec.publisher);

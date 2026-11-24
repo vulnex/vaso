@@ -40,18 +40,39 @@ export const cfg006 = defineCheck({
       }
       for (const scope of scopes) {
         if (scope.entry && scope.available && getNestedValue(scope.entry, 'tools.fs.workspaceOnly') === false) {
-          evidence.push({ file: scope.config.filePath, detail: `agents.entries.${scope.agentId}.tools.fs.workspaceOnly: false` });
+          evidence.push({ file: scope.config.filePath, detail: `${scope.entryPath ?? `agents.entries.${scope.agentId}`}.tools.fs.workspaceOnly: false` });
         }
       }
-      const passed = restricted && evidence.length === 0;
+      // Not confined at the root: name each agent with file tools that sets
+      // nothing of its own (the default agent, an entry granting them)
+      const unconfined: Evidence[] = [];
+      if (!restricted) {
+        if (scopes.length === 0) {
+          unconfined.push({ file: ctx.configs[0]?.filePath ?? ctx.installation.installDir, detail: 'tools.fs.workspaceOnly not set' });
+        }
+        for (const scope of scopes) {
+          if (!scope.available) continue;
+          const own = getNestedValue(scope.entry ?? {}, 'tools.fs.workspaceOnly');
+          if (own !== undefined) continue; // true confines it; false is reported above
+          if (scope.entry) {
+            const path = scope.entryPath ?? `agents.entries.${scope.agentId}`;
+            unconfined.push({ file: scope.config.filePath, detail: `${path} has file tools and no tools.fs.workspaceOnly — not set at the root either` });
+          } else if (getNestedValue(scope.config.data, 'tools.fs.workspaceOnly') === undefined) {
+            unconfined.push({ file: scope.config.filePath, detail: 'tools.fs.workspaceOnly not set' });
+          }
+        }
+      }
+      const passed = evidence.length === 0 && (restricted || unconfined.length === 0);
       return h.result({
         passed,
         message: passed
           ? 'File tools are confined to the workspace (tools.fs.workspaceOnly)'
           : evidence.length > 0
             ? `File tools can read and write outside the workspace — ${evidence.map(e => e.detail).join('; ')}`
-            : 'File tools can read and write outside the workspace — tools.fs.workspaceOnly is not set',
-        evidence,
+            : `File tools can read and write outside the workspace — ${unconfined.some(e => e.detail?.startsWith('agents.'))
+              ? unconfined.map(e => e.detail).join('; ')
+              : 'tools.fs.workspaceOnly is not set'}`,
+        evidence: [...evidence, ...unconfined],
       });
     }
 

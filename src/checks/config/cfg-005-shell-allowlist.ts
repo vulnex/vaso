@@ -38,8 +38,11 @@ function openclawExecPolicy(ctx: ScanContext, h: CheckHelpers) {
   }
   const evidence: Evidence[] = [];
   const set: string[] = [];
-  // an agent with exec and no tools.exec of its own runs under the root policy
-  let inheritsRoot = scopes.length === 0;
+  // agents with exec and no tools.exec of their own run under the root
+  // policy: the default agent (no tool policy at all counts as one) and each
+  // entry, named so an override that grants exec is visible
+  let rootInherits = scopes.length === 0;
+  const inheritingEntries: { path: string; file: string }[] = [];
   for (const config of ctx.configs) {
     const policy = execPolicy(getNestedValue(config.data, 'tools.exec'));
     if (!policy) continue;
@@ -52,16 +55,27 @@ function openclawExecPolicy(ctx: ScanContext, h: CheckHelpers) {
   for (const scope of scopes) {
     if (!scope.available) continue;
     const policy = scope.entry ? execPolicy(getNestedValue(scope.entry, 'tools.exec')) : undefined;
-    if (!policy) inheritsRoot = true;
-    else if (policy.value === 'full') {
-      evidence.push({ file: scope.config.filePath, detail: `agents.entries.${scope.agentId}.tools.exec.${policy.key}: full` });
+    const path = scope.entryPath ?? `agents.entries.${scope.agentId}`;
+    if (!policy) {
+      if (scope.entry) inheritingEntries.push({ path, file: scope.config.filePath });
+      else rootInherits = true;
+    } else if (policy.value === 'full') {
+      evidence.push({ file: scope.config.filePath, detail: `${path}.tools.exec.${policy.key}: full` });
     }
   }
-  if (set.length === 0 && inheritsRoot) {
-    evidence.push({
-      file: ctx.configs[0]?.filePath ?? ctx.installation.installDir,
-      detail: 'tools.exec.mode not set — OpenClaw default is "full"',
-    });
+  if (set.length === 0) {
+    if (rootInherits) {
+      evidence.push({
+        file: ctx.configs[0]?.filePath ?? ctx.installation.installDir,
+        detail: 'tools.exec.mode not set — OpenClaw default is "full"',
+      });
+    }
+    for (const e of inheritingEntries) {
+      evidence.push({
+        file: e.file,
+        detail: `${e.path} has the exec tool and no tools.exec.mode — tools.exec.mode not set, OpenClaw default is "full"`,
+      });
+    }
   }
   return h.result({
     passed: evidence.length === 0,

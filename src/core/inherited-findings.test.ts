@@ -89,3 +89,35 @@ describe('host-wide findings', () => {
     expect(oc.results[0].passed).toBe(false);
   });
 });
+
+describe('another detected agent\'s own service or cron job', () => {
+  const job = (mitigated: boolean, line: number, snippet: string) =>
+    ({ file: 'crontab', line, snippet, detail: mitigated ? 'Cron entry runs an installed agent' : 'Cron entry references', mitigated: mitigated || undefined });
+  const cron = (evidence: CheckResult['evidence']): CheckResult =>
+    ({ id: 'RUN-002', name: 'RUN-002', category: 'runtime', severity: evidence!.every(e => e.mitigated) ? 'info' : 'warning', passed: false, message: 'x', evidence });
+  const of = (a: AgentScanResult['agent'], dir: string, results: CheckResult[]): AgentScanResult =>
+    ({ agent: a, installation: { agent: a, installDir: dir, configFiles: [] }, results, score: 0, grade: 'F' });
+
+  it('is reported once, under the agent it runs; unclaimed jobs stay warnings everywhere', () => {
+    const nb = '*/10 * * * * /h/.local/bin/nanobot heartbeat';
+    const evil = '@reboot /opt/x/openclaw-update.sh';
+    const openclaw = of('openclaw', '/h/.openclaw', [cron([job(false, 1, nb), job(false, 2, evil)])]);
+    const nanobot = of('nanobot', '/h/.nanobot', [cron([job(true, 1, nb), job(false, 2, evil)])]);
+    dedupeInheritedFindings([openclaw, nanobot]);
+
+    expect(openclaw.results[0].evidence?.map(e => e.snippet)).toEqual([evil]);
+    expect(openclaw.results[0].severity).toBe('warning');
+    expect(openclaw.results[0].message).toBe('Found 1 suspicious cron entry/entries (1 more runs another detected agent, reported under nanobot (/h/.nanobot))');
+    expect(nanobot.results[0].evidence).toHaveLength(2);
+  });
+
+  it('passes an agent whose only finding is another agent\'s own job', () => {
+    const nb = '*/10 * * * * /h/.local/bin/nanobot heartbeat';
+    const openclaw = of('openclaw', '/h/.openclaw', [cron([job(false, 1, nb)])]);
+    const nanobot = of('nanobot', '/h/.nanobot', [cron([job(true, 1, nb)])]);
+    dedupeInheritedFindings([openclaw, nanobot]);
+    expect(openclaw.results[0]).toMatchObject({ passed: true, inherited: true });
+    expect(openclaw.score).toBe(100);
+    expect(nanobot.results[0]).toMatchObject({ passed: false, severity: 'info' });
+  });
+});

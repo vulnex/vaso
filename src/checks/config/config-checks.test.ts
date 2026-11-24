@@ -750,6 +750,33 @@ describe('deep-test 2026-10-15: OpenClaw 2026.9.4 schema', () => {
     expect(r.evidence?.map(e => e.detail)).toEqual(['agents.entries.ops.tools.exec.mode: full']);
   });
 
+  it('CFG-005/006 name the agent entry whose override grants the tools', async () => {
+    const data = {
+      gateway: { mode: 'local', bind: 'loopback' },
+      tools: { profile: 'messaging' },
+      agents: { list: [{ id: 'x', tools: { profile: 'coding' } }], entries: { y: { tools: { profile: 'coding' } } } },
+    };
+    const r5 = await cfg005.run(oc(data));
+    expect(r5.passed).toBe(false);
+    expect(r5.evidence?.map(e => e.detail)).toEqual([
+      'agents.entries.y has the exec tool and no tools.exec.mode — tools.exec.mode not set, OpenClaw default is "full"',
+      'agents.list[0] has the exec tool and no tools.exec.mode — tools.exec.mode not set, OpenClaw default is "full"',
+    ]);
+    const r6 = await cfg006.run(oc(data));
+    expect(r6.passed).toBe(false);
+    expect(r6.evidence?.map(e => e.detail)).toEqual([
+      'agents.entries.y has file tools and no tools.fs.workspaceOnly — not set at the root either',
+      'agents.list[0] has file tools and no tools.fs.workspaceOnly — not set at the root either',
+    ]);
+    expect(r6.message).toContain('agents.entries.y');
+    // the default agent alone keeps the plain wording
+    const plain = await cfg005.run(oc({ tools: { profile: 'coding' } }));
+    expect(plain.evidence?.map(e => e.detail)).toEqual(['tools.exec.mode not set — OpenClaw default is "full"']);
+    // every agent with file tools confined by its own entry: nothing open
+    const confined = { tools: { profile: 'messaging' }, agents: { entries: { y: { tools: { profile: 'coding', fs: { workspaceOnly: true } } } } } };
+    expect((await cfg006.run(oc(confined))).passed).toBe(true);
+  });
+
   it('CFG-005/006 pass a gateway.mode "remote" client (tools run on the remote gateway)', async () => {
     const data = { gateway: { mode: 'remote', remote: { url: 'wss://gw.example.com' } } };
     expect((await cfg005.run(oc(data))).passed).toBe(true);

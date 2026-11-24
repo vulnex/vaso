@@ -19,15 +19,6 @@ const INTERPRETERS = new Set(['node', 'nodejs', 'bun', 'deno', 'python', 'python
  *  `bun run x.ts`, `deno run x.ts`, `uv run x.py`, `npx tsx x.ts`. */
 const RUNNER_WORDS = new Set(['run', 'exec', 'dlx', 'tsx', 'ts-node']);
 
-/** Standard per-user and system install roots for agent CLIs/packages. */
-function installRoots(home: string): string[] {
-  return [
-    join(home, '.local'), join(home, '.npm-global'), join(home, '.nvm'), join(home, '.bun'),
-    join(home, '.volta'), join(home, '.cargo'), join(home, '.pyenv'), join(home, '.hermes'),
-    '/usr/local', '/usr/bin', '/usr/lib', '/opt/homebrew', '/opt',
-  ];
-}
-
 /** First command + its script argument from a systemd ExecStart= line. */
 export function systemdCommand(unit: string): string[] | undefined {
   const line = unit.split('\n').map(l => l.trim()).find(l => l.startsWith('ExecStart='));
@@ -47,12 +38,6 @@ export function launchdCommand(plist: string): string[] | undefined {
 }
 
 /**
- * The service runs the agent itself when its executable (or, for an
- * interpreter like node, its script) is the installation's CLI or an
- * agent-named program/package under a standard install root. A keyword-named
- * binary in /tmp or ~/Downloads is still suspicious.
- */
-/**
  * The command a service line runs: systemd's `%h` specifier expanded to the
  * home, and a leading `/usr/bin/env [-S] [-i] [VAR=value…]` dropped (it
  * starts the program named after it).
@@ -68,26 +53,93 @@ export function effectiveCommand(parts: string[], home: string): string[] {
   return out;
 }
 
-export function agentExecutable(rawParts: string[], keyword: string, ctx: ScanContext): string | undefined {
+/** Directories no installation owns as a whole: a job under them is not the agent's by location. */
+function sharedDirs(home: string): Set<string> {
+  return new Set([
+    '/', home, join(home, '.local'), join(home, '.local', 'bin'), join(home, '.config'),
+    '/usr', '/usr/bin', '/usr/local', '/usr/local/bin', '/usr/lib', '/bin', '/sbin',
+    '/opt', '/opt/homebrew', '/opt/homebrew/bin', '/tmp', '/var', '/etc',
+  ].map(p => normalize(p)));
+}
+
+/**
+ * The package directory a CLI's resolved path lives in: `…/node_modules/<pkg>`
+ * (or `@scope/pkg`) for an npm shim, the venv for a Python entry point.
+ */
+export function cliPackageRoot(real: string): string | undefined {
+  const parts = normalize(real).split('/');
+  const nm = parts.lastIndexOf('node_modules');
+  if (nm >= 0 && nm + 1 < parts.length - 1) {
+    const end = parts[nm + 1].startsWith('@') ? nm + 3 : nm + 2;
+    if (end <= parts.length - 1) return parts.slice(0, end).join('/');
+  }
+  const bin = parts.lastIndexOf('bin');
+  if (bin > 0 && /^\.?venv$/.test(parts[bin - 1])) return parts.slice(0, bin).join('/');
+  return undefined;
+}
+
+/**
+ * The installation's own executables (its CLI, every other copy, and what
+ * each resolves to) and directories (its install dir, the CLI's package).
+ * Only the installation's own paths are resolved — a job's command is judged
+ * literally, so a local scan and a probe snapshot agree.
+ */
+async function installationPaths(ctx: ScanContext): Promise<{ binaries: Set<string>; dirs: string[] }> {
+  const home = ctx.fs.homedir();
+  const shared = sharedDirs(home);
+  const binaries = new Set<string>();
+  const dirs: string[] = [];
+  const addDir = (d: string | undefined) => {
+    if (d && d.startsWith('/') && !shared.has(normalize(d))) dirs.push(normalize(d));
+  };
+  addDir(ctx.installation.installDir);
+  const clis = [ctx.installation.cliBinary, ...(ctx.installation.otherInstalls ?? []).map(o => o.path)]
+    .filter((p): p is string => !!p && p.startsWith('/'));
+  for (const cli of clis) {
+    binaries.add(normalize(cli));
+    let real: string | undefined;
+    try { real = await ctx.fs.realpath(cli); } catch {}
+    if (real) {
+      binaries.add(normalize(real));
+      addDir(cliPackageRoot(real));
+    }
+  }
+  return { binaries, dirs };
+}
+
+/**
+ * The executable (or, for an interpreter like node, its script) when the
+ * command runs the scanned installation itself: its CLI binary (or another
+ * copy of it), or a program inside its install dir or CLI package. A
+ * keyword-named program anywhere else — even under /usr/local or /opt — is
+ * not the agent's: names are not evidence.
+ */
+export async function agentExecutable(rawParts: string[], ctx: ScanContext): Promise<string | undefined> {
   const home = ctx.fs.homedir();
   const parts = effectiveCommand(rawParts, home);
   if (parts.length === 0) return undefined;
-  const roots = [...installRoots(home), ctx.installation.installDir];
-  const underRoot = (p: string) => roots.some(r => normalize(p).startsWith(`${normalize(r)}/`));
   const exe = parts[0];
   const script = INTERPRETERS.has(basename(exe))
     ? parts.slice(1).find(a => !a.startsWith('-') && !RUNNER_WORDS.has(a))
     : undefined;
-  const target = script ?? exe;
+  // an interpreter running a script file is judged by the script; one
+  // running a module (`python -m pkg`) by the interpreter itself
+  const target = script?.startsWith('/') ? script : exe;
   if (!target.startsWith('/')) return undefined;
-  if (ctx.installation.cliBinary && normalize(target) === normalize(ctx.installation.cliBinary)) return target;
-  // A script inside the scanned installation (Lyrie's `bun run
-  // <checkout>/scripts/daemon.ts`) is the agent itself, whatever the
-  // checkout directory is called.
-  const installDir = normalize(ctx.installation.installDir);
-  if (script && installDir !== '/' && normalize(script).startsWith(`${installDir}/`)) return target;
-  const named = target.toLowerCase().split('/').some(seg => seg.includes(keyword));
-  return named && underRoot(target) ? target : undefined;
+  const { binaries, dirs } = await installationPaths(ctx);
+  const ownPath = (p: string) => binaries.has(p) || dirs.some(d => p.startsWith(`${d}/`));
+  const t = normalize(target);
+  if (ownPath(t)) return target;
+  // Another link to the CLI (`~/.local/bin/openclaw` → the npm package): only
+  // a program named like the CLI is resolved — those locations are CLI
+  // candidates the probe collects, so a snapshot resolves them too
+  const cliNames = new Set([...binaries].map(b => basename(b)));
+  if (cliNames.has(basename(t))) {
+    try {
+      if (ownPath(normalize(await ctx.fs.realpath(t)))) return target;
+    } catch {}
+  }
+  return undefined;
 }
 
 async function classify(
@@ -98,31 +150,19 @@ async function classify(
   try {
     parts = parse(await ctx.fs.readFile(file));
   } catch {}
-  const own = parts ? agentExecutable(parts, keyword, ctx) : undefined;
+  const own = parts ? await agentExecutable(parts, ctx) : undefined;
   // the framework the unit names ("claw" alone would say little)
   const name = agentsNamedIn(basename(file))[0] ?? keyword;
   if (own) {
     return {
       file,
-      detail: `${kind} for an installed agent ("${name}") — runs ${own}`,
+      detail: `${kind} for an installed agent ("${ctx.installation.agent}") — runs ${own}`,
       mitigated: true,
     };
   }
   const shown = parts ? effectiveCommand(parts, ctx.fs.homedir()) : undefined;
   const runs = shown && shown.length > 0 ? ` — runs ${shown.slice(0, 2).join(' ')}` : '';
-  return { file, detail: `${kind} references "${name}"${runs}, not a recognized agent install location` };
-}
-
-/**
- * A service that runs another framework's own install is reported under that
- * framework's installation only — one unit must not appear under every agent
- * on the host. Suspicious units (not running a recognized install) and units
- * naming no known framework are reported under each agent.
- */
-export function keep(evidence: Evidence[], entry: string, ctx: ScanContext, item: Evidence): void {
-  const owners = agentsNamedIn(entry);
-  if (item.mitigated && owners.length > 0 && !owners.includes(ctx.installation.agent)) return;
-  evidence.push(item);
+  return { file, detail: `${kind} references "${name}"${runs}, not the installed agent's own program` };
 }
 
 export const run001 = defineCheck({
@@ -152,7 +192,7 @@ export const run001 = defineCheck({
             const lower = entry.toLowerCase();
             for (const keyword of SUSPICIOUS_KEYWORDS) {
               if (lower.includes(keyword)) {
-                keep(evidence, entry, ctx, await classify(ctx, join(dir, entry), keyword, 'LaunchAgent', launchdCommand));
+                evidence.push(await classify(ctx, join(dir, entry), keyword, 'LaunchAgent', launchdCommand));
                 break;
               }
             }
@@ -175,7 +215,7 @@ export const run001 = defineCheck({
             const lower = entry.toLowerCase();
             for (const keyword of SUSPICIOUS_KEYWORDS) {
               if (lower.includes(keyword)) {
-                keep(evidence, entry, ctx, await classify(ctx, join(dir, entry), keyword, 'Systemd service', systemdCommand));
+                evidence.push(await classify(ctx, join(dir, entry), keyword, 'Systemd service', systemdCommand));
                 break;
               }
             }

@@ -80,12 +80,32 @@ describe('RUN-001: Unauthorized LaunchAgents', () => {
     expect(result.passed).toBe(false);
   });
 
-  it('leaves another framework\'s own service to that framework (Linux)', async () => {
+  it('reports a service that is not the installation\'s own program — names are not evidence (Linux)', async () => {
     const fs = makeMockedFs({ '/home/test/.config/systemd/user': ['nanobot-gateway.service'] }, 'linux');
     (fs.readFile as ReturnType<typeof vi.fn>).mockResolvedValue(
       '[Service]\nExecStart=/home/test/.local/bin/nanobot gateway\n');
+    // scanned as OpenClaw: the unit is not OpenClaw's (the engine leaves it
+    // to nanobot when nanobot is detected and claims it — dedupeOwnPersistence)
     const result = await run001.run(makeRunCtx(fs, 'linux'));
-    expect(result.passed).toBe(true);
+    expect(result.passed).toBe(false);
+    expect(result.severity).toBe('warning');
+    // scanned as the nanobot installation whose CLI it runs: info
+    const ctx = makeRunCtx(fs, 'linux');
+    ctx.installation = { agent: 'nanobot', installDir: '/home/test/.nanobot', cliBinary: '/home/test/.local/bin/nanobot', configFiles: [] };
+    const own = await run001.run(ctx);
+    expect(own.evidence?.[0].mitigated).toBe(true);
+    expect(own.severity).toBe('info');
+  });
+
+  it('recognizes the CLI package an npm shim resolves to (node …/node_modules/openclaw/dist/index.js)', async () => {
+    const fs = makeMockedFs({ '/home/test/.config/systemd/user': ['openclaw-gateway.service'] }, 'linux');
+    (fs.readFile as ReturnType<typeof vi.fn>).mockResolvedValue(
+      '[Service]\nExecStart=/usr/bin/node /home/test/.npm-global/lib/node_modules/openclaw/dist/index.js gateway\n');
+    (fs.realpath as ReturnType<typeof vi.fn>).mockResolvedValue('/home/test/.npm-global/lib/node_modules/openclaw/openclaw.mjs');
+    const ctx = makeRunCtx(fs, 'linux');
+    ctx.installation.cliBinary = '/home/test/.npm-global/bin/openclaw';
+    const r = await run001.run(ctx);
+    expect(r.evidence?.[0].mitigated).toBe(true);
   });
 
   it('recognizes an interpreter running the install\'s own script (bun run / npx tsx)', async () => {
@@ -193,13 +213,33 @@ describe('RUN-002: Suspicious Cron Entries', () => {
     expect(result.severity).toBe('warning');
   });
 
-  it("reports an installed agent's own job as info, under that agent only", async () => {
-    const ctx = makeCronCtx('*/10 * * * * /usr/local/bin/nanobot heartbeat\n@reboot /home/test/.local/bin/openclaw gateway');
+  it("reports the installation's own job as info", async () => {
+    const ctx = makeCronCtx('@reboot /home/test/.local/bin/openclaw gateway\n0 3 * * * /home/test/.openclaw/scripts/backup.sh');
+    ctx.installation.cliBinary = '/home/test/.local/bin/openclaw';
     const r = await run002.run(ctx);
-    // the nanobot job belongs to nanobot's installation; openclaw's own job is info
-    expect(r.evidence?.map(e => e.detail)).toEqual(['Cron entry runs an installed agent — /home/test/.local/bin/openclaw']);
+    expect(r.evidence?.map(e => e.detail)).toEqual([
+      'Cron entry runs an installed agent — /home/test/.local/bin/openclaw',
+      'Cron entry runs an installed agent — /home/test/.openclaw/scripts/backup.sh',
+    ]);
     expect(r.severity).toBe('info');
     expect(r.message).toContain('all run an installed agent');
+  });
+
+  it('judges a job by its path, not its name — never drops one', async () => {
+    const ctx = makeCronCtx([
+      '@reboot /usr/local/bin/clawhelper',
+      '@reboot /opt/x/openclaw-update.sh',
+      '0 1 * * * /opt/lyrie/bin/lyrie-backup',
+      '0 2 * * * /usr/local/bin/atomic-agent-sync',
+      '0 4 * * * /usr/bin/hermes-agent run',
+      '*/10 * * * * /usr/local/bin/nanobot heartbeat',
+      '@reboot /home/test/.local/bin/openclaw gateway',
+    ].join('\n'));
+    ctx.installation.cliBinary = '/home/test/.local/bin/openclaw';
+    const r = await run002.run(ctx);
+    expect(r.severity).toBe('warning');
+    expect(r.evidence?.map(e => !!e.mitigated)).toEqual([false, false, false, false, false, false, true]);
+    expect(r.message).toBe('Found 6 suspicious cron entry/entries');
   });
 
   it('covers Lyrie, Atomic Agent and OpenShell too', async () => {
@@ -381,13 +421,25 @@ describe('RUN-004: Docker Security', () => {
 // read as malware persistence; a keyword-named binary elsewhere still does.
 describe('RUN-001: agent services vs. suspicious persistence', () => {
   const UNIT_DIR = '/home/test/.config/systemd/user';
+  // OpenClaw installed with npm under nvm; ~/.local/bin/openclaw links to it
+  const PKG = '/home/test/.nvm/versions/node/v22.22.1/lib/node_modules/openclaw';
+  const LINKS: Record<string, string> = {
+    '/home/test/.nvm/versions/node/v22.22.1/bin/openclaw': `${PKG}/openclaw.mjs`,
+    '/home/test/.local/bin/openclaw': `${PKG}/openclaw.mjs`,
+  };
   function linuxFs(units: Record<string, string>): FSProvider {
     return {
       readdir: vi.fn(async (dir: string) => (dir === UNIT_DIR ? Object.keys(units) : [])),
       readFile: vi.fn(async (p: string) => units[p.slice(UNIT_DIR.length + 1)] ?? ''),
+      realpath: vi.fn(async (p: string) => { if (LINKS[p]) return LINKS[p]; throw new Error('ENOENT'); }),
       homedir: () => '/home/test',
       platform: 'linux',
     } as unknown as FSProvider;
+  }
+  function openclawCtx(fs: FSProvider): ScanContext {
+    const ctx = makeRunCtx(fs, 'linux');
+    ctx.installation.cliBinary = '/home/test/.nvm/versions/node/v22.22.1/bin/openclaw';
+    return ctx;
   }
 
   it('reports the installed OpenClaw gateway (CLI wrapper and node forms) as info', async () => {
@@ -396,7 +448,7 @@ describe('RUN-001: agent services vs. suspicious persistence', () => {
       'openclaw-gateway.service.bak':
         '[Service]\nExecStart=/usr/bin/node /home/test/.nvm/versions/node/v22.22.1/lib/node_modules/openclaw/dist/index.js gateway\n',
     });
-    const result = await run001.run(makeRunCtx(fs, 'linux'));
+    const result = await run001.run(openclawCtx(fs));
     expect(result.passed).toBe(false);
     expect(result.severity).toBe('info');
     expect(result.message).toContain('all run an installed agent');
@@ -408,7 +460,7 @@ describe('RUN-001: agent services vs. suspicious persistence', () => {
       'openclaw-gateway.service': '[Service]\nExecStart=/home/test/.local/bin/openclaw gateway\n',
       'clawbot-update.service': '[Service]\nExecStart=/tmp/.x/clawbot --daemon\n',
     });
-    const result = await run001.run(makeRunCtx(fs, 'linux'));
+    const result = await run001.run(openclawCtx(fs));
     expect(result.severity).toBe('warning');
     expect(result.message).toBe('Found 1 suspicious persistence mechanism(s)');
     const bad = result.evidence!.find(e => !e.mitigated)!;
@@ -419,7 +471,7 @@ describe('RUN-001: agent services vs. suspicious persistence', () => {
     const fs = linuxFs({
       'openclaw-gateway.service': '[Service]\nExecStart=/usr/bin/env NODE_ENV=production node %h/.nvm/versions/node/v22.22.1/lib/node_modules/openclaw/dist/index.js gateway\n',
     });
-    const result = await run001.run(makeRunCtx(fs, 'linux'));
+    const result = await run001.run(openclawCtx(fs));
     expect(result.evidence?.[0].mitigated).toBe(true);
     expect(result.evidence?.[0].detail).toBe('Systemd service for an installed agent ("openclaw") — runs /home/test/.nvm/versions/node/v22.22.1/lib/node_modules/openclaw/dist/index.js');
   });
