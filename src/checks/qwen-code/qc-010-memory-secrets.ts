@@ -1,7 +1,7 @@
 import { join } from 'node:path';
 import type { Evidence, ScanContext } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
-import { memorySecretSeverity, scanMemorySecrets } from '../../analyzers/memory-secrets.js';
+import { scanMemorySecrets } from '../../analyzers/memory-secrets.js';
 import { MemoryReader } from '../../analyzers/memory-read.js';
 
 // QWEN.md is the default context ("memory") file, AGENTS.md the other one
@@ -50,8 +50,7 @@ export const qc010 = defineCheck({
     for (const filename of contextFileNames(ctx)) {
       await scanFile(ctx, join(ctx.installation.installDir, filename), reader, evidence);
     }
-    return h.fromEvidence(evidence, {
-      severity: memorySecretSeverity(evidence),
+    return reader.result(h, evidence, {
       passed: `No secrets detected in Qwen memory files${reader.note()}`,
       failed: (n) => `Found ${n} potential secret(s) in Qwen memory files`,
       fixDescription: 'Remove the secret from the memory file and rotate the credential — these files often end up in git',

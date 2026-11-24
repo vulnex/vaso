@@ -1,7 +1,7 @@
 import { dirname, join } from 'node:path';
 import type { Evidence, ScanContext } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
-import { memorySecretSeverity, scanMemorySecrets } from '../../analyzers/memory-secrets.js';
+import { scanMemorySecrets } from '../../analyzers/memory-secrets.js';
 import { MemoryReader } from '../../analyzers/memory-read.js';
 import { recordListFailure } from '../../core/config-loader.js';
 
@@ -86,12 +86,11 @@ export const dev007 = defineCheck({
       scanContent(file, content, evidence);
     }
 
-    if (scanned === 0) {
+    if (scanned === 0 && reader.linked.length === 0) {
       return h.passed(reader.unverified.length > 0 ? reader.notVerified() : 'No Devin rules files present');
     }
 
-    return h.fromEvidence(evidence, {
-      severity: memorySecretSeverity(evidence),
+    return reader.result(h, evidence, {
       passed: `No secrets detected in ${scanned} Devin rules file(s)${reader.note()}`,
       failed: (n) => `Found ${n} potential secret(s) in Devin rules files`,
       fixDescription: 'Remove the secret from the rules file and rotate the credential — rules files are injected into every session prompt',

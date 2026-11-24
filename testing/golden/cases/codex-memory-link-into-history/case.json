@@ -1,0 +1,7 @@
+{
+  "agent": "codex",
+  "source": "dt25 rv g9 (fx2), user decision D3: ~/.codex/AGENTS.md is a symlink to ~/.bash_history — Codex loads the shell history as instructions; reported as a warning without reading it, the same locally and from a probe snapshot",
+  "fail": {
+    "CDX-007": "warning"
+  }
+}

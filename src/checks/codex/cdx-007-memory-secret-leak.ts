@@ -1,7 +1,7 @@
 import { dirname, join } from 'node:path';
 import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
-import { memorySecretSeverity, scanMemorySecrets } from '../../analyzers/memory-secrets.js';
+import { scanMemorySecrets } from '../../analyzers/memory-secrets.js';
 import { MemoryReader } from '../../analyzers/memory-read.js';
 
 // AGENTS.override.md replaces AGENTS.md at its level when present, so either
@@ -44,8 +44,7 @@ export const cdx007 = defineCheck({
       await scanFile(join(dir, filename), reader, evidence);
     }
 
-    return h.fromEvidence(evidence, {
-      severity: memorySecretSeverity(evidence),
+    return reader.result(h, evidence, {
       passed: `No secrets detected in Codex memory files${reader.note()}`,
       failed: (n) => `Found ${n} potential secret(s) in Codex memory files`,
       fixDescription: 'Remove the secret from the memory file and rotate the credential — these files are often committed to git',

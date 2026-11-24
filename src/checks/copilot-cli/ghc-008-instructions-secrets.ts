@@ -1,7 +1,7 @@
 import { join } from 'node:path';
 import type { Evidence, ScanContext } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
-import { memorySecretSeverity, scanMemorySecrets } from '../../analyzers/memory-secrets.js';
+import { scanMemorySecrets } from '../../analyzers/memory-secrets.js';
 import { MemoryReader } from '../../analyzers/memory-read.js';
 import { recordListFailure } from '../../core/config-loader.js';
 import { isExcludedPath } from '../../core/utils.js';
@@ -73,8 +73,7 @@ export const ghc008 = defineCheck({
       : join(ctx.installation.installDir, 'instructions');
     for (const file of await instructionFiles(ctx, instrDir)) await scanFile(file, reader, evidence);
 
-    return h.fromEvidence(evidence, {
-      severity: memorySecretSeverity(evidence),
+    return reader.result(h, evidence, {
       passed: `No secrets detected in Copilot instruction files${reader.note()}`,
       failed: (n) => `Found ${n} potential secret(s) in Copilot instruction files`,
       fixDescription: 'Remove the secret and rotate the credential — instruction files often end up in git',

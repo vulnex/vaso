@@ -3,7 +3,7 @@ import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
 import { scanMemorySecrets } from '../../analyzers/memory-secrets.js';
 import { isProjectInstall } from './shared.js';
-import { readTextIfPresent } from '../../adapters/load-if-present.js';
+import { MemoryReader } from '../../analyzers/memory-read.js';
 
 export const aba012 = defineCheck({
   id: 'ABA-012',
@@ -21,17 +21,19 @@ export const aba012 = defineCheck({
 
     const evidence: Evidence[] = [];
     let scanned = 0;
+    const reader = new MemoryReader(ctx.fs);
     for (const file of files) {
       // Present but unreadable: reported as CONFIG-LOAD
-      const content = await readTextIfPresent(file, ctx.fs);
+      const content = await reader.read(file);
       if (content === undefined) continue;
       scanned++;
       // the same key formats, keyed values and entropy scan as every other memory file
       for (const e of scanMemorySecrets(file, content, 'AGENTS.md')) evidence.push(e);
     }
 
-    if (scanned === 0) return h.passed('No AGENTS.md files for this Abacus.AI installation');
-    return h.fromEvidence(evidence, {
+    if (scanned === 0 && reader.linked.length === 0) return h.passed('No AGENTS.md files for this Abacus.AI installation');
+    return reader.result(h, evidence, {
+      severity: 'warning',
       passed: `No secrets detected in ${scanned} AGENTS.md file(s)`,
       failed: (n) => `Found ${n} potential secret(s) in AGENTS.md`,
       fixDescription: 'Remove the secret from AGENTS.md and rotate it — the file is sent to the model with every new conversation (disable with autoLoadAgentsMd: false)',
