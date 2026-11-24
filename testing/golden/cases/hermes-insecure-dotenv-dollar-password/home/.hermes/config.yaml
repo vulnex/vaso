@@ -1,0 +1,21 @@
+model:
+  default: anthropic/claude-opus-4.6
+  provider: auto
+  base_url: https://openrouter.ai/api/v1
+approvals:
+  mode: smart
+  timeout: 300
+security:
+  tirith_enabled: true
+terminal:
+  backend: docker
+platforms:
+  api_server:
+    enabled: true
+    extra:
+      host: 127.0.0.1
+      port: 8642
+mcp_servers:
+  fs:
+    command: npx
+    args: ["-y", "@modelcontextprotocol/server-filesystem@1.2.3"]
