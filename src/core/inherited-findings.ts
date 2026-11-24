@@ -127,7 +127,8 @@ function evidenceKey(e: Evidence): string {
 }
 
 /** Service and cron checks: a unit/job is judged against the scanned installation's own paths. */
-const PERSISTENCE_CHECKS = new Set(['RUN-001', 'RUN-002']);
+export const PERSISTENCE_CHECK_IDS: ReadonlySet<string> = new Set(['RUN-001', 'RUN-002']);
+const PERSISTENCE_CHECKS = PERSISTENCE_CHECK_IDS;
 
 function persistenceKey(e: Evidence): string {
   return `${e.file}\u0000${e.line ?? ''}\u0000${e.snippet ?? ''}`;

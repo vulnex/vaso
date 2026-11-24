@@ -7,7 +7,7 @@ import type { MCPConfig, MCPConfigLoadError, MCPServerSource } from '../mcp/type
 import type { FSProvider } from './fs-provider.js';
 import { LocalFSProvider } from './local-fs-provider.js';
 import { computeScore, scoreToGrade, summarizeResults, aggregateScore, meanScore } from './scoring.js';
-import { dedupeInheritedFindings } from './inherited-findings.js';
+import { dedupeInheritedFindings, dedupeOwnPersistence, PERSISTENCE_CHECK_IDS } from './inherited-findings.js';
 import { dedupePermissionFindings } from './duplicate-findings.js';
 import { collectSkillInventory } from '../inventory/skills.js';
 import { MAX_SNIPPET, truncateSnippet } from './patterns.js';
@@ -79,6 +79,10 @@ export const MAX_EVIDENCE = 200;
  * of 150k-line files made a 0.5 GB JSON report and crashed SARIF). The
  * result's message keeps the full count.
  */
+function hasSuspiciousPersistence(a: AgentScanResult): boolean {
+  return a.results.some(r => PERSISTENCE_CHECK_IDS.has(r.id) && !r.passed && (r.evidence ?? []).some(e => !e.mitigated));
+}
+
 export function capSnippets(result: CheckResult): CheckResult {
   const evidence = result.evidence;
   if (!evidence) return result;
@@ -301,6 +305,15 @@ export class ScanEngine {
     this.foldConfigLoadErrors(agents, configLoadErrors);
     dedupeConfigLoadFindings(agents);
     dedupeInheritedFindings(agents);
+    // With -a, the services and cron jobs of the other detected agents still
+    // belong to them: judge them for those agents too, so each one's own
+    // items leave the scanned agent's warnings, as in a full scan
+    if (options.agentFilter) {
+      const others = installations.filter(i => i.agent !== options.agentFilter);
+      if (others.length > 0 && agents.some(hasSuspiciousPersistence)) {
+        dedupeOwnPersistence([...agents, ...await Promise.all(others.map(i => this.persistenceResults(i)))]);
+      }
+    }
 
     // 3. Compute overall results
     const allResults = agents.flatMap(a => a.results);
@@ -375,6 +388,16 @@ export class ScanEngine {
       score,
       grade: scoreToGrade(score),
     };
+  }
+
+  /** The service and cron checks of an installation the scan doesn't report
+   *  (`-a` selected another agent): only to learn which items it owns. */
+  private async persistenceResults(installation: AgentInstallation): Promise<AgentScanResult> {
+    const context: ScanContext = { installation, configs: installation.configFiles, platform: this.fs.platform, fs: this.fs };
+    const checks = this.checks.getApplicable(installation.agent, this.fs.platform).filter(c => PERSISTENCE_CHECK_IDS.has(c.id));
+    const settled = await Promise.allSettled(checks.map(check => runCheck(check, context, this.checkTimeoutMs)));
+    const results = settled.flatMap(r => (r.status === 'fulfilled' ? [r.value] : []));
+    return { agent: installation.agent, version: installation.version, installation, results, score: 0, grade: scoreToGrade(0) };
   }
 
   /** Surface config files that exist but could not be read/parsed during
