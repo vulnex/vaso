@@ -19,6 +19,7 @@ for a in "$@"; do last="$a"; done
 case "$last" in
   -N) echo "${SSH_NOTICE}" >&2; exit 0 ;;
   "uname -s && uname -m") printf 'Linux\\nx86_64\\n'; exit 0 ;;
+  *"mktemp -d"*) [ -n "$FAKE_MKTEMP_FAIL" ] && exit 0; echo /tmp/vaso-probe.FakeHost123; exit 0 ;;
   *--manifest*) cat "$FAKE_PROBE_OUT"; exit 0 ;;
 esac
 exit 0
@@ -49,13 +50,13 @@ describe.skipIf(process.platform === 'win32')('E2E: remote probe output is valid
     await rm(root, { recursive: true, force: true });
   });
 
-  async function scanWith(probeOutput: string, scanArgs: string[], globalArgs: string[] = []) {
+  async function scanWith(probeOutput: string, scanArgs: string[], globalArgs: string[] = [], extraEnv: Record<string, string> = {}) {
     const out = join(root, `probe-out-${Math.random().toString(36).slice(2)}.txt`);
     await writeFile(out, probeOutput);
     return new Promise<{ exitCode: number; stderr: string; stdout: string }>((done, fail) => {
       const child = spawn(process.execPath, [join(root, 'dist', 'cli.js'), ...globalArgs, 'scan', '--host', 'u@fake.test', '--ssh-timeout', '5', ...scanArgs], {
         cwd: join(root, 'home'),
-        env: { ...process.env, HOME: join(root, 'home'), PATH: `${bin}:${process.env.PATH}`, FAKE_PROBE_OUT: out, NO_COLOR: '1', VASO_SKIP_IOC_UPDATE: '1' },
+        env: { ...process.env, HOME: join(root, 'home'), PATH: `${bin}:${process.env.PATH}`, FAKE_PROBE_OUT: out, NO_COLOR: '1', VASO_SKIP_IOC_UPDATE: '1', ...extraEnv },
         stdio: ['ignore', 'pipe', 'pipe'],
       });
       let stdout = '';
@@ -78,6 +79,13 @@ describe.skipIf(process.platform === 'win32')('E2E: remote probe output is valid
     expect(run.exitCode).toBe(3);
     expect(run.stderr).toMatch(/u@fake\.test returned unusable probe output, host not scanned/);
     expect(run.stderr).toMatch(why);
+  }, 60_000);
+
+  // dt25 g9-F1: nothing is uploaded unless the target made a private directory
+  it('a host that cannot make a private temp directory is not scanned, exit 3', async () => {
+    const run = await scanWith(valid, [], [], { FAKE_MKTEMP_FAIL: '1' });
+    expect(run.exitCode).toBe(3);
+    expect(run.stderr).toMatch(/could not create a private temporary directory for the probe/);
   }, 60_000);
 
   it('valid probe output scans', async () => {
