@@ -1783,9 +1783,9 @@ func (c *collector) collectUnlistableSkills(snapshot *ProbeSnapshot, pattern str
 // collectNonUTF8Names collects what a `<root>/**` glob skips: the glob never
 // enters a directory whose name is not valid UTF-8 (Linux names are bytes),
 // so a skill dir named `\xfe` hid its SKILL.md from remote scans while a local
-// walk read it. Such paths are walked here, without following links, and keyed
-// as the JSON encoder writes them (invalid bytes become U+FFFD), which is how
-// the CLI lists them locally. macOS and Windows reject such names.
+// walk read it. Such paths are walked here, without following links; the
+// snapshot writes their names without loss (`\udcXX` per byte, fs_names.go),
+// which is how the CLI lists them locally. macOS and Windows reject such names.
 func (c *collector) collectNonUTF8Names(snapshot *ProbeSnapshot, pattern string) {
 	if runtime.GOOS == "darwin" || runtime.GOOS == "windows" || !strings.HasSuffix(filepath.ToSlash(pattern), "/**") {
 		return

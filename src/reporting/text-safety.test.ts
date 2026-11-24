@@ -138,3 +138,11 @@ describe('line and paragraph separators, SARIF values, every JSON (dt23 N8)', ()
     expect(JSON.parse(json)[0].agentName).toBe('a\u202eb\u200bc\u{e0041}');
   });
 });
+
+describe('file-name bytes that are not UTF-8 (dt25 g9-F4)', () => {
+  it('are shown as the byte, so two such names read apart; pairs (astral characters) are kept', () => {
+    expect(escapeControlChars('tool/\udcfe.js tool/\udcff.js')).toBe('tool/\\xfe.js tool/\\xff.js');
+    expect(escapeControlChars('caf\udce9 \ud83d\ude00')).toBe('caf\\xe9 \ud83d\ude00');
+    expect(stripXmlInvalid('a\udcfe')).toBe('a\\xfe');
+  });
+});
