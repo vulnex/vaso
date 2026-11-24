@@ -38,3 +38,16 @@ export async function claudeManagedLocks(ctx: ScanContext): Promise<ManagedLocks
   }
   return locks;
 }
+
+/**
+ * Why `disableAllHooks` stops what `file` defines, or undefined. A managed
+ * `disableAllHooks` stops everything; one in a user, project or local file
+ * stops what those scopes define, not what managed settings define. Claude
+ * Code's settings schema: "Disable all hooks and statusLine execution".
+ */
+export function allHooksOffReason(ctx: ScanContext, locks: ManagedLocks, file: string): string | undefined {
+  if (locks.allHooksOff) return `${locks.allHooksOff} sets disableAllHooks`;
+  if (locks.managedFiles.has(file)) return undefined;
+  const scoped = ctx.configs.find(c => !locks.managedFiles.has(c.filePath) && (c.data as Record<string, unknown> | undefined)?.disableAllHooks === true);
+  return scoped ? `${scoped.filePath} sets disableAllHooks` : undefined;
+}

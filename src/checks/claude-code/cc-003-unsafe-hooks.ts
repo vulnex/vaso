@@ -5,7 +5,7 @@ import { shellCommandWrapper } from '../../mcp/shell-wrapper.js';
 import { hookCommandRisks, hookExpansion, httpHookRisks, topTier, hookSnippet } from '../../analyzers/hook-commands.js';
 import { customCommandRuns } from './custom-commands.js';
 import { readSubagents } from './subagents.js';
-import { claudeManagedLocks } from './managed-locks.js';
+import { allHooksOffReason, claudeManagedLocks } from './managed-locks.js';
 
 // ${CLAUDE_PROJECT_DIR} / ${CLAUDE_PLUGIN_ROOT} / ${CLAUDE_PLUGIN_DATA} are
 // path placeholders the hooks docs use unquoted in their own examples
@@ -120,12 +120,10 @@ export const cc003 = defineCheck({
     // hooks; a managed disableAllHooks stops every hook; disableAllHooks in
     // a user/project/local file stops the hooks of those scopes only
     const locks = await claudeManagedLocks(ctx);
-    const scopedOff = ctx.configs.find(c => !locks.managedFiles.has(c.filePath) && (c.data as Record<string, unknown> | undefined)?.disableAllHooks === true);
     const offReason = (file: string): string | undefined => {
-      if (locks.allHooksOff) return `${locks.allHooksOff} sets disableAllHooks`;
-      if (locks.managedFiles.has(file)) return undefined;
+      if (locks.allHooksOff || locks.managedFiles.has(file)) return allHooksOffReason(ctx, locks, file);
       if (locks.hooksOnly) return `${locks.hooksOnly} sets allowManagedHooksOnly`;
-      return scopedOff ? `${scopedOff.filePath} sets disableAllHooks` : undefined;
+      return allHooksOffReason(ctx, locks, file);
     };
     for (const config of ctx.configs) {
       const found = hookObjectEvidence(config.data.hooks, config.filePath);

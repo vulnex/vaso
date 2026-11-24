@@ -2,7 +2,7 @@ import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
 import { buildBroadPaths, isBroadPath } from '../../analyzers/broad-paths.js';
 import { DANGEROUS_COMMANDS } from '../devin/dev-001-broad-permissions.js';
-import { actionMatches, isCatchAllResource, v2Action, v2CatchAll, v2PermissionRules } from './schema.js';
+import { actionMatches, isCatchAllResource, v1CatchAll, v1PermissionRules, v1ScopedAllows, v2Action, v2CatchAll, v2PermissionRules } from './schema.js';
 
 /**
  * OpenCode's permission defaults (opencode.ai/docs/permissions): most tools
@@ -14,26 +14,11 @@ import { actionMatches, isCatchAllResource, v2Action, v2CatchAll, v2PermissionRu
  * allow-by-default tools are judged on their effective state, set or not
  * (info: OpenCode runs them unconfirmed unless set to "ask"). Critical is
  * kept for loosening what OpenCode guards by default.
+ *
+ * V1 rules are judged on the merged permission (`v1PermissionRules`): key
+ * order decides, so `{ bash: "ask", "*": "allow" }` allows bash.
  */
 const ALLOW_BY_DEFAULT = ['bash', 'edit', 'task', 'webfetch'] as const;
-
-/** The catch-all action of a rule: a string, or an object's `"*"`. */
-function catchAll(rule: unknown): string | undefined {
-  if (typeof rule === 'string') return rule.toLowerCase();
-  if (rule && typeof rule === 'object') {
-    const star = (rule as Record<string, unknown>)['*'];
-    if (typeof star === 'string') return star.toLowerCase();
-  }
-  return undefined;
-}
-
-/** Scoped `pattern → "allow"` entries of an object rule (not the catch-all). */
-function scopedAllows(rule: unknown): string[] {
-  if (!rule || typeof rule !== 'object') return [];
-  return Object.entries(rule as Record<string, unknown>)
-    .filter(([pattern, action]) => pattern !== '*' && typeof action === 'string' && action.toLowerCase() === 'allow')
-    .map(([pattern]) => pattern);
-}
 
 /** `rm *` → rm, `/usr/bin/python3 -c *` → python. */
 function commandFamily(pattern: string): string {
@@ -97,59 +82,49 @@ export const opc002 = defineCheck({
           });
         }
       }
+    }
 
-      const perm = config.data.permission;
-      if (typeof perm === 'string') {
-        if (perm.toLowerCase() === 'allow') {
-          critical.push({
-            file: config.filePath,
-            detail: 'permission = "allow" — every tool runs without confirmation, including access outside the workspace',
-          });
-        } else {
-          for (const k of ALLOW_BY_DEFAULT) gated.add(k);
-        }
-        continue;
-      }
-      if (!perm || typeof perm !== 'object') continue;
-      const rules = perm as Record<string, unknown>;
-      const global = catchAll(rules['*']);
+    // V1 `permission`: judged as OpenCode merges it — the config files, then
+    // $OPENCODE_CONFIG_CONTENT and $OPENCODE_PERMISSION over them, so a later
+    // layer can re-open a tool an earlier one gates
+    const rules = v1PermissionRules(ctx.configs) ?? [];
+    const allowedBy = new Map<string, string>();
+    for (const k of ALLOW_BY_DEFAULT) {
+      const top = v1CatchAll(rules, k)?.rule;
+      if (top && top.action !== 'allow') gated.add(k);
+      else if (top) allowedBy.set(k, top.file);
+    }
 
-      for (const k of ALLOW_BY_DEFAULT) {
-        const action = catchAll(rules[k]) ?? global;
-        if (action && action !== 'allow') gated.add(k);
-      }
-
-      // external_directory is "ask" by default: allowing it is a real loosening
-      const ext = catchAll(rules.external_directory) ?? (rules.external_directory === undefined ? global : undefined);
-      if (ext === 'allow') {
-        critical.push({
-          file: config.filePath,
-          snippet: rules.external_directory === undefined ? 'permission["*"] = "allow"' : 'permission.external_directory = "allow"',
+    const ext = v1CatchAll(rules, 'external_directory')?.rule;
+    if (ext?.action === 'allow') {
+      critical.push(ext.fromString
+        ? { file: ext.file, detail: 'permission = "allow" — every tool runs without confirmation, including access outside the workspace' }
+        : {
+          file: ext.file,
+          snippet: ext.key === 'external_directory' ? 'permission.external_directory = "allow"' : `permission["${ext.key}"] = "allow"`,
           detail: 'Files outside the project are read and written without confirmation (OpenCode asks by default)',
         });
+    }
+    for (const r of v1ScopedAllows(rules, 'external_directory')) {
+      const hit = isBroadPath(globBase(r.pattern), broad, home);
+      if (hit) {
+        critical.push({
+          file: r.file,
+          snippet: `permission.external_directory["${r.pattern}"] = "allow"`,
+          detail: `Outside-workspace access allowed for a path that ${hit.reason}`,
+        });
       }
-      for (const pattern of scopedAllows(rules.external_directory)) {
-        const hit = isBroadPath(globBase(pattern), broad, home);
-        if (hit) {
-          critical.push({
-            file: config.filePath,
-            snippet: `permission.external_directory["${pattern}"] = "allow"`,
-            detail: `Outside-workspace access allowed for a path that ${hit.reason}`,
-          });
-        }
-      }
+    }
 
-      // A scoped bash allow only matters when bash isn't already allowed outright
-      if ((catchAll(rules.bash) ?? global) !== 'allow') {
-        for (const pattern of scopedAllows(rules.bash)) {
-          const family = commandFamily(pattern);
-          if (DANGEROUS_COMMANDS.has(family)) {
-            critical.push({
-              file: config.filePath,
-              snippet: `permission.bash["${pattern}"] = "allow"`,
-              detail: `"${family}" runs without confirmation — shell execution, network egress or privilege escalation`,
-            });
-          }
+    if (v1CatchAll(rules, 'bash')?.rule.action !== 'allow') {
+      for (const r of v1ScopedAllows(rules, 'bash')) {
+        const family = commandFamily(r.pattern);
+        if (DANGEROUS_COMMANDS.has(family)) {
+          critical.push({
+            file: r.file,
+            snippet: `permission.bash["${r.pattern}"] = "allow"`,
+            detail: `"${family}" runs without confirmation — shell execution, network egress or privilege escalation`,
+          });
         }
       }
     }
@@ -158,7 +133,7 @@ export const opc002 = defineCheck({
     const evidence = [...critical];
     if (unconfirmed.length > 0) {
       evidence.push({
-        file: ctx.configs[0]?.filePath ?? ctx.installation.installDir,
+        file: unconfirmed.map(k => allowedBy.get(k)).find(f => f !== undefined) ?? ctx.configs[0]?.filePath ?? ctx.installation.installDir,
         snippet: `permission: ${unconfirmed.join(', ')} = "allow"`,
         detail: `${unconfirmed.join(', ')} run without confirmation — OpenCode's default unless set to "ask"`,
       });

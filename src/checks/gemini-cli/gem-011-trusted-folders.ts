@@ -50,7 +50,9 @@ export const gem011 = defineCheck({
         // (trustedFolders.ts: effectivePath = path.dirname(rulePath)), so
         // "~/code": "TRUST_PARENT" trusts all of $HOME.
         const effective = level.toUpperCase() === 'TRUST_PARENT' ? dirname(path) : path;
-        const broad = isBroadPath(effective, broadPaths, home, { ancestors: true });
+        // Gemini CLI compares trust paths case-insensitively on macOS
+        // (normalizePath / isSubpath lowercase both sides on darwin)
+        const broad = isBroadPath(effective, broadPaths, home, { ancestors: true, ignoreCase: ctx.fs.platform === 'darwin' });
         if (broad) {
           evidence.push({
             file: config.filePath,

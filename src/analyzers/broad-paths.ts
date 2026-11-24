@@ -40,20 +40,26 @@ export interface BroadPathOptions {
    * a broad path (`/Users`, `/home`, `/private`) is broad too.
    */
   ancestors?: boolean;
+  /**
+   * The agent compares paths case-insensitively (Gemini CLI `normalizePath`
+   * and `isSubpath` lowercase both sides on darwin), so `/users` and
+   * `/PRIVATE/TMP` match too.
+   */
+  ignoreCase?: boolean;
 }
 
 export function isBroadPath(rawPath: string, broadPaths: BroadPath[], home: string, opts: BroadPathOptions = {}): BroadPath | undefined {
+  const key = (p: string): string => (opts.ignoreCase ? p.toLowerCase() : p);
   const normalized = normalize(expandHome(rawPath, home));
-  // normalize('/home/user/') → '/home/user', but normalize('/') stays '/'
   const trimmed = normalized.length > 1 && normalized.endsWith('/')
     ? normalized.slice(0, -1)
     : normalized;
-  const exact = broadPaths.find(b => trimmed === b.path);
+  const t = key(trimmed);
+  const exact = broadPaths.find(b => t === key(b.path));
   if (exact) return exact;
   if (!trimmed.startsWith('/')) return undefined;
   if (opts.ancestors) {
-    // The agent trusts the whole subtree: a folder above any broad path is broad
-    const below = broadPaths.find(b => b.path !== '/' && b.path.startsWith(`${trimmed}/`));
+    const below = broadPaths.find(b => b.path !== '/' && key(b.path).startsWith(`${t}/`));
     if (!below) return undefined;
     return {
       path: trimmed,
@@ -62,9 +68,7 @@ export function isBroadPath(rawPath: string, broadPaths: BroadPath[], home: stri
         : `contains ${below.path}, which ${below.reason}`,
     };
   }
-  // A directory above the home (`/Users`, `/home`, `~/..`) covers it too —
-  // and every other user's home beside it
-  if (broadPaths.some(b => b.path === home) && trimmed !== home && home.startsWith(trimmed === '/' ? '/' : `${trimmed}/`)) {
+  if (broadPaths.some(b => b.path === home) && t !== key(home) && key(home).startsWith(t === '/' ? '/' : `${t}/`)) {
     return { path: trimmed, reason: 'contains the home directory and every other user\'s' };
   }
   return undefined;

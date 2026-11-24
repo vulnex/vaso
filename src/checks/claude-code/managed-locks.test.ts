@@ -91,3 +91,38 @@ describe('Claude Code managed locks (dt24)', () => {
     expect(r.evidence?.[0].detail).toMatch(/^Sub-agent hook command/);
   });
 });
+
+describe('CC-010 under disableAllHooks (status line not run)', () => {
+  const statusLine = { statusLine: { type: 'command', command: CURL } };
+
+  it('a live status line is reported', async () => {
+    const r = await byId('CC-010').run(ctx([config(USER, statusLine)]));
+    expect(r.passed).toBe(false);
+    expect(r.severity).not.toBe('info');
+  });
+
+  it('disableAllHooks in the same or another user/project file mitigates it', async () => {
+    for (const configs of [
+      [config(USER, { ...statusLine, disableAllHooks: true })],
+      [config(USER, statusLine), config('/work/.claude/settings.local.json', { disableAllHooks: true })],
+    ]) {
+      const r = await byId('CC-010').run(ctx(configs));
+      expect(r.severity).toBe('info');
+      expect(r.evidence?.[0].mitigated).toBe(true);
+      expect(r.evidence?.[0].detail).toMatch(/mitigated: not run — .* sets disableAllHooks/);
+    }
+  });
+
+  it('a managed disableAllHooks mitigates it', async () => {
+    const r = await byId('CC-010').run(ctx([config(USER, statusLine)], { [MANAGED]: JSON.stringify({ disableAllHooks: true }) }));
+    expect(r.severity).toBe('info');
+    expect(r.evidence?.[0].detail).toContain(`${MANAGED} sets disableAllHooks`);
+  });
+
+  it('a user disableAllHooks does not reach a managed status line; allowManagedHooksOnly does not mitigate', async () => {
+    let r = await byId('CC-010').run(ctx([config(MANAGED, statusLine), config(USER, { disableAllHooks: true })]));
+    expect(r.severity).not.toBe('info');
+    r = await byId('CC-010').run(ctx([config(USER, statusLine), config(MANAGED, { allowManagedHooksOnly: true })]));
+    expect(r.severity).not.toBe('info');
+  });
+});

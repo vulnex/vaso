@@ -52,4 +52,13 @@ describe('isBroadPath', () => {
   it('only when the caller judges the home itself broad', () => {
     expect(isBroadPath('/Users', broad.filter(b => b.path !== HOME), HOME)).toBeUndefined();
   });
+
+  it('ignoreCase matches catalogue entries, the home and its parents in any case', () => {
+    expect(isBroadPath('/PRIVATE/TMP', broad, HOME, { ignoreCase: true })?.path).toBe('/private/tmp');
+    expect(isBroadPath('/users/ALICE/', broad, HOME, { ignoreCase: true })?.path).toBe(HOME);
+    expect(isBroadPath('/users', broad, HOME, { ignoreCase: true })?.path).toBe('/users');
+    expect(isBroadPath('/users', broad, HOME, { ignoreCase: true, ancestors: true })?.reason).toContain(HOME);
+    expect(isBroadPath('/users/alice/work', broad, HOME, { ignoreCase: true })).toBeUndefined();
+    expect(isBroadPath('/PRIVATE/TMP', broad, HOME)).toBeUndefined();
+  });
 });
