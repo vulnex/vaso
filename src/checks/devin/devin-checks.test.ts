@@ -700,6 +700,13 @@ describe('DEV-008: Devin Workspace Trust Bypassed or Over-Broad', () => {
     expect(result.evidence?.map(e => e.snippet)).toEqual(['trusted_paths: "/home/test"', 'trusted_paths: "/"']);
   });
 
+  it('judges /private/etc broad on macOS only (dt25 g4-F21)', async () => {
+    const linux = await check.run(makeCtx([], trustFs(['/private/etc'])));
+    expect(linux.passed).toBe(true);
+    const mac = await check.run({ ...makeCtx([], trustFs(['/private/etc'])), platform: 'darwin' });
+    expect(mac.evidence?.map(e => e.snippet)).toEqual(['trusted_paths: "/private/etc"']);
+  });
+
   it('passes with trust enforced and narrow trusted paths', async () => {
     const result = await check.run(makeCtx([makeConfig('config.json', { skip_workspace_trust: false })], trustFs(['/home/test/work/app'])));
     expect(result.passed).toBe(true);

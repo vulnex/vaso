@@ -86,7 +86,7 @@ export const dev001 = defineCheck({
     const home = ctx.fs.homedir();
     // Scratch dirs (/tmp, /var/tmp) are routine write targets — only whole-disk,
     // whole-home, and /etc write grants are critical here.
-    const broadPaths = buildBroadPaths(home).filter(b => !b.path.endsWith('tmp'));
+    const broadPaths = buildBroadPaths(home, ctx.platform).filter(b => !b.path.endsWith('tmp'));
 
     // Devin merges permission lists across config levels and deny wins at
     // any level, so a deny rule in any of this installation's files — or, for

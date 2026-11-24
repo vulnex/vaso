@@ -43,7 +43,7 @@ export const opc002 = defineCheck({
   async run(ctx, h) {
     const critical: Evidence[] = [];
     const home = ctx.fs.homedir();
-    const broad = buildBroadPaths(home);
+    const broad = buildBroadPaths(home, ctx.platform);
     const gated = new Set<string>();
 
     for (const config of ctx.configs) {

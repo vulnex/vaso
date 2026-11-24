@@ -46,7 +46,7 @@ export const cur009 = defineCheck({
         if (typeof type === 'string' && type !== 'workspace_readwrite') continue;
         for (const entry of Array.isArray(config.data.additionalReadwritePaths) ? config.data.additionalReadwritePaths : []) {
           if (typeof entry !== 'string') continue;
-          const reason = overbroadPathRule(`Write(${entry})`, home);
+          const reason = overbroadPathRule(`Write(${entry})`, home, ctx.platform);
           if (!reason || reason.startsWith('covers every file in the workspace')) continue;
           evidence.push({
             file: config.filePath,
@@ -61,7 +61,7 @@ export const cur009 = defineCheck({
       const allow = Array.isArray(perms.allow) ? (perms.allow as unknown[]).filter((a): a is string => typeof a === 'string') : [];
 
       for (const rule of allow) {
-        const pathReason = overbroadPathRule(rule, home);
+        const pathReason = overbroadPathRule(rule, home, ctx.platform);
         if (!pathReason && !OVERBROAD_WEB_RULES.some(p => p.test(rule))) continue;
         evidence.push({
           file: config.filePath,

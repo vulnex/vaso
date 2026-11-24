@@ -108,14 +108,14 @@ function globRoot(path: string): string {
  * startup file (`Read(~/.ssh/**)`, `Write(~/.zshrc)` — the shared
  * sensitive-path catalogue).
  */
-export function overbroadPathRule(rule: string, home: string): string | undefined {
+export function overbroadPathRule(rule: string, home: string, platform: string): string | undefined {
   const parsed = parseCursorRule(rule);
   if (!parsed || (parsed.tool !== 'read' && parsed.tool !== 'write') || !parsed.arg) return undefined;
   const root = globRoot(parsed.arg);
   if (root === '' || root === '.' || root === './') return 'covers every file in the workspace';
   if (root === '..' || root.startsWith('../')) return 'reaches outside the workspace (parent directory)';
   // the home, a directory above it (`/Users/**`), /, /tmp, /etc
-  const broad = isBroadPath(root, buildBroadPaths(home), home)?.reason;
+  const broad = isBroadPath(root, buildBroadPaths(home, platform), home)?.reason;
   if (broad) return broad;
   const abs = expandHome(root, home);
   // reading one /etc file (`/etc/hosts`) exposes nothing; writing one does

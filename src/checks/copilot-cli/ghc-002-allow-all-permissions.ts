@@ -24,12 +24,12 @@ interface Found {
   critical: boolean;
 }
 
-function permissionsConfigEvidence(config: ParsedConfig, home: string): Found {
+function permissionsConfigEvidence(config: ParsedConfig, home: string, platform: string): Found {
   const found: Found = { evidence: [], critical: false };
   const out = found.evidence;
   const locations = config.data.locations;
   if (!locations || typeof locations !== 'object') return found;
-  const broadPaths = buildBroadPaths(home);
+  const broadPaths = buildBroadPaths(home, platform);
   for (const [location, entry] of Object.entries(locations as Record<string, unknown>)) {
     if (!entry || typeof entry !== 'object') continue;
     const rec = entry as Record<string, unknown>;
@@ -116,7 +116,7 @@ export const ghc002 = defineCheck({
 
     for (const config of ctx.configs) {
       if (config.filePath.endsWith('permissions-config.json')) {
-        const found = permissionsConfigEvidence(config, home);
+        const found = permissionsConfigEvidence(config, home, ctx.platform);
         evidence.push(...found.evidence);
         critical ||= found.critical;
         continue;

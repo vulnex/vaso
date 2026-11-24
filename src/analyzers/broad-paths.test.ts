@@ -3,7 +3,7 @@ import { buildBroadPaths, isBroadPath } from './broad-paths.js';
 
 describe('isBroadPath with ancestors', () => {
   const home = '/Users/alice';
-  const broad = buildBroadPaths(home);
+  const broad = buildBroadPaths(home, 'darwin');
 
   it('matches the catalogue exactly; without ancestors only a folder above the home widens', () => {
     expect(isBroadPath('/', broad, home)?.reason).toMatch(/entire filesystem/);
@@ -27,7 +27,7 @@ describe('isBroadPath with ancestors', () => {
 });
 
 const HOME = '/Users/alice';
-const broad = buildBroadPaths(HOME);
+const broad = buildBroadPaths(HOME, 'darwin');
 
 describe('isBroadPath', () => {
   it('matches the catalogue exactly, with ~ and trailing slashes', () => {
@@ -40,7 +40,7 @@ describe('isBroadPath', () => {
   it('treats a directory above the home as broad', () => {
     expect(isBroadPath('/Users', broad, HOME)).toEqual({ path: '/Users', reason: 'contains the home directory and every other user\'s' });
     expect(isBroadPath('~/..', broad, HOME)?.path).toBe('/Users');
-    expect(isBroadPath('/home', buildBroadPaths('/home/alice'), '/home/alice')?.path).toBe('/home');
+    expect(isBroadPath('/home', buildBroadPaths('/home/alice', 'linux'), '/home/alice')?.path).toBe('/home');
   });
 
   it('does not flag paths inside the home or beside it', () => {
@@ -60,5 +60,17 @@ describe('isBroadPath', () => {
     expect(isBroadPath('/users', broad, HOME, { ignoreCase: true, ancestors: true })?.reason).toContain(HOME);
     expect(isBroadPath('/users/alice/work', broad, HOME, { ignoreCase: true })).toBeUndefined();
     expect(isBroadPath('/PRIVATE/TMP', broad, HOME)).toBeUndefined();
+  });
+});
+
+describe('the /private entries are macOS-only (dt25 g4-F21)', () => {
+  it('flags /private/etc on darwin, not on Linux', () => {
+    const linux = buildBroadPaths('/home/alice', 'linux');
+    for (const p of ['/private/etc', '/private/tmp', '/private/var/tmp']) {
+      expect(isBroadPath(p, linux, '/home/alice'), p).toBeUndefined();
+      expect(isBroadPath(p, buildBroadPaths('/Users/alice', 'darwin'), '/Users/alice'), p).toBeDefined();
+    }
+    expect(isBroadPath('/private', linux, '/home/alice', { ancestors: true })).toBeUndefined();
+    expect(isBroadPath('/etc', linux, '/home/alice')?.reason).toMatch(/system configuration/);
   });
 });

@@ -34,7 +34,7 @@ export const aba009 = defineCheck({
 
     const { file, paths } = await trustedWorkspaces(ctx, { report: true });
     const home = ctx.fs.homedir();
-    const broadPaths = buildBroadPaths(home);
+    const broadPaths = buildBroadPaths(home, ctx.platform);
     for (const p of paths) {
       const broad = isBroadPath(p, broadPaths, home);
       if (!broad) continue;

@@ -21,7 +21,7 @@ export const ly019 = defineCheck({
 
   async run(ctx, h) {
     const home = ctx.fs.homedir();
-    const broad = buildBroadPaths(home);
+    const broad = buildBroadPaths(home, ctx.platform);
     const evidence: Evidence[] = [];
 
     for (const config of lyrieEnvConfigs(ctx.configs)) {

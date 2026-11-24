@@ -46,7 +46,7 @@ export const aba002 = defineCheck({
     const critical: Evidence[] = [];
     const warning: Evidence[] = [];
     const home = ctx.fs.homedir();
-    const broadPaths = buildBroadPaths(home).filter(b => !b.path.endsWith('tmp'));
+    const broadPaths = buildBroadPaths(home, ctx.platform).filter(b => !b.path.endsWith('tmp'));
 
     for (const config of settingsConfigs(ctx.configs)) {
       const permissions = config.data.permissions as Record<string, unknown> | undefined;
@@ -77,7 +77,7 @@ export const aba002 = defineCheck({
           if (!pattern || ANY.has(pattern)) continue;
           const target = hostPath(pattern);
           if (target === undefined) continue;
-          const base = canonicalSystemPath(target.replace(/(?:[\\/]\*{1,2})+$/, '') || '/');
+          const base = canonicalSystemPath(target.replace(/(?:[\\/]\*{1,2})+$/, '') || '/', ctx.platform);
           const broad = isBroadPath(base, broadPaths, home);
           const sinks = classifySensitivePath(base.replace(/^~/, home));
           if (broad) {

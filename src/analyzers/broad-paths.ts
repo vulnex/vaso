@@ -13,17 +13,23 @@ export interface BroadPath {
   reason: string;
 }
 
-export function buildBroadPaths(home: string): BroadPath[] {
+/** `platform` is the scanned host's (`ctx.platform`): the `/private/*`
+ *  entries exist only on macOS, where /tmp, /var/tmp and /etc link into
+ *  /private — elsewhere `/private/etc` is an ordinary directory. */
+export function buildBroadPaths(home: string, platform: string): BroadPath[] {
   return [
     { path: '/', reason: 'covers the entire filesystem' },
     { path: home, reason: 'covers the entire home directory' },
     { path: '/tmp', reason: 'is shared by all local users' },
     { path: '/var/tmp', reason: 'is shared by all local users' },
     { path: '/etc', reason: 'is the system configuration directory' },
-    // macOS: /tmp, /var/tmp and /etc are links into /private
-    { path: '/private/tmp', reason: 'is shared by all local users' },
-    { path: '/private/var/tmp', reason: 'is shared by all local users' },
-    { path: '/private/etc', reason: 'is the system configuration directory' },
+    ...(platform === 'darwin'
+      ? [
+        { path: '/private/tmp', reason: 'is shared by all local users' },
+        { path: '/private/var/tmp', reason: 'is shared by all local users' },
+        { path: '/private/etc', reason: 'is the system configuration directory' },
+      ]
+      : []),
   ];
 }
 

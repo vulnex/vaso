@@ -145,7 +145,8 @@ export function isInsecureUrl(url: unknown): url is string {
  * macOS: /etc, /var and /tmp are symlinks into /private, so `/private/etc`
  * names the same directory and must be judged like `/etc`.
  */
-export function canonicalSystemPath(path: string): string {
+export function canonicalSystemPath(path: string, platform: string): string {
+  if (platform !== 'darwin') return path;
   return path.replace(/^\/private(?=\/(?:etc|var|tmp)(?:\/|$))/, '');
 }
 

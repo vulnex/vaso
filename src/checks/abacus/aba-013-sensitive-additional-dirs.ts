@@ -16,7 +16,7 @@ export const aba013 = defineCheck({
     const critical: Evidence[] = [];
     const warning: Evidence[] = [];
     const home = ctx.fs.homedir();
-    const broadPaths = buildBroadPaths(home);
+    const broadPaths = buildBroadPaths(home, ctx.platform);
 
     for (const config of settingsConfigs(ctx.configs)) {
       const dirs = config.data.additionalDirectories;
@@ -24,7 +24,7 @@ export const aba013 = defineCheck({
       for (const dir of dirs) {
         if (typeof dir !== 'string' || !dir.trim()) continue;
         const snippet = `additionalDirectories: "${dir}"`;
-        const path = canonicalSystemPath(dir.trim());
+        const path = canonicalSystemPath(dir.trim(), ctx.platform);
         const broad = isBroadPath(path, broadPaths, home);
         const sinks = classifySensitivePath(expandHome(path, home));
         if (broad && broad.path.endsWith('tmp')) {
