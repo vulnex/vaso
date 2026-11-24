@@ -586,6 +586,28 @@ describe('CFG-011: Node.js CVE-2026-21636', () => {
     expect((await cfg011.run(withCli('/usr/bin/openclaw', 'v25.1.0', 'snapshot'))).message).toContain('not collected');
   });
 
+  // dt25 g1-F13: tj/n trees (no `v` prefix, N_PREFIX anywhere) and Volta's
+  // per-binary record of the Node a package was installed with
+  it('reads n and Volta installs (same on snapshots)', async () => {
+    for (const cli of ['/usr/local/n/versions/node/25.1.0/bin/openclaw', '/home/alice/n/versions/node/25.1.0/bin/openclaw']) {
+      const r = await cfg011.run(withCli(cli, 'v24.11.0', 'snapshot'));
+      expect(r.passed, cli).toBe(false);
+    }
+    const bins = '/home/alice/.volta/tools/user/bins/openclaw.json';
+    for (const cli of ['/home/alice/.volta/bin/openclaw', '/home/alice/.volta/tools/image/packages/openclaw/bin/openclaw']) {
+      const c = withCli(cli, 'v24.11.0', 'snapshot');
+      c.fs = Object.assign(Object.create(c.fs) as typeof c.fs, {
+        readFile: async (p: string) => {
+          if (p !== bins) throw new Error('ENOENT');
+          return JSON.stringify({ name: 'openclaw', package: 'openclaw', version: '2026.11.2', platform: { node: '25.2.0', npm: null }, manager: 'Npm' });
+        },
+      });
+      const r = await cfg011.run(c);
+      expect(r.passed, cli).toBe(false);
+      expect(r.evidence?.[0].file).toBe(bins);
+    }
+  });
+
   it('runs only for Node-based frameworks', () => {
     expect(cfg011.supportedAgents).toEqual(['openclaw', 'nanoclaw', 'nemoclaw']);
   });
@@ -733,6 +755,12 @@ describe('deep-test 2026-10-15: OpenClaw 2026.9.4 schema', () => {
     [{ tools: { profile: 'full' } }, false, false],
     // an allowlist of plugin tools only is dropped by OpenClaw: core tools stay
     [{ tools: { allow: ['my_plugin_tool'] } }, false, false],
+    // dt25 g1-F12: group:openclaw (2026.11.2 catalog, includeInOpenClawGroup)
+    // carries code_execution/secrets but no exec/process and no fs tool
+    [{ tools: { profile: 'coding', allow: ['group:openclaw'] } }, true, true],
+    [{ tools: { allow: ['group:openclaw', 'group:fs'] } }, true, false],
+    [{ tools: { allow: ['group:web', 'group:sessions'] } }, true, true],
+    [{ tools: { allow: ['group:openclaw', 'exec'] } }, false, true],
     // an agent's own profile replaces the root one
     [{ tools: { profile: 'messaging' }, agents: { entries: { ops: { tools: { profile: 'coding' } } } } }, false, false],
     [{ tools: { profile: 'coding' }, agents: { entries: { ops: { tools: { profile: 'messaging' } } } } }, false, false],

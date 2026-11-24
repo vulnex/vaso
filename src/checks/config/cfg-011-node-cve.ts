@@ -10,7 +10,26 @@ import type { AgentInstallation } from '../../core/types.js';
 const AFFECTED = { major: 25, fixedMinor: 3 };
 
 /** A CLI installed into a Node version manager's per-version tree runs on that Node. */
-const MANAGER_VERSION = /\/(?:\.nvm\/versions\/node|fnm\/node-versions|\.asdf\/installs\/nodejs|mise\/installs\/node|\/n\/versions\/node)\/v?(\d+\.\d+\.\d+)\//;
+export const MANAGER_VERSION = /\/(?:\.nvm\/versions\/node|fnm\/node-versions|\.asdf\/installs\/nodejs|mise\/installs\/node|n\/versions\/node)\/v?(\d+\.\d+\.\d+)\//;
+
+/**
+ * Volta runs a global package on the Node it was installed with, recorded
+ * per binary in `$VOLTA_HOME/tools/user/bins/<bin>.json` (`platform.node`;
+ * volta-core `BinConfig`). The CLI path (`~/.volta/bin/<bin>` shim or the
+ * package image) doesn't name it.
+ */
+async function voltaNodeVersion(cliBinary: string, fs: FSProvider): Promise<{ version: string; source: string } | undefined> {
+  const m = /^(.*\/\.volta)\/(?:bin\/([^/]+)$|tools\/image\/packages\/(?:@[^/]+\/)?[^/]+\/bin\/([^/]+)$)/.exec(cliBinary);
+  if (!m) return undefined;
+  const file = `${m[1]}/tools/user/bins/${m[2] ?? m[3]}.json`;
+  try {
+    const node = (JSON.parse(await fs.readFile(file)) as { platform?: { node?: unknown } }).platform?.node;
+    const v = typeof node === 'string' ? /^v?(\d+\.\d+\.\d+)$/.exec(node.trim()) : null;
+    return v ? { version: v[1], source: file } : undefined;
+  } catch {
+    return undefined;
+  }
+}
 
 /**
  * The Node.js the agent runs on: the version-manager tree its CLI sits in
@@ -18,9 +37,11 @@ const MANAGER_VERSION = /\/(?:\.nvm\/versions\/node|fnm\/node-versions|\.asdf\/i
  * (the scanned host's, not necessarily the one running VASO). A snapshot
  * collects no `node --version`, so a CLI outside a version manager is unknown.
  */
-function agentNodeVersion(installation: AgentInstallation, fs: FSProvider): { version: string; source: string } | undefined {
+async function agentNodeVersion(installation: AgentInstallation, fs: FSProvider): Promise<{ version: string; source: string } | undefined> {
   const fromPath = installation.cliBinary ? MANAGER_VERSION.exec(installation.cliBinary) : null;
   if (fromPath) return { version: fromPath[1], source: installation.cliBinary! };
+  const volta = installation.cliBinary ? await voltaNodeVersion(installation.cliBinary, fs) : undefined;
+  if (volta) return volta;
   if (fs.kind === 'snapshot') return undefined;
   try {
     const out = fs.execSync('node', ['--version'], { timeout: 5000 }).trim();
@@ -42,7 +63,7 @@ export const cfg011 = defineCheck({
   supportedAgents: ['openclaw', 'nanoclaw', 'nemoclaw'],
 
   async run(ctx, h) {
-    const runtime = agentNodeVersion(ctx.installation, ctx.fs);
+    const runtime = await agentNodeVersion(ctx.installation, ctx.fs);
     if (!runtime) {
       return h.passed(ctx.fs.kind === 'snapshot'
         ? 'Not checked on remote/snapshot scans — the scanned host\'s Node.js version is not collected'

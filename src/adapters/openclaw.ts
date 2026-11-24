@@ -550,6 +550,8 @@ export const openclawAdapter: AgentAdapter = {
         '~/.moltbot/.env',
         // User-relative CLI install locations — kept in sync with USER_CLI_RELATIVE_PATHS
         '~/.volta/bin/openclaw',
+        // Volta's record of the Node a global package runs on (CFG-011)
+        '~/.volta/tools/user/bins/openclaw.json',
         '~/.local/bin/openclaw',
         '~/.nvm/current/bin/openclaw',
         '~/.npm-global/bin/openclaw',
