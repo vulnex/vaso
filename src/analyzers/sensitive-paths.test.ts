@@ -58,7 +58,8 @@ describe('SENSITIVE_SINKS', () => {
       '/home/u/.cargo/credentials.toml', '/home/u/.cargo/credentials', '/home/u/.config/rclone/rclone.conf',
       '/home/u/.terraform.d/credentials.tfrc.json', '/home/u/.local/share/keyrings/login.keyring',
       '/home/u/.zsh_history', '/home/u/.bash_history', '/home/u/.psql_history', '/Users/u/.zsh_sessions/x.history',
-      '/home/u/.local/share/fish/fish_history']) {
+      '/home/u/.local/share/fish/fish_history', '/home/u/.histfile', '/home/u/.irb_history', '/home/u/.ksh_history',
+      '/home/u/.Rhistory', '/home/u/.lesshst', '/home/u/.history', '/home/u/.node-repl-history', '/home/u/.sqlite_history']) {
       expect(classifySensitivePath(p), p).toHaveLength(1);
     }
     for (const p of ['/home/u/.vault-token', '/home/u/.cargo/credentials.toml', '/home/u/.config/rclone/rclone.conf', '/home/u/.local/share/keyrings/x']) {
@@ -67,7 +68,8 @@ describe('SENSITIVE_SINKS', () => {
     expect(credentialStoreOf('/home/u/.local/share/keyrings/cop/config.json')).toBeDefined();
     // look-alikes and agents' own files stay ordinary
     for (const p of ['/home/u/.cargo/config.toml', '/home/u/.config/rclone/filters.txt', '/home/u/proj/history.md',
-      '/home/u/.claude/history.jsonl', '/home/u/.local/share/opencode/x', '/home/u/my.cnf.d/readme']) {
+      '/home/u/.claude/history.jsonl', '/home/u/.local/share/opencode/x', '/home/u/my.cnf.d/readme',
+      '/home/u/.copilot/command-history-state.json', '/home/u/.gemini/shell_history', '/home/u/.histfile.bak', '/home/u/.history/x']) {
       expect(classifySensitivePath(p), p).toEqual([]);
     }
   });
