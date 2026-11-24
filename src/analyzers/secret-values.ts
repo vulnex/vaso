@@ -1,4 +1,4 @@
-import { API_KEY_PATTERNS, isEnvReference, isPlaceholderSecret, isSecretReference, storedFallback } from '../core/patterns.js';
+import { API_KEY_PATTERNS, isDotenvReference, isEnvReference, isPlaceholderSecret, isSecretReference, storedFallback } from '../core/patterns.js';
 import { findUrlSecrets } from '../mcp/config-secrets.js';
 import { shannonEntropy } from './entropy.js';
 
@@ -152,13 +152,15 @@ const ENV_SECRET_KEY = /(?:_API_KEY|_TOKEN|_SECRET|_KEY|BEARER|PASSWORD)$/i;
  * Credential-named keys of a parsed `.env` (`parseEnv` in config-loader:
  * comments and blank lines dropped, last assignment wins) that hold a value:
  * not empty, not a documentation placeholder (`your-key-here`, `sk-...`) and
- * not a reference to a value kept elsewhere. A copied `.env.example` with
- * every key commented out or left empty holds none.
+ * not a reference to a value kept elsewhere (`isDotenvReference`: dotenv
+ * loaders read a bare name or profile-like word literally, so those are the
+ * secret). A copied `.env.example` with every key commented out or left
+ * empty holds none.
  */
 export function envSecretKeys(data: Record<string, unknown> | undefined): string[] {
   if (!data) return [];
   return Object.entries(data)
     .filter(([key, value]) => ENV_SECRET_KEY.test(key) && typeof value === 'string'
-      && !isPlaceholderSecret(value) && !isSecretReference(value.trim()))
+      && !isPlaceholderSecret(value) && !isDotenvReference(value))
     .map(([key]) => key);
 }

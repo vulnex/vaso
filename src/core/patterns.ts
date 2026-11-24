@@ -227,6 +227,24 @@ export function isSecretReference(value: string): boolean {
 }
 
 /**
+ * A `.env` value that names where a credential is kept: a variable reference
+ * (`${VAR}` — python-dotenv expands it; a `$`-form Node's dotenv keeps as
+ * literal text is a broken value, not a stored secret), a secret manager
+ * reference (`op://…`, resolved by `op run --env-file`) or a key file. Not a
+ * bare variable NAME or a profile name: dotenv loaders read the value
+ * literally, so `EMAIL_PASSWORD=admin-2024` or `DB_PASSWORD=MY_DB_PASS_2024`
+ * is the password itself.
+ */
+export function isDotenvReference(value: string): boolean {
+  const v = value.trim().replace(/^(['"])(.*)\1$/, '$2');
+  if (v === '') return false;
+  const form = envReference(v);
+  if (form !== undefined) return form !== 'name';
+  if (API_KEY_PATTERNS.some((p) => p.pattern.test(v))) return false;
+  return SECRET_MANAGER_REFERENCE.test(v) || FILE_REFERENCE.test(v) && (!PATH_PREFIX.test(v) || isPathValue(v));
+}
+
+/**
  * `isSecretReference`, with a value that only starts like a path judged by
  * its shape (`isPathValue`): `/Xq7Lk2Pz9…` is a base64 secret, not a file.
  * (`isSecretReference` itself has a Go copy in the probe and stays as is.)
