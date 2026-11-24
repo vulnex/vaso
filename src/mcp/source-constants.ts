@@ -44,6 +44,8 @@ const FOLDABLE = /^(?:[a-zA-Z][\w+.-]*:\/\/[^\s]*|\/[\w\-./~%]*|(?:https?|wss?)(
  * first round that adds nothing; a chain of any realistic length is followed.
  */
 const MAX_DERIVED_ROUNDS = 64;
+/** An array `.join(` — folded below when it joins string literals only (linear test; the fold does the parsing). */
+const LITERAL_JOIN = /\]\s*\.join\s*\(/;
 /** Characters of object literals read in one file when folding their properties. */
 const OBJECT_SCAN_BUDGET = 4 * 1024 * 1024;
 
@@ -114,7 +116,9 @@ export function stringConstants(code: string, opts: { python?: boolean } = {}): 
   const values = new Map<string, string>();
   for (const [name, value] of seen) if (value !== null) values.set(name, value);
   // constants built from constants: `const BASE = HOST + "/oauth"`
-  for (let round = 0; round < MAX_DERIVED_ROUNDS && values.size > 0; round++) {
+  // (or from literals only: `const TOKEN = ["http://", host, "/token"].join("")`)
+  const joins = LITERAL_JOIN.test(code);
+  for (let round = 0; round < MAX_DERIVED_ROUNDS && (values.size > 0 || joins); round++) {
     const known = withNames(values);
     let added = false;
     for (const m of code.matchAll(python ? PY_EXPR_BINDING : JS_EXPR_BINDING)) {
@@ -187,19 +191,24 @@ function resolveUrl(path: string, base: string): string | undefined {
  * the statement uses none of them (or is one of their own bindings).
  */
 export function foldConstants(text: string, constants: StringConstants): string | undefined {
-  if (!constants.names || !constants.names.test(text)) return undefined;
+  // a `[…].join("")` of literals is folded even when no constant is named
+  const joined = LITERAL_JOIN.test(text);
+  const names = constants.names && constants.names.test(text) ? constants.names : undefined;
+  if (!names && !joined) return undefined;
   const { values } = constants;
   const quoteSafe = (v: string): string => v.replace(/"/g, '%22');
   let out = text;
-  // `${NAME}` in a template, `{NAME}` in an f-string (not an object shorthand `{ NAME }`)
-  const placeholder = /\bf["']/.test(text) ? /\$?\{\s*([A-Za-z_$][\w$]*)\s*\}/g : /\$\{\s*([A-Za-z_$][\w$]*)\s*\}/g;
-  out = out.replace(placeholder, (m, name: string) => (values.has(name) ? values.get(name)! : m));
-  // a bare reference — not the name's own binding
-  out = out.replace(new RegExp(constants.names.source, 'g'), (m, offset: number, whole: string) => {
-    if (isBinding(whole, offset + m.length)) return m;
-    return `"${quoteSafe(values.get(m)!)}"`;
-  });
-  if (out === text) return undefined;
+  if (names) {
+    // `${NAME}` in a template, `{NAME}` in an f-string (not an object shorthand `{ NAME }`)
+    const placeholder = /\bf["']/.test(text) ? /\$?\{\s*([A-Za-z_$][\w$]*)\s*\}/g : /\$\{\s*([A-Za-z_$][\w$]*)\s*\}/g;
+    out = out.replace(placeholder, (m, name: string) => (values.has(name) ? values.get(name)! : m));
+    // a bare reference — not the name's own binding
+    out = out.replace(new RegExp(names.source, 'g'), (m, offset: number, whole: string) => {
+      if (isBinding(whole, offset + m.length)) return m;
+      return `"${quoteSafe(values.get(m)!)}"`;
+    });
+  }
+  if (out === text && !joined) return undefined;
   // "{}/token".format("http://host"), "%s/token" % "http://host": one placeholder, one value
   out = out.replace(/(["'])([^"'\n]*)\1\s*\.format\(\s*(["'])([^"'\n]*)\3\s*\)/g, (m, _q1, tpl: string, _q2, v: string) =>
     (/^[^{}]*\{0?\}[^{}]*$/.test(tpl) ? `"${tpl.replace(/\{0?\}/, v)}"` : m));
@@ -236,5 +245,5 @@ export function foldConstants(text: string, constants: StringConstants): string 
     if (next === out) break;
     out = next;
   }
-  return out;
+  return out === text ? undefined : out;
 }

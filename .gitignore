@@ -1,6 +1,7 @@
 node_modules
 dist/
 *.tgz
+*.tgz.sha256
 .DS_Store
 *.log
 coverage/

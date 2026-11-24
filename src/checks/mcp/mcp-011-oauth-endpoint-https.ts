@@ -17,6 +17,8 @@ const REMOTE_HTTP = String.raw`[hH][tT][tT][pP]:\/\/(?!(?:localhost|127(?:\.\d{1
 const REMOTE_HTTP_URL = new RegExp('^' + REMOTE_HTTP);
 /** A bare plaintext scheme constant (`const SCHEME = "http"`), folded into `${SCHEME}://host/…`. */
 const PLAINTEXT_SCHEME = /^http(?::\/\/)?$/i;
+/** An array `.join(` on the line (folded when it joins string literals only). */
+const JOIN = /\]\s*\.join\s*\(/;
 
 /**
  * Whether the URL `pattern` finds in the folded line is only an operand of a
@@ -25,10 +27,20 @@ const PLAINTEXT_SCHEME = /^http(?::\/\/)?$/i;
  * reject it, not an endpoint it uses.
  */
 function comparedOnly(folded: string, pattern: RegExp): boolean {
-  const m = pattern.exec(folded);
-  if (!m) return false;
+  // every match: `if (u === BASE + "/authorize") { fetch(BASE + "/authorize") }`
+  // compares one URL and uses the other
+  let any = false;
+  for (const m of folded.matchAll(new RegExp(pattern.source, pattern.flags.includes('g') ? pattern.flags : `${pattern.flags}g`))) {
+    any = true;
+    if (!compared(folded, m.index)) return false;
+  }
+  return any;
+}
+
+/** Whether the match at `index` is an operand of a comparison or prefix test. */
+function compared(folded: string, index: number): boolean {
   // the string literal holding the match
-  const open = Math.max(folded.lastIndexOf('"', m.index), folded.lastIndexOf("'", m.index), folded.lastIndexOf('`', m.index));
+  const open = Math.max(folded.lastIndexOf('"', index), folded.lastIndexOf("'", index), folded.lastIndexOf('`', index));
   if (open === -1) return false;
   const close = folded.slice(open + 1).search(/["'`]/);
   const before = folded.slice(0, open);
@@ -89,7 +101,8 @@ export const mcp011 = defineCheck({
 
       for (let i = 0; i < segments.length; i++) {
         const line = segments[i].text;
-        const folded = remoteConstant ? foldConstants(line, constants) : undefined;
+        // a `[…].join("")` URL is folded whether or not a constant is named
+        const folded = remoteConstant || JOIN.test(line) ? foldConstants(line, constants) : undefined;
         // A constant that is an OAuth endpoint by itself is reported at its
         // binding; a line only using it (`fetch(TOKEN_URL)`, logging it) adds
         // nothing — one built from it (`AUTH_HOST + "/authorize"`) does
@@ -101,7 +114,7 @@ export const mcp011 = defineCheck({
               file: source.localPath ?? source.serverName,
               line: segments[i].line,
               snippet: sourceSnippet(source, line),
-              detail: direct ? detail : `${detail} (built from a same-file string constant)`,
+              detail: direct ? detail : `${detail} (built from ${used.length > 0 ? 'a same-file string constant' : 'joined string pieces'})`,
             });
             break; // one finding per line: the patterns overlap on one URL
           }

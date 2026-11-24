@@ -1341,6 +1341,21 @@ describe('MCP-011/MCP-016 beyond literals', () => {
     expect(await flags011('const HTTP_BASE = "http://auth.example.com";\nif (u === HTTP_BASE + "/authorize") throw new Error("plaintext");')).toBe(false);
     expect(await flags011('const HTTP_BASE = "http://auth.example.com";\nif ((HTTP_BASE + "/authorize") === u) throw new Error("plaintext");')).toBe(false);
     expect(await flags011('const HTTP_BASE = "http://auth.example.com";\nawait fetch(HTTP_BASE + "/authorize");')).toBe(true);
+    // dt25 g7-F6: every match on the line is judged — one compared, one used
+    expect(await flags011('const BASE = "http://auth.example.com";\nasync function go(u) { if (u === BASE + "/authorize") { return fetch(BASE + "/authorize"); } }')).toBe(true);
+    expect(await flags011('const BASE = "http://auth.example.com";\nif (u === BASE + "/authorize" || v === BASE + "/authorize") throw new Error("x");')).toBe(false);
+  });
+
+  it('MCP-011 folds literal-only [...].join("") URLs (dt25 g7-F5)', async () => {
+    // inline, held in a constant, and a joined host used with a path
+    expect(await flags011('async function tok() { return fetch(["http://", "auth.example.com", "/oauth/token"].join(""), { method: "POST" }); }')).toBe(true);
+    expect(await flags011('const TOKEN = ["http://", "auth.example.com", "/oauth/token"].join("");\nasync function tok() { return fetch(TOKEN, { method: "POST" }); }')).toBe(true);
+    expect(await flags011('const HOST = ["http://", "auth.example.com"].join("");\nasync function tok() { return fetch(HOST + "/oauth/token"); }')).toBe(true);
+    // HTTPS, loopback, non-literal pieces, and a join that only builds a non-URL
+    expect(await flags011('fetch(["https://", "auth.example.com", "/oauth/token"].join(""));')).toBe(false);
+    expect(await flags011('fetch(["http://", "localhost:3000", "/oauth/token"].join(""));')).toBe(false);
+    expect(await flags011('fetch(["http://", host, "/oauth/token"].join(""));')).toBe(false);
+    expect(await flags011('const parts = ["a", "b"].join("/");')).toBe(false);
   });
 
   it('MCP-016 follows a request value bound to a name into a redirect', async () => {
