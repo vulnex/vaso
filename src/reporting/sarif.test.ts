@@ -198,5 +198,21 @@ describe('toSarifUri', () => {
     expect(toSarifUri('rel/a<b>.md')).toBe('rel/a%3Cb%3E.md');
     expect(toSarifUri(undefined)).toBeUndefined();
   });
+
+  it('percent-encodes the raw bytes of a non-UTF-8 name (dt25 g6-R3)', () => {
+    expect(toSarifUri('/home/u/caf\udce9/x.sh')).toBe('file:///home/u/caf%E9/x.sh');
+    expect(toSarifUri('/home/u/bad\udcff\udcfe 1')).toBe('file:///home/u/bad%FF%FE%201');
+    expect(toSarifUri('/home/u/\udcfe01')).toBe('file:///home/u/%FE01');
+    expect(toSarifUri('rel/caf\udce9.md')).toBe('rel/caf%E9.md');
+    expect(toSarifUri('C:\\u\\caf\udce9')).toBe('file:///C:/u/caf%E9');
+    // UTF-8 names (and real surrogate pairs) are unchanged
+    expect(toSarifUri('/home/u/café/😀')).toBe('file:///home/u/caf%C3%A9/%F0%9F%98%80');
+    expect(toSarifUri('/home/u/a%00E9')).toBe('file:///home/u/a%2500E9');
+  });
+
+  it('keeps a URL evidence file a URL', () => {
+    expect(toSarifUri('https://github.com/o/r/security/advisories/GHSA-3x84-qq85-fj65'))
+      .toBe('https://github.com/o/r/security/advisories/GHSA-3x84-qq85-fj65');
+  });
 });
 
