@@ -49,4 +49,14 @@ describe('debug', () => {
     logError('Scan failed:', undefined);
     expect(consoleErrors[0]).toBe('Scan failed: undefined');
   });
+
+  it('logError escapes control characters in the message and stack', () => {
+    const err = new Error('Unexpected token \x1b]0;PWNED\x07\x1b[2J');
+    logError('visualize: scan-result', err);
+    setDebug(true);
+    logError('visualize: scan-result', err);
+    logError('x', '\x1b[2J');
+    for (const line of consoleErrors) expect(line).not.toMatch(/[\x1b\x07]/);
+    expect(consoleErrors[0]).toContain('\\x1b]0;PWNED\\x07');
+  });
 });
