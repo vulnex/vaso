@@ -192,6 +192,10 @@ function envFile(label: string): string {
     `GATEWAY_TOKEN=\`${canary(`${label} env backtick one line`, generic)}\``,
     // single quotes hold no escapes: the value ends at \', the rest of the line still a secret
     `SECRET_KEY='${canary(`${label} env before \\'`, () => body(14))}\\'${canary(`${label} env after \\'`, () => body(14))}'`,
+    // pieces the shell glues into one value: a short first piece is judged
+    // as the start of the whole value, not on its own
+    `GLUED_PASSWORD="${contextCanary(`${label} env glued short first piece`, body(7), v => `GLUED_PASSWORD="${v}"`)}"'!'`,
+    `GLUED_TOKEN="${contextCanary(`${label} env glued 6-char first piece`, body(6), v => `GLUED_TOKEN="${v}"`)}"'${canary(`${label} env glued second piece`, () => body(10))}'`,
   ].join('\n') + '\n';
 }
 
@@ -820,6 +824,12 @@ async function plantSkillLinks(home: string): Promise<boolean> {
     await rm(join(home, root), { recursive: true, force: true });
     await mkdir(dirname(join(home, root)), { recursive: true });
     await symlink(join(home, target), join(home, root));
+  }
+  // Links into history files no shell list names (.histfile, .irb_history, …)
+  await put('.claude/skills/canary-hist/SKILL.md', '---\nname: canary-hist\n---\n');
+  for (const name of ['.histfile', '.irb_history', '.ksh_history', '.Rhistory', '.lesshst']) {
+    await put(name, `${canary(`${name} behind a skills link`, () => body(24))}\n`);
+    await symlink(join(home, name), join(home, `.claude/skills/canary-hist/${name.slice(1)}.md`));
   }
   // A skill's own settings and env files carry live keys too: disguised (its code ships as is)
   await put('.claude/skills/canary-data/SKILL.md', '---\nname: canary-data\n---\n');
