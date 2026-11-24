@@ -1,11 +1,14 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { spawnSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { mkdtempSync, mkdirSync, writeFileSync, chmodSync, rmSync, readFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 
 const script = fileURLToPath(new URL('../install.sh', import.meta.url));
+/** The stub tarball's ("tgz\n") checksum, as the release's .sha256 asset carries it. */
+const TGZ_SHA = createHash('sha256').update('tgz\n').digest('hex');
 
 /**
  * install.sh against stub `node`, `npm` and `curl`: what it downloads, what
@@ -37,10 +40,18 @@ describe.skipIf(process.platform === 'win32')('install.sh', () => {
     fi
     exit 0 ;;
 esac`);
-    // -o <file> … -w '%{http_code}' <url>: write the body, print the status
-    stub('curl', `out=""; while [ $# -gt 0 ]; do [ "$1" = "-o" ] && out="$2"; shift; done
-[ -n "$out" ] && [ "$FAKE_CODE" = 200 ] && echo tgz > "$out"
-printf '%s' "$FAKE_CODE"`);
+    // -o <file> … -w '%{http_code}' <url>: write the body, print the status.
+    // The tarball is "tgz\n"; its .sha256 asset answers $FAKE_SUM_CODE
+    // (default $FAKE_CODE) with $FAKE_SUM (default: the right checksum)
+    stub('curl', `out=""; url=""; while [ $# -gt 0 ]; do case "$1" in -o) out="$2"; shift ;; -w|--retry) shift ;; -*) ;; *) url="$1" ;; esac; shift; done
+case "$url" in
+  *.sha256) code="\${FAKE_SUM_CODE-$FAKE_CODE}"
+    [ -n "$out" ] && [ "$code" = 200 ] && printf '%s  %s\\n' "\${FAKE_SUM-${TGZ_SHA}}" "\${url##*/}" > "$out"
+    printf '%s' "$code" ;;
+  *) [ -n "$out" ] && [ "$FAKE_CODE" = 200 ] && echo tgz > "$out"
+    echo "$url" >> "${dir}/curl.log"
+    printf '%s' "$FAKE_CODE" ;;
+esac`);
   });
 
   afterEach(() => rmSync(dir, { recursive: true, force: true }));
@@ -59,6 +70,64 @@ printf '%s' "$FAKE_CODE"`);
     expect(r.npm).toMatch(/^install -g \/.*\/vaso-9\.9\.9\.tgz\n$/);
     expect(r.npm).not.toContain('https://');
     expect(r.npm).not.toContain('github:');
+  });
+
+  // dt25 g8-F2: the tarball is checked against vaso-<version>.tgz.sha256
+  it('verifies the tarball checksum before installing', () => {
+    const r = install({ FAKE_CODE: '200' });
+    expect(r.out).toContain(`Tarball checksum verified (sha256 ${TGZ_SHA})`);
+    expect(r.npm).toMatch(/^install -g /);
+  });
+
+  it('a checksum mismatch stops the install', () => {
+    const r = install({ FAKE_CODE: '200', FAKE_SUM: 'a'.repeat(64) });
+    expect(r.status).not.toBe(0);
+    expect(r.out).toContain(`Checksum mismatch for vaso-9.9.9.tgz: expected ${'a'.repeat(64)}, got ${TGZ_SHA}`);
+    expect(r.npm).toBe('');
+  });
+
+  it('a checksum file that is not a checksum stops the install', () => {
+    const r = install({ FAKE_CODE: '200', FAKE_SUM: 'Not Found' });
+    expect(r.status).not.toBe(0);
+    expect(r.out).toContain('is not a SHA-256 checksum file');
+    expect(r.npm).toBe('');
+  });
+
+  it('a release from 1.4.3 on without a checksum asset fails closed', () => {
+    for (const v of ['v9.9.9', 'v1.4.3', 'v1.5.0-rc.1']) {
+      const r = install({ FAKE_CODE: '200', FAKE_SUM_CODE: '404', VASO_VERSION: v });
+      expect(r.status).not.toBe(0);
+      expect(r.out).toContain(`Release ${v} has no checksum asset`);
+      expect(r.out).toContain('refusing to install an unverified tarball');
+      expect(r.npm).toBe('');
+    }
+  });
+
+  it('a checksum download failure (not a 404) stops the install', () => {
+    const r = install({ FAKE_CODE: '200', FAKE_SUM_CODE: '503' });
+    expect(r.status).not.toBe(0);
+    expect(r.out).toMatch(/Could not download .*vaso-9\.9\.9\.tgz\.sha256 \(HTTP 503\)/);
+    expect(r.npm).toBe('');
+  });
+
+  it('a release before 1.4.3 (no checksum assets) installs with a warning', () => {
+    const r = install({ FAKE_CODE: '200', FAKE_SUM_CODE: '404', VASO_VERSION: 'v1.4.2' });
+    expect(r.out).toContain('Release v1.4.2 predates published tarball checksums');
+    expect(r.npm).toMatch(/^install -g \/.*\/vaso-1\.4\.2\.tgz\n$/);
+  });
+
+  // dt25 g8-F3
+  it('accepts VASO_VERSION without the leading v', () => {
+    const r = install({ FAKE_CODE: '200', VASO_VERSION: '9.9.9' });
+    expect(r.out).toContain('Using VASO_VERSION=v9.9.9');
+    expect(readFileSync(join(dir, 'curl.log'), 'utf-8')).toBe('https://github.com/vulnex/vaso/releases/download/v9.9.9/vaso-9.9.9.tgz\n');
+    expect(r.npm).toMatch(/^install -g \/.*\/vaso-9\.9\.9\.tgz\n$/);
+  });
+
+  it('VASO_VERSION=main keeps the git-ref fallback (no tarball, no checksum)', () => {
+    const r = install({ FAKE_CODE: '404', VASO_VERSION: 'main', FAKE_NPM: '10.9.0' });
+    expect(r.npm).toBe('install -g github:vulnex/vaso#main\n');
+    expect(existsSync(join(dir, 'curl.log'))).toBe(false);
   });
 
   it('a tarball that fails to install is an error, not a git fallback', () => {

@@ -20,12 +20,14 @@ VASO is distributed from GitHub. The npm name `vaso` is held by an unrelated pac
 # Recommended (Linux / macOS / WSL): installs the latest release tarball
 curl -fsSL https://raw.githubusercontent.com/vulnex/vaso/main/install.sh | bash
 
-# Alternative: download the release tarball and install it with npm
+# Alternative: download the release tarball, check it, and install it with npm
 curl -fLO https://github.com/vulnex/vaso/releases/download/v1.4.3/vaso-1.4.3.tgz
+curl -fLO https://github.com/vulnex/vaso/releases/download/v1.4.3/vaso-1.4.3.tgz.sha256
+shasum -a 256 -c vaso-1.4.3.tgz.sha256
 npm install -g ./vaso-1.4.3.tgz
 ```
 
-Requires Node.js 20+. Download the tarball before installing it: npm 12 refuses tarball URLs by default (`allow-remote=none`). Set `VASO_VERSION=v1.4.3` in front of `bash` to make the installer pick a specific release.
+Requires Node.js 20+. Download the tarball before installing it: npm 12 refuses tarball URLs by default (`allow-remote=none`). The installer checks the tarball against the release's `vaso-<version>.tgz.sha256` asset (published from v1.4.3 on) and refuses it when that checksum is missing or wrong. Set `VASO_VERSION=v1.4.3` (or `1.4.3`) in front of `bash` to make the installer pick a specific release; `VASO_VERSION=main` installs from the git ref (npm 10 or older only, no checksum).
 
 > **Note:** install the release **tarball**, not `npm install -g github:vulnex/vaso#<tag>`. On npm 11+, the global git-dependency install path mishandles the package and leaves an unusable install; the prebuilt tarball has no build step and installs cleanly.
 

@@ -9,10 +9,15 @@
 // removed — the working tree is never modified.
 //
 // Usage: node scripts/pack-release.mjs [destination-dir]   (default: cwd)
+//
+// Also writes vaso-<version>.tgz.sha256 (`<sha256>  vaso-<version>.tgz`, the
+// `shasum -a 256` format) next to it: a release asset install.sh checks the
+// tarball against before installing it. Prints the tarball path on stdout.
+import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { dirname, join, resolve } from 'node:path';
+import { basename, dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
@@ -40,7 +45,10 @@ try {
   writeFileSync(join(stage, 'package.json'), `${JSON.stringify(pkg, null, 2)}\n`);
   mkdirSync(dest, { recursive: true });
   const out = execFileSync(npm, ['pack', '--ignore-scripts', '--pack-destination', dest], { cwd: stage, encoding: 'utf-8' });
-  console.log(join(dest, out.trim().split('\n').pop()));
+  const tgz = join(dest, out.trim().split('\n').pop());
+  writeFileSync(`${tgz}.sha256`, `${createHash('sha256').update(readFileSync(tgz)).digest('hex')}  ${basename(tgz)}\n`);
+  console.error(`wrote ${tgz}.sha256`);
+  console.log(tgz);
 } finally {
   rmSync(stage, { recursive: true, force: true });
 }

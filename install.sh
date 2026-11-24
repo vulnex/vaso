@@ -13,6 +13,11 @@ BOLD='\033[1m'
 MIN_NODE_MAJOR=20
 REPO="vulnex/vaso"
 FALLBACK_REF="main"
+# Releases from this version on publish vaso-<version>.tgz.sha256 next to the
+# tarball; install.sh refuses their tarball when the checksum is missing or
+# doesn't match. Older releases have no checksum asset and install with a
+# warning.
+CHECKSUM_SINCE="1.4.3"
 
 info()  { echo -e "${CYAN}>${NC} $1"; }
 ok()    { echo -e "${GREEN}>${NC} $1"; }
@@ -128,6 +133,10 @@ install_node_prompt() {
 resolve_version() {
   if [ -n "${VASO_VERSION:-}" ]; then
     VERSION="$VASO_VERSION"
+    # Release tags carry a leading v: VASO_VERSION=1.4.3 means tag v1.4.3
+    if [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+ ]]; then
+      VERSION="v${VERSION}"
+    fi
     info "Using VASO_VERSION=${VERSION}"
     return
   fi
@@ -172,6 +181,76 @@ download_tarball() {
   esac
 }
 
+# Whether release $VERSION must ship a tarball checksum: X.Y.Z at or above
+# CHECKSUM_SINCE, or a version that can't be read (fail closed).
+checksum_required() {
+  local re='^v?([0-9]+)\.([0-9]+)\.([0-9]+)'
+  [[ "$VERSION" =~ $re ]] || return 0
+  local a=("${BASH_REMATCH[1]}" "${BASH_REMATCH[2]}" "${BASH_REMATCH[3]}")
+  [[ "$CHECKSUM_SINCE" =~ $re ]] || return 0
+  local b=("${BASH_REMATCH[1]}" "${BASH_REMATCH[2]}" "${BASH_REMATCH[3]}")
+  local i
+  for i in 0 1 2; do
+    if [ "${a[$i]}" -gt "${b[$i]}" ]; then return 0; fi
+    if [ "${a[$i]}" -lt "${b[$i]}" ]; then return 1; fi
+  done
+  return 0
+}
+
+# The SHA-256 of a file, lowercase hex, from whichever tool the system has.
+sha256_of() {
+  if command -v sha256sum &>/dev/null; then
+    sha256sum "$1" | awk '{print $1}'
+  elif command -v shasum &>/dev/null; then
+    shasum -a 256 "$1" | awk '{print $1}'
+  elif command -v openssl &>/dev/null; then
+    openssl dgst -sha256 "$1" | awk '{print $NF}'
+  else
+    return 1
+  fi
+}
+
+# Stop the install, removing the downloaded tarball.
+abort_install() {
+  rm -rf "${TARBALL_DIR:-}"
+  fail "$1"
+}
+
+# Check $TARBALL against the release's vaso-<version>.tgz.sha256 asset
+# (`<sha256>  vaso-<version>.tgz`, as `shasum -a 256` prints it). A missing
+# asset stops the install for a release that must have one (checksum_required).
+verify_tarball() {
+  local url="$1.sha256"
+  local sum_file="$TARBALL_DIR/checksum.sha256"
+  local code
+  code=$(curl -sSL --retry 2 -o "$sum_file" -w '%{http_code}' "$url" 2>/dev/null) || true
+  case "${code:-000}" in
+    200) ;;
+    404)
+      if checksum_required; then
+        abort_install "Release ${VERSION} has no checksum asset (${url}); refusing to install an unverified tarball. Not installed."
+      fi
+      warn "Release ${VERSION} predates published tarball checksums (v${CHECKSUM_SINCE} and later have them); installing it unverified."
+      return 0
+      ;;
+    *)
+      abort_install "Could not download ${url} (HTTP ${code:-000}). Check your network or proxy and re-run."
+      ;;
+  esac
+  local expected actual
+  expected=$(awk 'NR == 1 { print tolower($1) }' "$sum_file")
+  if ! [[ "$expected" =~ ^[0-9a-f]{64}$ ]]; then
+    abort_install "${url} is not a SHA-256 checksum file; refusing to install an unverified tarball. Not installed."
+  fi
+  if ! actual=$(sha256_of "$TARBALL") || [ -z "$actual" ]; then
+    abort_install "No SHA-256 tool found (sha256sum, shasum or openssl) to verify the tarball. Not installed."
+  fi
+  if [ "$actual" != "$expected" ]; then
+    abort_install "Checksum mismatch for $(basename "$TARBALL"): expected ${expected}, got ${actual}. The download is corrupt or was tampered with. Not installed."
+  fi
+  ok "Tarball checksum verified (sha256 ${actual})"
+}
+
 install_vaso() {
   local ver_no_v="${VERSION#v}"
   local tarball_url="https://github.com/${REPO}/releases/download/${VERSION}/vaso-${ver_no_v}.tgz"
@@ -205,7 +284,9 @@ install_vaso() {
   # first and installed as a local file: npm 12 refuses remote tarball URLs by
   # default (allow-remote=none) but not files. Fall back to the git ref only
   # when the release has no tarball (e.g. the `main` fallback), and only on
-  # npm 10 or older — a tarball
+  # npm 10 or older. The tarball is checked against the release's
+  # vaso-<version>.tgz.sha256 asset first (verify_tarball); the git-ref
+  # fallback has no checksum (npm fetches the ref itself). A tarball
   # that exists but fails to download or install is an error, not a reason to
   # try a worse install path.
   if [ "$VERSION" != "$FALLBACK_REF" ]; then
@@ -213,6 +294,7 @@ install_vaso() {
     local rc=0
     download_tarball "$tarball_url" || rc=$?
     if [ "$rc" -eq 0 ]; then
+      verify_tarball "$tarball_url"
       echo ""
       if ! "${NPM[@]}" install -g "$TARBALL"; then
         rm -rf "$TARBALL_DIR"
@@ -249,6 +331,8 @@ install_vaso() {
     echo ""
     info "Download a release tarball and install it from the file:"
     echo "    curl -fLO https://github.com/${REPO}/releases/download/<tag>/vaso-<version>.tgz"
+    echo "    curl -fLO https://github.com/${REPO}/releases/download/<tag>/vaso-<version>.tgz.sha256"
+    echo "    shasum -a 256 -c vaso-<version>.tgz.sha256   # v${CHECKSUM_SINCE} and later"
     echo "    npm install -g ./vaso-<version>.tgz"
     echo "  for example <tag> = v1.4.3 and <version> = 1.4.3. Releases: https://github.com/${REPO}/releases"
     echo ""
