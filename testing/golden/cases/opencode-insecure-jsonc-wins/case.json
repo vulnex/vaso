@@ -1,0 +1,7 @@
+{
+  "agent": "opencode",
+  "source": "dt25 g3-F3 regression: OpenCode merges opencode.json then opencode.jsonc, so external_directory allow in the jsonc wins over ask in the json",
+  "fail": {
+    "OPC-002": "critical"
+  }
+}
