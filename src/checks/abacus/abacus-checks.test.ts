@@ -142,6 +142,17 @@ describe('ABA-002 broad permission rules', () => {
     expect(root.evidence).toHaveLength(2);
   });
 
+  it('folds tool-name case like the CLI (dt25 g4-F2)', async () => {
+    const r = await check('ABA-002').run(userCtx([cfg(USER_CFG, {
+      permissions: { allow: ['bash(*)', 'BASH', 'edit(~/**)', 'write(//etc/**)', 'bash(curl *)'] },
+    })]));
+    expect(r.severity).toBe('critical');
+    expect(r.evidence?.map(e => e.snippet)).toEqual([
+      'permissions.allow: "bash(*)"', 'permissions.allow: "BASH"', 'permissions.allow: "edit(~/**)"',
+      'permissions.allow: "write(//etc/**)"', 'permissions.allow: "bash(curl *)"',
+    ]);
+  });
+
   it('passes scoped rules', async () => {
     const r = await check('ABA-002').run(userCtx([cfg(USER_CFG, { permissions: { allow: ['Read', 'Edit', 'Bash(git status)'], deny: ['Bash(rm *)'] } })]));
     expect(r.passed).toBe(true);
