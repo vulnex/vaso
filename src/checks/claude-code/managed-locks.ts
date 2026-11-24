@@ -1,4 +1,5 @@
 import type { ScanContext } from '../../core/types.js';
+import { basename } from 'node:path';
 import { parseJsonLenient } from '../../core/jsonc.js';
 import { claudeManagedSettingsPaths } from '../../adapters/claude-code.js';
 
@@ -9,11 +10,19 @@ import { claudeManagedSettingsPaths } from '../../adapters/claude-code.js';
  * `allowManagedHooksOnly` (user, project, local and plugin hooks are
  * blocked) and a managed `disableAllHooks` (no hook runs). Each names the
  * managed file that sets it. Honoured only from managed settings.
+ *
+ * Claude Code merges `managed-settings.json` first, then the
+ * `managed-settings.d/*.json` drop-ins in alphabetical order, and a later
+ * file's single value replaces an earlier one (code.claude.com/docs/en/
+ * managed-settings) — so a drop-in's `false` undoes the base file's `true`.
  */
 export interface ManagedLocks {
   permissionRulesOnly?: string;
   hooksOnly?: string;
   allHooksOff?: string;
+  /** Set when the merged managed settings set `disableAllHooks: false` —
+   *  the managed value wins over every user, project and local file. */
+  allHooksOnInManaged?: string;
   /** The managed settings files (a config in one of them is not locked out). */
   managedFiles: Set<string>;
 }
@@ -32,22 +41,53 @@ export async function claudeManagedLocks(ctx: ScanContext): Promise<ManagedLocks
     }
     if (!data || typeof data !== 'object' || Array.isArray(data)) continue;
     const d = data as Record<string, unknown>;
-    if (d.allowManagedPermissionRulesOnly === true) locks.permissionRulesOnly ??= file;
-    if (d.allowManagedHooksOnly === true) locks.hooksOnly ??= file;
-    if (d.disableAllHooks === true) locks.allHooksOff ??= file;
+    // Later files replace earlier values; only booleans are valid settings
+    if (typeof d.allowManagedPermissionRulesOnly === 'boolean') locks.permissionRulesOnly = d.allowManagedPermissionRulesOnly ? file : undefined;
+    if (typeof d.allowManagedHooksOnly === 'boolean') locks.hooksOnly = d.allowManagedHooksOnly ? file : undefined;
+    if (typeof d.disableAllHooks === 'boolean') {
+      locks.allHooksOff = d.disableAllHooks ? file : undefined;
+      locks.allHooksOnInManaged = d.disableAllHooks ? undefined : file;
+    }
   }
   return locks;
 }
 
 /**
- * Why `disableAllHooks` stops what `file` defines, or undefined. A managed
- * `disableAllHooks` stops everything; one in a user, project or local file
- * stops what those scopes define, not what managed settings define. Claude
- * Code's settings schema: "Disable all hooks and statusLine execution".
+ * Settings files that carry `disableAllHooks`, lowest precedence first:
+ * user/shared-project `settings.json`, then `settings.local.json`
+ * (code.claude.com/docs/en/settings#settings-precedence). `~/.claude.json`
+ * and `.mcp.json` are not settings files — a key there does nothing.
+ */
+const SETTINGS_RANK: Record<string, number> = { 'settings.json': 0, 'settings.local.json': 1 };
+
+/** The non-managed settings file whose `disableAllHooks` is left after
+ *  precedence, with its value; undefined when none sets it. */
+function scopedAllHooks(ctx: ScanContext, locks: ManagedLocks): { file: string; value: boolean } | undefined {
+  let best: { file: string; value: boolean; rank: number } | undefined;
+  for (const c of ctx.configs) {
+    if (locks.managedFiles.has(c.filePath)) continue;
+    const rank = SETTINGS_RANK[basename(c.filePath)];
+    if (rank === undefined) continue;
+    const value = (c.data as Record<string, unknown> | undefined)?.disableAllHooks;
+    if (typeof value !== 'boolean') continue;
+    // Same rank: the later file wins (the repo-root settings.local.json is
+    // loaded after the working directory's, and its value applies)
+    if (!best || rank >= best.rank) best = { file: c.filePath, value, rank };
+  }
+  return best && { file: best.file, value: best.value };
+}
+
+/**
+ * Why `disableAllHooks` stops what `file` defines, or undefined. Claude Code
+ * reads the value left after settings precedence (code.claude.com/docs/en/
+ * hooks): managed > local > project > user, so a later `false` undoes an
+ * earlier `true`. A managed `true` stops everything; a `true` left from a
+ * user, project or local file stops what those scopes define, not what
+ * managed settings define. Only settings files count.
  */
 export function allHooksOffReason(ctx: ScanContext, locks: ManagedLocks, file: string): string | undefined {
   if (locks.allHooksOff) return `${locks.allHooksOff} sets disableAllHooks`;
-  if (locks.managedFiles.has(file)) return undefined;
-  const scoped = ctx.configs.find(c => !locks.managedFiles.has(c.filePath) && (c.data as Record<string, unknown> | undefined)?.disableAllHooks === true);
-  return scoped ? `${scoped.filePath} sets disableAllHooks` : undefined;
+  if (locks.allHooksOnInManaged || locks.managedFiles.has(file)) return undefined;
+  const scoped = scopedAllHooks(ctx, locks);
+  return scoped?.value ? `${scoped.file} sets disableAllHooks` : undefined;
 }
