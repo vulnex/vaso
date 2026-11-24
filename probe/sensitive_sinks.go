@@ -39,7 +39,7 @@ var sensitiveSinkPatterns = []string{
 	`(^|\/)openshell\/(gateway\/credentials|docker-sandbox-tokens|gateways\/[^/]+\/mtls)(\/|$)|(^|\/)openshell\/gateways\/[^/]+\/(?:oidc_token\.json|edge_token)$`,
 	`(^|\/)\.(vault-token|my\.cnf|mylogin\.cnf|s3cfg|boto)$|(^|\/)\.cargo\/credentials(\.toml)?$|(^|\/)\.config\/rclone\/rclone\.conf$|(^|\/)\.terraform\.d\/credentials\.tfrc\.json$`,
 	`(^|\/)\.local\/share\/keyrings(\/|$)`,
-	`(^|\/)\.(bash|zsh|sh|python|psql|mysql|sqlite|node_repl|rediscli)_history$|(^|\/)\.zsh_sessions(\/|$)|(^|\/)\.local\/share\/fish\/fish_history$`,
+	`(^|\/)\.([\w-]*history|histfile|lesshst)$|(^|\/)\.zsh_sessions(\/|$)|(^|\/)\.local\/share\/fish\/fish_history$`,
 }
 
 var sensitiveSinks = func() []*regexp.Regexp {

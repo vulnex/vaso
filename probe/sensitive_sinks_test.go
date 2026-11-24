@@ -174,3 +174,43 @@ func TestConfigLinkedToCredentialFilesAndHistoryNotShipped(t *testing.T) {
 		}
 	}
 }
+
+// Memory files linked to a history file no shell list names (.histfile,
+// .irb_history, .ksh_history, .Rhistory, .lesshst) are withheld too: the sink
+// covers every dot-file ending in "history", as credentialName does.
+func TestMemoryLinkedToAnyHistoryFileNotShipped(t *testing.T) {
+	home := setupHome(t)
+	targets := map[string]string{
+		".histfile":    ": 1:0;mysql -pCANARYHISTFILE7Tk4\n",
+		".irb_history": "token = 'CANARYIRB9Zq8Wv3'\n",
+		".ksh_history": "export PW=CANARYKSH5Np2Lm\n",
+		".Rhistory":    "Sys.setenv(KEY='CANARYRHIST3Hs9')\n",
+		".lesshst":     ".less-history-file:\n\"CANARYLESS8Jd6\n",
+	}
+	links := []string{".claude/CLAUDE.md", ".codex/AGENTS.md", ".gemini/GEMINI.md", ".claude/settings.json", ".qwen/settings.json"}
+	var paths []string
+	i := 0
+	for rel, body := range targets {
+		write(t, filepath.Join(home, rel), body, 0o600)
+		mustSymlink(t, filepath.Join(home, rel), filepath.Join(home, links[i]))
+		paths = append(paths, "~/"+links[i])
+		i++
+	}
+	snap := Collect(ProbeManifest{FilePaths: paths}, false)
+	for _, p := range paths {
+		e := snap.Files[filepath.Join(home, p[2:])]
+		if !e.Exists || e.Omitted != "sensitive" || strings.Contains(e.Content, "CANARY") {
+			t.Errorf("%s: %+v, want present and omitted sensitive", p, e)
+		}
+	}
+	for _, name := range []string{".histfile", ".irb_history", ".ksh_history", ".Rhistory", ".lesshst", ".node-repl-history"} {
+		if len(sinkSet("/home/u/"+name)) == 0 {
+			t.Errorf("%s: not a sensitive sink", name)
+		}
+	}
+	for _, name := range []string{"history.md", ".histfile.bak", ".history/x", "command-history-state.json"} {
+		if len(sinkSet("/home/u/"+name)) != 0 {
+			t.Errorf("%s: should not be a sink", name)
+		}
+	}
+}

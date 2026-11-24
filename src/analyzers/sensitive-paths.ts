@@ -43,10 +43,13 @@ export const SENSITIVE_SINKS: SensitiveSink[] = [
   { re: /(^|\/)\.ironclaw\/reborn\/(webui-token|([^/]+\/)?\.reborn-local-dev-secrets-master-key)$|(^|\/)\.?zeroclaw\/\.secret_key$/iu, label: 'agent credentials (IronClaw WebUI token / master key, ZeroClaw secret key)' },
   { re: /(^|\/)openshell\/(gateway\/credentials|docker-sandbox-tokens|gateways\/[^/]+\/mtls)(\/|$)|(^|\/)openshell\/gateways\/[^/]+\/(?:oidc_token\.json|edge_token)$/iu, label: 'OpenShell credentials (key-encryption key, sandbox tokens, mTLS keys)' },
   // Other tools' credential files, keyring and typed-command history: a
-  // config or skill path linked to one is neither read nor shipped.
+  // config or skill path linked to one is neither read nor shipped. History
+  // is every dot-file ending in "history" (.irb_history, .Rhistory,
+  // .ksh_history, …) plus .histfile and .lesshst — the probe's credentialName
+  // set, not a list of known shells.
   { re: /(^|\/)\.(vault-token|my\.cnf|mylogin\.cnf|s3cfg|boto)$|(^|\/)\.cargo\/credentials(\.toml)?$|(^|\/)\.config\/rclone\/rclone\.conf$|(^|\/)\.terraform\.d\/credentials\.tfrc\.json$/iu, label: 'credentials file (.vault-token, .my.cnf, .s3cfg, .boto, cargo, rclone, terraform)' },
   { re: /(^|\/)\.local\/share\/keyrings(\/|$)/iu, label: 'GNOME keyring credentials (~/.local/share/keyrings)' },
-  { re: /(^|\/)\.(bash|zsh|sh|python|psql|mysql|sqlite|node_repl|rediscli)_history$|(^|\/)\.zsh_sessions(\/|$)|(^|\/)\.local\/share\/fish\/fish_history$/iu, label: 'shell or REPL history (typed commands and passwords)' },
+  { re: /(^|\/)\.([\w-]*history|histfile|lesshst)$|(^|\/)\.zsh_sessions(\/|$)|(^|\/)\.local\/share\/fish\/fish_history$/iu, label: 'shell or REPL history (typed commands and passwords: any ~/.*history, .histfile, .lesshst)' },
 ];
 
 /**

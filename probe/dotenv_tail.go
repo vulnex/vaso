@@ -29,7 +29,13 @@ func (c *collector) dotenvEscapedTail(key, raw string) string {
 	if len(out) != len(tail) {
 		return raw
 	}
-	return raw[:j+1] + out + raw[j+1+len(tail):]
+	// the piece before the \' is the start of the same secret: judged by
+	// the joined length, like dotenvGluedTail's first piece
+	head := raw[:j-1]
+	if h := c.gluedHead(head[1:], head[1:], j-2+len(tail)); len(h) == j-2 {
+		head = head[:1] + h
+	}
+	return head + raw[j-1:j+1] + out + raw[j+1+len(tail):]
 }
 
 // dotenvGluedTail disguises the pieces a shell glues onto a quoted dotenv
@@ -70,20 +76,20 @@ func (c *collector) dotenvGluedTail(key, raw, done string) string {
 		return done
 	}
 	out := []byte(done)
-	at := end + 1
+	// the glued pieces after the first; the whole value is all of them
+	var pieces [][2]int
+	joined := end - 1
 	put := func(from, to int) {
-		if to-from < 1 {
-			return
-		}
-		piece := done[from:to]
-		if s := c.disguiseGluedPiece(piece); len(s) == len(piece) {
-			copy(out[from:to], s)
+		if to-from >= 1 {
+			pieces = append(pieces, [2]int{from, to})
+			joined += to - from
 		}
 	}
-	for i := at; i < len(done); {
+scan:
+	for i := end + 1; i < len(done); {
 		switch ch := done[i]; ch {
 		case ' ', '\t':
-			return string(out)
+			break scan
 		case '\\':
 			i += 2
 		case '\'', '"':
@@ -94,7 +100,7 @@ func (c *collector) dotenvGluedTail(key, raw, done string) string {
 				k = quoteEnd(done[i+1:], '"', false)
 			}
 			if k < 0 {
-				return string(out)
+				break scan
 			}
 			put(i+1, i+1+k)
 			i += k + 2
@@ -107,7 +113,56 @@ func (c *collector) dotenvGluedTail(key, raw, done string) string {
 			i = j
 		}
 	}
+	if len(pieces) == 0 {
+		return done
+	}
+	// The first piece is the start of the whole value: it keeps only the
+	// head a stand-in of the joined value keeps (none under 16 characters),
+	// not what its own length allowed — and is disguised even when, short on
+	// its own, the keyed rules left it as written ("S3cr3tP"'!').
+	if h := c.gluedHead(raw[1:end], done[1:end], joined); len(h) == end-1 {
+		copy(out[1:end], h)
+	}
+	for _, p := range pieces {
+		piece := done[p[0]:p[1]]
+		if s := c.disguiseGluedPiece(piece); len(s) == len(piece) {
+			copy(out[p[0]:p[1]], s)
+		}
+	}
 	return string(out)
+}
+
+// gluedHead: a stand-in for the first piece of a value glued from several
+// (raw as written, done what the keyed rules made of it alone) that keeps
+// the head keepBounds allows for the joined value's length and the piece's
+// verdicts. Falls back to done when that was disguised or may be kept
+// whole, else to disguiseArgv.
+func (c *collector) gluedHead(raw, done string, joined int) string {
+	if isPlaceholderSecret(raw) || isSecretReference(raw) {
+		return done
+	}
+	pre, _ := keepBounds(joined)
+	if pre >= len(raw) {
+		return raw
+	}
+	fixed := make([]bool, len(raw))
+	for i := 0; i < pre; i++ {
+		fixed[i] = true
+	}
+	want := verdictsOf(raw)
+	for try := 0; try < 64; try++ {
+		if cand := randomLike(raw, fixed); cand != raw && verdictsOf(cand) == want {
+			if c.disguised == nil {
+				c.disguised = map[string]string{}
+			}
+			c.disguised[cand] = cand
+			return cand
+		}
+	}
+	if done != raw {
+		return done
+	}
+	return c.disguiseArgv(raw)
 }
 
 // disguiseGluedPiece: a stand-in for a piece from the middle of a secret.

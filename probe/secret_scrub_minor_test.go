@@ -76,3 +76,34 @@ func TestScrubDotenvGluedPieces(t *testing.T) {
 	}
 	sameShape(t, doc, out)
 }
+
+// 1.4.3 re-verify: the first piece of a glued dotenv value was judged on its
+// own, so a short one ("S3cr3tP"'!') shipped as written and a 6-character
+// one kept more than the joined value's stand-in keeps.
+func TestScrubDotenvGluedShortFirstPiece(t *testing.T) {
+	doc := "DB_PASSWORD=\"S3cr3tP\"'!'\n" +
+		"DB_PASSWORD2=\"Pq8Wo3\"'Ie7Ru2TyXc'\n" +
+		"API_TOKEN='Zx4Cv7'\"Bn2Mm5Qw9Er\"\n" +
+		"AUTH_SECRET=\"Kd3Fg8\"Hj6Lp1Wq4\n" +
+		"DB_PASS=\"Yt5Ui2\"\"Op7As3Df\"\n" +
+		"SECRET_KEY='Gh9J\\'Kl8mNo7pQr'\n" +
+		"PLAIN_NAME='hello'\"world\"\n"
+	for i := 0; i < 20; i++ {
+		out := string((&collector{}).scrubSecrets("/h/.hermes/.env", []byte(doc)))
+		for _, s := range []string{"S3cr3tP", "Pq8Wo3", "Zx4Cv7", "Kd3Fg8", "Yt5Ui2", "Gh9J"} {
+			if strings.Contains(out, s) {
+				t.Fatalf("%s shipped:\n%s", s, out)
+			}
+		}
+		if !strings.Contains(out, "PLAIN_NAME='hello'\"world\"") {
+			t.Fatalf("non-secret changed:\n%s", out)
+		}
+		sameShape(t, doc, out)
+	}
+	// a joined value of 16+ characters keeps the stand-in's 4-character head
+	long := "DB_PASSWORD=\"Pq8Wo3Ie\"'7Ru2TyXcAb'\n"
+	out := string((&collector{}).scrubSecrets("/h/.hermes/.env", []byte(long)))
+	if !strings.HasPrefix(out, "DB_PASSWORD=\"Pq8W") || strings.Contains(out, "Pq8Wo3Ie") {
+		t.Errorf("head of a 16+ joined value:\n%s", out)
+	}
+}

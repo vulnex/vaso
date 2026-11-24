@@ -264,11 +264,12 @@ func TestCredentialNamedFilesInConfigTreesAreMetadataOnly(t *testing.T) {
 	write(t, filepath.Join(tree, "s", "secrets.json"), `{"x": "`+bare+`"}`, 0o755)
 	// files that are sensitive sinks themselves (like .netrc) are not walked
 	// at all, here or locally (skill-root-scope.ts)
-	sinks := []string{".vault-token", ".psql_history", ".bash_history", ".mysql_history", ".netrc"}
+	sinks := []string{".vault-token", ".psql_history", ".bash_history", ".mysql_history", ".netrc",
+		".histfile", ".lesshst", ".irb_history", ".Rhistory"}
 	for _, n := range sinks {
 		write(t, filepath.Join(tree, "s", n), "hvs.Q7rT2mZ9kLp4Vw8NcB1dYh6J PASSWORD 'pw-"+bare+"'\n", 0o600)
 	}
-	stores := []string{".histfile", ".lesshst", "login.keyring",
+	stores := []string{"login.keyring",
 		"Cookies", "Login Data", "Web Data", "key4.db", "logins.json",
 		filepath.Join("keyrings", "user.keystore2"), filepath.Join("keyrings", "default")}
 	for _, n := range stores {
