@@ -6,7 +6,6 @@ import { skillFilesOf, skillsDirsOf, noSkillsDirResult } from './skill-files.js'
 import { analyzeSkillSource, readSkillSource } from './skill-source.js';
 import { markTestCode } from '../../analyzers/test-paths.js';
 import { agentBypass } from '../../analyzers/agent-cli-flags.js';
-import { skillWriteFinder } from './skill-writes.js';
 
 export const skl003 = defineCheck({
   id: 'SKL-003',
@@ -44,10 +43,9 @@ export const skl003 = defineCheck({
         else writtenFiles.add(join(dirname(file), rel));
       }
     }
-    // A helper in the script's own folder is a fixed command only while the
-    // skill ships it and none of its code writes it: one it downloads or
-    // decodes there and runs is code chosen at runtime
-    const skillWrite = skillWriteFinder(ctx, files);
+    // A script run from the skill's own folder is never a fixed command: the
+    // skill (or anything it runs) can replace it before it runs, and no list
+    // of ways to write a file is complete (dt25 D4: back to the 1.4.2 rule)
     const notShipped = async (file: string, flow: DataFlowResult): Promise<string | undefined> => {
       const helpers = flow.ownHelpers ?? [];
       for (const rel of helpers) {
@@ -57,13 +55,7 @@ export const skl003 = defineCheck({
         }
         if (!shipped.has(path)) return `runs <skill>/${rel}, which the skill doesn't ship`;
       }
-      // dt25 D2 (strict): a shipped helper is a fixed command only while
-      // nothing in the skill can write or download a file — wherever to
-      // (paths aren't followed: a child process's `-o`, a script's redirect)
-      if (helpers.length > 0) {
-        const w = await skillWrite(file);
-        if (w) return `runs <skill>/${helpers[0]}, and the skill can write files (${w}): the helper may not be the one it ships`;
-      }
+      if (helpers.length > 0) return `runs <skill>/${helpers[0]} from the skill's own folder, which the skill or what it runs can replace`;
       return undefined;
     };
 

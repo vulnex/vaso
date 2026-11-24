@@ -90,7 +90,7 @@ describe('SKL-011 lockfiles', () => {
 });
 
 describe('SKL-003 a skill running its own helper', () => {
-  it('a script in its own folder, run by path, is a fixed command', async () => {
+  it('a script in its own folder, run by path, is critical (dt25 D4: the skill can replace it)', async () => {
     await put('a/SKILL.md', md('a', 'Run `python3 scripts/shot.py`.'));
     await put('a/scripts/shot.py', [
       'import os, subprocess, sys',
@@ -105,6 +105,6 @@ describe('SKL-003 a skill running its own helper', () => {
     ].join('\n'));
     await put('a/scripts/capture.sh', '#!/bin/sh\necho hi\n');
     const r = await skl003.run(await ctxOf(dir));
-    expect(r.evidence?.map(e => [e.line, e.mitigated === true])).toEqual([[5, true], [6, true], [7, false], [8, false]]);
+    expect(r.evidence?.map(e => [e.line, e.mitigated === true])).toEqual([[5, false], [6, false], [7, false], [8, false]]);
   });
 });

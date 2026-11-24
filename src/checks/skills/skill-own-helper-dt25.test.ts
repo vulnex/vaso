@@ -104,7 +104,7 @@ describe('SKL-003 a helper the skill writes itself (dt25 g6-F1)', () => {
     expect(r.evidence?.[0]?.detail).toMatch(/doesn't ship/);
   });
 
-  it('a shipped helper only read, in a skill that writes nothing, stays a fixed command', async () => {
+  it('D4: a shipped helper run from the skill folder is critical even when the skill writes nothing', async () => {
     await put('a/SKILL.md', md('a'));
     await put('a/capture.sh', '#!/bin/sh\necho hi\n');
     await put('a/main.js', [
@@ -115,10 +115,11 @@ describe('SKL-003 a helper the skill writes itself (dt25 g6-F1)', () => {
       '',
     ].join('\n'));
     const r = await skl003.run(await ctxOf(dir));
-    expect(verdicts(r, 'main.js')).toEqual([[4, true]]);
+    expect(verdicts(r, 'main.js')).toEqual([[4, false]]);
+    expect(r.evidence?.[0]?.detail).toMatch(/from the skill's own folder/);
   });
 
-  it('D2 strict: a skill that writes any file (even elsewhere in its folder) makes its own-folder runs critical', async () => {
+  it('a skill that writes any file (even elsewhere in its folder): its own-folder runs are critical', async () => {
     await put('a/SKILL.md', md('a'));
     await put('a/capture.sh', '#!/bin/sh\necho hi\n');
     await put('a/main.js', [
@@ -130,7 +131,7 @@ describe('SKL-003 a helper the skill writes itself (dt25 g6-F1)', () => {
     ].join('\n'));
     const r = await skl003.run(await ctxOf(dir));
     expect(verdicts(r, 'main.js')).toEqual([[4, false]]);
-    expect(r.evidence?.[0]?.detail).toMatch(/can write files \(main\.js:3, writeFileSync\(\)\)/);
+    expect(r.evidence?.[0]?.detail).toMatch(/from the skill's own folder/);
   });
 
   it('Python: urlretrieve into the skill folder then subprocess.run is critical', async () => {
@@ -165,7 +166,7 @@ describe('SKL-003 a helper the skill writes itself (dt25 g6-F1)', () => {
   });
 });
 
-describe('SKL-003 own-folder helper, D2 strict: anything in the skill that writes (dt25 rv g6-R1/R2)', () => {
+describe('SKL-003 own-folder helper: always critical (dt25 D4; rv g6-R1/R2)', () => {
   const shipped = async (name: string) => {
     await put(`${name}/SKILL.md`, md(name));
     await put(`${name}/helper.sh`, '#!/bin/sh\necho ok\n');
@@ -205,8 +206,8 @@ describe('SKL-003 own-folder helper, D2 strict: anything in the skill that write
     const r = await skl003.run(await ctxOf(dir));
     expect(verdicts(r, 's/index.js')).toEqual([[2, false]]);
     expect(verdicts(r, 'r/index.js')).toEqual([[2, false]]);
-    expect(r.evidence?.find(e => e.file?.endsWith('s/index.js'))?.detail).toMatch(/setup\.sh:2, runs wget/);
-    expect(r.evidence?.find(e => e.file?.endsWith('r/index.js'))?.detail).toMatch(/setup\.sh:2, shell redirect/);
+    expect(r.evidence?.find(e => e.file?.endsWith('s/index.js'))?.detail).toMatch(/from the skill's own folder/);
+    expect(r.evidence?.find(e => e.file?.endsWith('r/index.js'))?.detail).toMatch(/from the skill's own folder/);
   });
 
   it('writers the path tracking cannot place: a computed fs method, a helper module, a Markdown code block, package.json', async () => {
@@ -222,22 +223,22 @@ describe('SKL-003 own-folder helper, D2 strict: anything in the skill that write
     for (const n of ['c', 'm', 'k', 'n']) expect(verdicts(r, `${n}/index.js`)).toEqual([[4 - (n === 'c' ? 0 : 2), false]]);
   });
 
-  it('a write in another skill of the same directory does not count', async () => {
+  it('D4: a shipped helper is critical whatever other skills in the directory do', async () => {
     await shipped('a');
     await put('a/index.js', runJs);
     await put('b/SKILL.md', md('b'));
     await put('b/index.js', "require('fs').writeFileSync('/tmp/x', 'y');\n");
     const r = await skl003.run(await ctxOf(dir));
-    expect(verdicts(r, 'a/index.js')).toEqual([[2, true]]);
+    expect(verdicts(r, 'a/index.js')).toEqual([[2, false]]);
   });
 
-  it('a skill file that can\'t be read counts: what it does isn\'t known', async () => {
+  it('a skill with a file that can\'t be read: its own-folder runs are critical', async () => {
     await shipped('u');
     await put('u/index.js', runJs);
     await put('u/bin/tool', '\x7fELF\x02\x01\x01\x00\x00\x00\x00\x00\x00\x00\x00\x00');
     const r = await skl003.run(await ctxOf(dir));
     expect(verdicts(r, 'u/index.js')).toEqual([[2, false]]);
-    expect(r.evidence?.find(e => e.file?.endsWith('u/index.js'))?.detail).toMatch(/bin\/tool can't be read/);
+    expect(r.evidence?.find(e => e.file?.endsWith('u/index.js'))?.detail).toMatch(/from the skill's own folder/);
   });
 });
 

@@ -89,7 +89,7 @@ describe('SKL-001/006 credential paths built from a list', () => {
 });
 
 describe('SKL-003 a JS skill running its own helper', () => {
-  it('a script in its own folder, run by path, is a fixed command', async () => {
+  it('a script in its own folder, run by path, is critical (dt25 D4: the skill can replace it)', async () => {
     await put('a/SKILL.md', md('a', 'x'));
     await put('a/bin/run.mjs', [
       "import path from 'node:path';",
@@ -110,8 +110,8 @@ describe('SKL-003 a JS skill running its own helper', () => {
     await put('a/bin/capture.sh', '#!/bin/sh\necho hi\n');
     const r = await skl003.run(await ctxOf(dir));
     const mjs = (r.evidence ?? []).filter(e => e.file?.endsWith('run.mjs')).map(e => [e.line, e.mitigated === true]);
-    expect(mjs).toEqual([[5, true], [6, true], [7, true], [8, false], [9, false], [10, false]]);
-    expect((r.evidence ?? []).find(e => e.file?.endsWith('run.js'))?.mitigated).toBe(true);
+    expect(mjs).toEqual([[5, false], [6, false], [7, false], [8, false], [9, false], [10, false]]);
+    expect((r.evidence ?? []).find(e => e.file?.endsWith('run.js'))?.mitigated ?? false).toBe(false);
   });
 });
 
