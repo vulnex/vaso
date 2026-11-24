@@ -1,0 +1,17 @@
+[Unit]
+Description=OpenClaw Gateway (v2026.11.2)
+After=network-online.target
+Wants=network-online.target
+StartLimitBurst=5
+StartLimitIntervalSec=60
+
+[Service]
+ExecStart={{HOME}}/.nvm/versions/node/v24.22.1/bin/node {{HOME}}/.nvm/versions/node/v24.16.0/lib/node_modules/openclaw/openclaw.mjs gateway --port 18789
+Restart=always
+RestartSec=5
+TimeoutStopSec=30
+SuccessExitStatus=0 143
+KillMode=control-group
+
+[Install]
+WantedBy=default.target

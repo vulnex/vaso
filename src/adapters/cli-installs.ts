@@ -297,6 +297,28 @@ function newest(installs: CliInstall[], opts?: VersionParseOptions): CliInstall 
   return versioned.reduce((a, b) => (compareVersions(b.version!, a.version!, opts) > 0 ? b : a));
 }
 
+/**
+ * Every existing copy of a CLI named `names` in the locations discovery
+ * searches without running `which` — the common system and user bin dirs and
+ * every Node version manager's per-version bin dirs — whatever its version.
+ * `otherInstalls` keeps only copies at another version (one advisory finding
+ * per version); deciding which programs are the agent's own (RUN-001/002)
+ * needs all of them: a same-version nvm copy is often the package a wrapper
+ * in ~/.local/bin and the agent's service run. The probe collects the same
+ * locations (`cliInstallGlobs`, `cliInstallSystemPaths`).
+ */
+export async function cliCopyPaths(home: string, fs: FSProvider, names: readonly string[]): Promise<string[]> {
+  const dirs = [...COMMON_SYSTEM_BIN_DIRS, ...COMMON_USER_BIN_DIRS.map(d => join(home, d)), ...(await nodeManagerBinDirs(home, fs))];
+  const out: string[] = [];
+  for (const dir of dirs) {
+    for (const name of names) {
+      const p = join(dir, name);
+      try { if (await fs.access(p)) out.push(p); } catch {}
+    }
+  }
+  return out;
+}
+
 /** Probe-manifest globs that surface every copy of `name` on a remote host. */
 export function cliInstallGlobs(names: readonly string[]): string[] {
   return names.flatMap(name => [

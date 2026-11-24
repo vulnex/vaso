@@ -1,0 +1,6 @@
+#!/bin/sh
+# Keep OpenClaw on its dedicated runtime without changing Node defaults.
+# (fixture stand-in for the installer wrapper: it reports the version the
+# wrapped package has)
+if [ "$1" = "--version" ]; then echo "OpenClaw 2026.11.2"; exit 0; fi
+exec "{{HOME}}/.nvm/versions/node/v24.22.1/bin/node" "{{HOME}}/.nvm/versions/node/v24.16.0/lib/node_modules/openclaw/openclaw.mjs" "$@"
