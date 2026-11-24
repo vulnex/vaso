@@ -1,8 +1,8 @@
 import { describe, it, expect, vi } from 'vitest';
-import { mkdtempSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
-import { assertDistinctLabels, assertIdentityFiles, describeConnectFailure, executeRemoteProbe, parseProbeOutput, parseSSHTarget, uniqueTargets, withRetry } from './ssh.js';
+import { dirname, join } from 'node:path';
+import { assertDistinctLabels, assertIdentityFiles, describeConnectFailure, executeRemoteProbe, makePrivateLocalDir, parseProbeOutput, parseRemoteTempDir, parseSSHTarget, uniqueTargets, withRetry } from './ssh.js';
 
 describe('parseProbeOutput', () => {
   const target = { user: 'u', host: 'h.test' };
@@ -283,5 +283,104 @@ describe('ssh not installed', () => {
       process.env.PATH = path;
     }
     expect(sleep).not.toHaveBeenCalled();
+  });
+});
+
+describe('temporary files of a remote scan (dt25 g9-F1)', () => {
+  // A fake ssh/scp pair: logs each call (argv + the mode of the directory a
+  // local file sits in) and answers the commands executeRemoteProbe sends.
+  const FAKE = `#!/usr/bin/env node
+const fs = require('fs'), path = require('path');
+const args = process.argv.slice(2);
+const entry = { cmd: path.basename(process.argv[1]), args };
+if (entry.cmd === 'scp') {
+  const src = args[args.length - 2];
+  entry.srcDirMode = (fs.statSync(path.dirname(src)).mode & 0o777).toString(8);
+  entry.srcMode = (fs.statSync(src).mode & 0o777).toString(8);
+}
+const cp = args.find(a => a.startsWith('ControlPath='));
+if (cp) entry.controlDirMode = (fs.statSync(path.dirname(cp.slice(12))).mode & 0o777).toString(8);
+fs.appendFileSync(process.env.FAKE_SSH_LOG, JSON.stringify(entry) + '\\n');
+const last = args[args.length - 1];
+if (entry.cmd === 'ssh' && last.includes('uname')) process.stdout.write('Linux\\nx86_64\\n');
+else if (entry.cmd === 'ssh' && last.includes('mktemp')) process.stdout.write(process.env.FAKE_MKTEMP);
+else if (entry.cmd === 'ssh' && last.includes('--manifest')) process.stdout.write(JSON.stringify({ version: 1, platform: 'linux', hostname: 'h', homedir: '/home/u', files: {}, directories: {}, commandOutputs: {} }));
+`;
+
+  async function run(mktempOut: string): Promise<{ log: Array<{ cmd: string; args: string[]; srcDirMode?: string; srcMode?: string; controlDirMode?: string }>; result: unknown }> {
+    const bin = mkdtempSync(join(tmpdir(), 'vaso-fakessh-'));
+    const probes = mkdtempSync(join(tmpdir(), 'vaso-fakeprobes-'));
+    writeFileSync(join(probes, 'vaso-probe-linux-amd64'), 'probe');
+    for (const name of ['ssh', 'scp']) writeFileSync(join(bin, name), FAKE, { mode: 0o755 });
+    const logPath = join(bin, 'log.jsonl');
+    const saved = { PATH: process.env.PATH, FAKE_SSH_LOG: process.env.FAKE_SSH_LOG, FAKE_MKTEMP: process.env.FAKE_MKTEMP };
+    process.env.PATH = `${bin}:${saved.PATH}`;
+    process.env.FAKE_SSH_LOG = logPath;
+    process.env.FAKE_MKTEMP = mktempOut;
+    let result: unknown;
+    try {
+      result = await executeRemoteProbe({ user: 'u', host: 'h', port: 22, sudo: true }, { probeBinDir: probes, manifest: { filePaths: [] } as never, timeout: 30_000 })
+        .catch((err: Error) => err);
+    } finally {
+      process.env.PATH = saved.PATH;
+      for (const k of ['FAKE_SSH_LOG', 'FAKE_MKTEMP'] as const) {
+        if (saved[k] === undefined) delete process.env[k]; else process.env[k] = saved[k];
+      }
+    }
+    const log = readFileSync(logPath, 'utf-8').trim().split('\n').map(l => JSON.parse(l));
+    return { log, result };
+  }
+
+  it('uploads into a private mktemp directory and removes it, and keeps the local side private', async () => {
+    const remote = '/tmp/vaso-probe.Ab3dE9fGh1';
+    const { log, result } = await run(`${remote}\n`);
+    expect(result).not.toBeInstanceOf(Error);
+    const all = log.flatMap(e => e.args).join(' ');
+    // No fixed, guessable names in a shared /tmp
+    expect(all).not.toMatch(/\/tmp\/vaso-(ssh|manifest|probe)-/);
+    const controlPath = log[0].args.find(a => a.startsWith('ControlPath='))!.slice(12);
+    expect(controlPath.length).toBeLessThanOrEqual(80);
+    for (const e of log) if (e.controlDirMode) expect(e.controlDirMode).toBe('700');
+    // mktemp comes before any upload
+    const mktempAt = log.findIndex(e => e.args.some(a => a.includes('mktemp -d')));
+    const firstScp = log.findIndex(e => e.cmd === 'scp');
+    expect(mktempAt).toBeGreaterThan(-1);
+    expect(firstScp).toBeGreaterThan(mktempAt);
+    const scps = log.filter(e => e.cmd === 'scp');
+    expect(scps.map(e => e.args[e.args.length - 1])).toEqual([`u@h:${remote}/vaso-probe`, `u@h:${remote}/manifest.json`]);
+    // The manifest copy: owner-only file in an owner-only directory
+    expect(scps[1].srcDirMode).toBe('700');
+    expect(scps[1].srcMode).toBe('600');
+    const runCmd = log.find(e => e.args.some(a => a.includes('--manifest')))!;
+    expect(runCmd.args[runCmd.args.length - 1]).toBe(`${remote}/vaso-probe --manifest ${remote}/manifest.json --escalate`);
+    // The whole remote directory is removed, then the local one
+    expect(log.some(e => e.args[e.args.length - 1] === `rm -rf -- ${remote}`)).toBe(true);
+    expect(existsSync(dirname(controlPath))).toBe(false);
+  });
+
+  it('fails closed when the target cannot make a private directory', async () => {
+    for (const out of ['', '/tmp/vaso-probe-fixed', '/tmp/vaso-probe.abcdef/../x', '/tmp/vaso-probe.abcdef\n/tmp/other', 'mktemp: not found']) {
+      const { log, result } = await run(out);
+      expect(result, JSON.stringify(out)).toBeInstanceOf(Error);
+      expect((result as Error).message).toMatch(/could not create a private temporary directory/);
+      expect(log.some(e => e.cmd === 'scp')).toBe(false);
+      expect(log.some(e => e.args.some(a => a.startsWith('rm ')))).toBe(false);
+    }
+  });
+
+  it('parseRemoteTempDir accepts only mktemp output for its template', () => {
+    expect(parseRemoteTempDir('/tmp/vaso-probe.XyZ123abcd\n', { user: 'u', host: 'h' })).toBe('/tmp/vaso-probe.XyZ123abcd');
+    expect(() => parseRemoteTempDir('/tmp/vaso-probe.a b', { user: 'u', host: 'h' })).toThrow(/host not scanned/);
+    expect(() => parseRemoteTempDir('/tmp/vaso-probe.$(id)', { user: 'u', host: 'h' })).toThrow(/host not scanned/);
+  });
+
+  it('makePrivateLocalDir falls back to /tmp when $TMPDIR is too long for a socket path', async () => {
+    const dir = await makePrivateLocalDir('/' + 'x'.repeat(100));
+    try {
+      expect(dir.startsWith('/tmp/vaso-')).toBe(true);
+      expect(statSync(dir).mode & 0o777).toBe(0o700);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
