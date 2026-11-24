@@ -18,6 +18,7 @@
 import { cutLine } from './finding-snippet.js';
 import { classifySensitivePath } from './sensitive-paths.js';
 import type { DataFlowResult } from './ast-analyzer.js';
+import { markWrittenHelpers } from './own-helpers.js';
 import { credentialEnvName, onVendorHost, ownedCredential, signingSecret, staticOrigin, vendorApiDomains, vendorUrlSlot } from './vendor-domains.js';
 
 /**
@@ -2298,7 +2299,7 @@ const OWN_DIR_EXPR = String.raw`(?:(?:pathlib\.)?Path\(\s*__file__\s*\)(?:\.(?:r
  * the skill ships is a fixed command, not one built at runtime. Names bound
  * once at module level to the folder count; a name with `..` never does.
  */
-function ownPathArgs(stmts: ReadonlyArray<{ text: string }>): (args: string) => string {
+function ownPathArgs(stmts: ReadonlyArray<{ text: string }>): { rewrite: (args: string) => string; anyName: RegExp } {
   const names = new Map<string, number>();
   const bind = new RegExp(String.raw`^([A-Za-z_]\w*)[ \t]*(?::[^=\n]+)?=[ \t]*${OWN_DIR_EXPR}[ \t]*$`);
   const any = /^([A-Za-z_]\w*)[ \t]*(?::[^=\n]+)?=(?!=)/;
@@ -2315,8 +2316,27 @@ function ownPathArgs(stmts: ReadonlyArray<{ text: string }>): (args: string) => 
   const dir = own.length > 0 ? `(?:${OWN_DIR_EXPR}|${own.join('|')})` : OWN_DIR_EXPR;
   const lit = String.raw`["']((?![^"']*\.\.)[\w./-]{1,200})["']`;
   const joined = new RegExp(String.raw`(?:\bstr\(\s*)?(?<![\w.])${dir}\s*\/\s*${lit}(?:\s*\))?|\bos\.path\.join\(\s*${dir}\s*,\s*${lit}\s*\)`, 'g');
-  return (args: string) => args.slice(0, 2000).replace(joined, (_m, a?: string, b?: string) => `"<skill>/${a ?? b}"`);
+  return {
+    rewrite: (args: string) => args.slice(0, 2000).replace(joined, (_m, a?: string, b?: string) => `"<skill>/${a ?? b}"`),
+    // the folder joined with a name chosen at runtime (`HERE / name`, `os.path.join(HERE, name)`)
+    anyName: new RegExp(String.raw`(?<![\w.])${dir}\s*\/\s*(?!["'])[A-Za-z_(]|\bos\.path\.join\(\s*${dir}\s*,\s*(?!["'][^"']*["']\s*\))[^\s)]`),
+  };
 }
+
+/** Writers of a file: download, pathlib/shutil/os writes, copies, moves and links. */
+const PY_WRITE = /\b(?:urlretrieve|write_text|write_bytes|symlink_to|hardlink_to|download_file|download_to_filename|download_fileobj|(?:os\.(?:replace|rename|renames|link|symlink)|shutil\.(?:copy\w*|move)))\s*\(/;
+
+/** `open(p, "wb")`, `open(p, mode="a")`: opened for writing. */
+function opensForWrite(text: string): boolean {
+  for (const m of text.matchAll(/\bopen\s*\(/g)) {
+    const { positional, keywords } = splitArgs(callArgs(text, (m.index ?? 0) + m[0].length - 1));
+    const mode = (keywords.get('mode') ?? positional[1] ?? '').trim();
+    if (/^[rRbBtTuU]{0,2}["'][^"']*[wax+]/.test(mode)) return true;
+  }
+  return false;
+}
+/** `"<skill>/x.sh"` as ownPathArgs writes it. */
+const OWN_LITERAL = /"<skill>\/([\w./-]{1,200})"/g;
 
 export function analyzePythonDataFlow(code: string): DataFlowResult[] {
   const out: DataFlowResult[] = [];
@@ -2326,7 +2346,10 @@ export function analyzePythonDataFlow(code: string): DataFlowResult[] {
   const fns = functionsOf(stmts);
   const constants = stringConstantNames(stmts, fns);
   const urlConstants = scopedConstants(stmts, fns);
-  const ownPaths = ownPathArgs(stmts);
+  const own = ownPathArgs(stmts);
+  const ownPaths = own.rewrite;
+  // names bound to a path in the folder (`dest = HERE / "x.sh"`), module level
+  const ownNames = new Map<string, string>();
   // the file redirects every request (patched client, proxy settings): no request is the vendor's own
   const rewritten = stmts.map((st) => rewrite(st.text, st.line));
   const redirectsAll = PY_GLOBAL_REDIRECT.test(rewritten.join('\n'));
@@ -2390,7 +2413,9 @@ export function analyzePythonDataFlow(code: string): DataFlowResult[] {
       if (!m) continue;
       const args = callArgs(text, (m.index ?? 0) + m[0].length - 1);
       const sink = name(m);
-      const { command, dynamic } = commandOf(ownPaths(args));
+      const ownArgs = ownPaths(args);
+      const { command, dynamic } = commandOf(ownArgs);
+      const ownHelpers = [...new Set([...ownArgs.matchAll(OWN_LITERAL)].map((h) => h[1]))];
       const { positional, keywords } = splitArgs(args);
       const shell = /^True\b/.test(keywords.get('shell')?.trim() ?? '');
       const program = literalProgram(positional[0]);
@@ -2410,6 +2435,7 @@ export function analyzePythonDataFlow(code: string): DataFlowResult[] {
         type: 'eval-exec', line: stmt.line, ...snippet, description: `${sink}() call detected`,
         ...(command ? { command } : {}), ...(dynamic ? { dynamic } : {}), ...(DECODES.test(args) ? { decoded: true } : {}),
         ...(noShell ? { noShell } : {}), ...(fixedCode ? { fixedCode } : {}),
+        ...(ownHelpers.length > 0 ? { ownHelpers } : {}),
       });
       if (sink !== 'eval' && sink !== 'exec') {
         // What the process gets: its argv and stdin, not env=/cwd=/timeout=
@@ -2515,6 +2541,22 @@ export function analyzePythonDataFlow(code: string): DataFlowResult[] {
       }
     }
 
+    // A file written into the script's own folder: a helper run from there isn't a shipped one
+    const ownText = ownPaths(text);
+    const ownBound = /^\s*([A-Za-z_]\w*)\s*(?::[^=]+)?=(?!=)\s*(?:str\(\s*)?"<skill>\/([\w./-]{1,200})"\s*\)?\s*$/.exec(ownText);
+    if (ownBound) ownNames.set(ownBound[1], ownBound[2]);
+    if (PY_WRITE.test(blankStrings(text)) || opensForWrite(text)) {
+      const targets = new Set([...ownText.matchAll(OWN_LITERAL)].map((h) => h[1]));
+      for (const id of new Set(text.match(/[A-Za-z_]\w*/g) ?? [])) {
+        const p = ownNames.get(id);
+        if (p !== undefined) targets.add(p);
+      }
+      if (own.anyName.test(text)) targets.add('*');
+      for (const t of targets) {
+        out.push({ type: 'own-write', resolvedPath: `<skill>/${t}`, line: stmt.line, ...snippet, description: `Writes <skill>/${t} into the skill's own folder` });
+      }
+    }
+
     // Track what assignments hold: file contents, environment values, or
     // values derived from either; a plain reassignment clears the name.
     const assign = /^\s*([A-Za-z_]\w*)\s*(?::[^=]+)?=(?!=)\s*([\s\S]+)$/.exec(text);
@@ -2542,5 +2584,5 @@ export function analyzePythonDataFlow(code: string): DataFlowResult[] {
     const withOpen = /\bwith\s+open\s*\([^)]*\)\s+as\s+(\w+)/.exec(text);
     if (withOpen) local.set(withOpen[1], 'file');
   });
-  return out;
+  return markWrittenHelpers(out);
 }

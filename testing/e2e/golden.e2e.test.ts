@@ -1,9 +1,9 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { spawn, execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { chmod, cp, mkdtemp, readdir, readFile, rm, writeFile, lstat } from 'node:fs/promises';
+import { chmod, cp, mkdtemp, readdir, readFile, rename, rm, writeFile, lstat } from 'node:fs/promises';
 import { existsSync, readdirSync, readFileSync, realpathSync } from 'node:fs';
-import { basename, join, resolve } from 'node:path';
+import { basename, dirname, join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import type { AgentScanResult, ScanResult, Severity } from '../../src/core/types.js';
 
@@ -41,6 +41,9 @@ import type { AgentScanResult, ScanResult, Severity } from '../../src/core/types
  *   env      { "<NAME>": "<value>" } — extra environment for the scan, the
  *            probe and the fix ({{HOME}} substituted), e.g. a relocated
  *            system directory such as HERMES_MANAGED_DIR
+ *   rawNames { "<path under home>": "<hex>" } — renamed to that file name in
+ *            bytes (a name that isn't UTF-8: `fe2e6a73` is `\xfe.js`); macOS
+ *            keeps only UTF-8 names, so such a case needs `skipOn` darwin/win32
  *
  * A case's `outside/` directory, when it has one, is copied beside the
  * fixture HOME (`<work>/outside`): what a link in the home leads out to.
@@ -69,6 +72,7 @@ interface GoldenCase {
   cleanIgnore?: string[];
   modes?: Record<string, string>;
   env?: Record<string, string>;
+  rawNames?: Record<string, string>;
   localOnly?: string[];
   reachable?: boolean;
   /** Skip on these platforms (fixtures relying on POSIX modes). */
@@ -180,6 +184,9 @@ describe.each(caseNames)('golden: %s', (name) => {
     home = join(work, 'home');
     await materialize(join(CASES, name, 'home'), home);
     if (existsSync(join(CASES, name, 'outside'))) await materialize(join(CASES, name, 'outside'), join(work, 'outside'));
+    for (const [path, name] of Object.entries(spec.rawNames ?? {})) {
+      await rename(join(home, path), Buffer.concat([Buffer.from(dirname(join(home, path)) + '/'), Buffer.from(name, 'hex')]));
+    }
     for (const [path, mode] of Object.entries(spec.modes ?? {})) await chmod(join(home, path), parseInt(mode, 8));
     if (spec.env) caseEnv.set(home, Object.fromEntries(Object.entries(spec.env).map(([k, v]) => [k, v.split('{{HOME}}').join(home)])));
     local = (await scan(home, spec.agent, [], mcpOf(spec))).agents.filter(a => a.agent === spec.agent);

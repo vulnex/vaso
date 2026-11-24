@@ -75,7 +75,8 @@ describe.skipIf(process.platform === 'win32' || process.getuid?.() === 0)('Local
 
 // Linux file names are bytes: a skill file named `caf\xe9.js` was listed as
 // `caf�.js`, which then failed to open, so its code went unanalysed
-// locally while a remote scan read it. (macOS and Windows reject such names.)
+// locally while a remote scan read it; then two such names were one
+// (U+FFFD) and only one was read (dt25). (macOS and Windows reject such names.)
 describe.skipIf(process.platform !== 'linux')('LocalFSProvider non-UTF-8 file names', () => {
   const fs = new LocalFSProvider();
   let dir: string;
@@ -87,16 +88,26 @@ describe.skipIf(process.platform !== 'linux')('LocalFSProvider non-UTF-8 file na
     mkdirSync(raw('\xffdir'));
     writeFileSync(Buffer.concat([raw('\xffdir'), Buffer.from('/inner.js')]), 'x');
     writeFileSync(join(dir, 'plain.js'), 'y');
+    // two names U+FFFD would make one (dt25 g9-F4)
+    writeFileSync(raw('\xfe.js'), 'evil');
+    writeFileSync(raw('\xff.js'), 'benign');
   });
   afterAll(() => rmSync(dir, { recursive: true, force: true }));
 
-  it('lists them as the probe does (U+FFFD) and reads the listed path', async () => {
+  it('lists them without loss (U+DC00+byte, as the probe writes them) and reads the listed path', async () => {
     const entries = await fs.readdirEntries(dir, { recursive: true });
     const files = entries.filter(e => e.isFile).map(e => join(e.parentPath!, e.name)).sort();
-    expect(files).toEqual([join(dir, 'caf�-�.js'), join(dir, 'plain.js'), join(dir, '�dir', 'inner.js')].sort());
-    expect(await fs.readFile(join(dir, 'caf�-�.js'))).toContain('eval');
-    expect(await fs.readFile(join(dir, '�dir', 'inner.js'))).toBe('x');
-    expect((await fs.stat(join(dir, '�dir'))).isDirectory()).toBe(true);
+    expect(files).toEqual([
+      join(dir, 'caf\udce9-\udcff.js'), join(dir, 'plain.js'), join(dir, '\udcffdir', 'inner.js'),
+      join(dir, '\udcfe.js'), join(dir, '\udcff.js'),
+    ].sort());
+    expect(await fs.readFile(join(dir, 'caf\udce9-\udcff.js'))).toContain('eval');
+    expect(await fs.readFile(join(dir, '\udcffdir', 'inner.js'))).toBe('x');
+    expect((await fs.stat(join(dir, '\udcffdir'))).isDirectory()).toBe(true);
+    expect(await fs.readFile(join(dir, '\udcfe.js'))).toBe('evil');
+    expect(await fs.readFile(join(dir, '\udcff.js'))).toBe('benign');
+    expect((await fs.readdir(dir)).filter(n => n.endsWith('.js') && n.length === 4).sort()).toEqual(['\udcfe.js', '\udcff.js']);
+    expect(await fs.realpath(join(dir, '\udcfe.js'))).toMatch(/\udcfe\.js$/);
     // UTF-8 names are untouched
     expect(await fs.readFile(join(dir, 'plain.js'))).toBe('y');
   });

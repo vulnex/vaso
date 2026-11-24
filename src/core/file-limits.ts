@@ -1,4 +1,5 @@
 import { stat } from 'node:fs/promises';
+import { encodeFsPath } from './fs-names.js';
 import type { FSProvider } from './fs-provider.js';
 
 /**
@@ -46,7 +47,7 @@ export const OVER_LIMIT_DETAIL = `not scanned: larger than the ${MAX_SCAN_FILE_B
 async function knownOverLimit(fs: FSProvider, path: string): Promise<boolean> {
   if (fs.kind !== 'local') return false;
   try {
-    return (await stat(path)).size > MAX_SCAN_FILE_BYTES;
+    return (await stat(encodeFsPath(path) ?? path)).size > MAX_SCAN_FILE_BYTES;
   } catch {
     return false;
   }
@@ -83,7 +84,7 @@ export async function readCappedFile(fs: FSProvider, path: string): Promise<stri
 async function bytesOnDisk(fs: FSProvider, path: string): Promise<number> {
   if (fs.kind === 'local') {
     try {
-      return (await stat(path)).size;
+      return (await stat(encodeFsPath(path) ?? path)).size;
     } catch {
       return Infinity;
     }

@@ -1,0 +1,82 @@
+[
+  {
+    "name": "plain ascii",
+    "hex": "746f6f6c2f706c61696e2e6a73",
+    "json": "\"tool/plain.js\""
+  },
+  {
+    "name": "valid utf-8 kept",
+    "hex": "636166c3a92fe697a5e69cac2ff09f98802e6a73",
+    "json": "\"café/日本/😀.js\""
+  },
+  {
+    "name": "a real U+FFFD kept",
+    "hex": "78efbfbd79",
+    "json": "\"x�y\""
+  },
+  {
+    "name": "lone high byte",
+    "hex": "746f6f6c2ffe2e6a73",
+    "json": "\"tool/\\udcfe.js\""
+  },
+  {
+    "name": "other lone byte",
+    "hex": "746f6f6c2fff2e6a73",
+    "json": "\"tool/\\udcff.js\""
+  },
+  {
+    "name": "latin-1 e-acute",
+    "hex": "636166e92dff2e6a73",
+    "json": "\"caf\\udce9-\\udcff.js\""
+  },
+  {
+    "name": "truncated 2-byte lead",
+    "hex": "61c3",
+    "json": "\"a\\udcc3\""
+  },
+  {
+    "name": "overlong slash",
+    "hex": "c0af78",
+    "json": "\"\\udcc0\\udcafx\""
+  },
+  {
+    "name": "overlong 3-byte",
+    "hex": "e080af78",
+    "json": "\"\\udce0\\udc80\\udcafx\""
+  },
+  {
+    "name": "encoded surrogate",
+    "hex": "eda08078",
+    "json": "\"\\udced\\udca0\\udc80x\""
+  },
+  {
+    "name": "above U+10FFFF",
+    "hex": "f4908080",
+    "json": "\"\\udcf4\\udc90\\udc80\\udc80\""
+  },
+  {
+    "name": "lone continuation",
+    "hex": "80bf",
+    "json": "\"\\udc80\\udcbf\""
+  },
+  {
+    "name": "truncated 4-byte then ascii",
+    "hex": "f09f987a",
+    "json": "\"\\udcf0\\udc9f\\udc98z\""
+  },
+  {
+    "name": "valid then invalid then valid",
+    "hex": "c3a9fef09f9880",
+    "json": "\"é\\udcfe😀\""
+  },
+  {
+    "name": "f5 lead",
+    "hex": "f5808080",
+    "json": "\"\\udcf5\\udc80\\udc80\\udc80\""
+  },
+  {
+    "name": "quote and backslash",
+    "hex": "6122625c63fe",
+    "json": "\"a\\\"b\\\\c\\udcfe\""
+  }
+]

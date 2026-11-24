@@ -12,11 +12,15 @@
 // joiners, word joiner and invisible operators, BOM, Unicode tag characters
 // (U+E0000–E007F, which spell hidden ASCII) — that make different strings
 // print alike. The Unicode line and paragraph separators (U+2028/2029) are
-// always shown escaped: only \n is a line break VASO's text keeps
-const CONTROL_RE = /[\u0000-\u0008\u000b-\u001f\u007f-\u009f\u061c\u200b-\u200f\u2028\u2029\u202a-\u202e\u2060-\u2064\u2066-\u2069\ufeff\u{e0000}-\u{e007f}]/gu;
+// always shown escaped: only \n is a line break VASO's text keeps. A byte of
+// a file name that isn't UTF-8, held as U+DC00+byte (core/fs-names.ts), is
+// shown as that byte (`\xfe.js`): printed raw it becomes U+FFFD, and two such
+// names would read alike
+const CONTROL_RE = /[\u0000-\u0008\u000b-\u001f\u007f-\u009f\u061c\u200b-\u200f\u2028\u2029\u202a-\u202e\u2060-\u2064\u2066-\u2069\ufeff\u{dc80}-\u{dcff}\u{e0000}-\u{e007f}]/gu;
 
 function visible(ch: string): string {
   const code = ch.codePointAt(0)!;
+  if (code >= 0xdc80 && code <= 0xdcff) return `\\x${(code - 0xdc00).toString(16)}`;
   if (code > 0xffff) return `\\u{${code.toString(16)}}`;
   return code > 0xff ? `\\u${code.toString(16).padStart(4, '0')}` : `\\x${code.toString(16).padStart(2, '0')}`;
 }

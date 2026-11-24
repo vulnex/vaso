@@ -1,3 +1,4 @@
+import { markWrittenHelpers } from './own-helpers.js';
 import { createHash } from 'node:crypto';
 import _traverse from '@babel/traverse';
 import type { Node } from '@babel/types';
@@ -16,8 +17,11 @@ export interface DataFlowResult {
    * module-call / param-sink: a value read from a file or the environment
    * passed to a helper module of the skill, and a helper module's exported
    * parameter that reaches a send — joined across the skill's files by SKL-001.
+   * own-write: the code writes a file into its own folder (`resolvedPath`
+   * `<skill>/x.sh`, or `<skill>/*` for a name chosen at runtime) — a helper
+   * it runs from there is then not a shipped one (SKL-003).
    */
-  type: 'source-to-sink' | 'eval-exec' | 'suspicious-network' | 'fs-access' | 'module-call' | 'param-sink';
+  type: 'source-to-sink' | 'eval-exec' | 'suspicious-network' | 'fs-access' | 'module-call' | 'param-sink' | 'own-write';
   source?: string;
   /** source-to-sink: what the source variable holds — file contents or environment values. */
   sourceKind?: 'file' | 'env';
@@ -54,6 +58,14 @@ export interface DataFlowResult {
   dynamic?: boolean;
   /** eval-exec: the argument is decoded at runtime (atob, base64 Buffer, fromCharCode). */
   decoded?: boolean;
+  /**
+   * eval-exec: files in the script's own folder the command runs, relative
+   * to that folder (`latest.sh` for `<skill>/latest.sh` in `command`). The
+   * command is fixed only while each is a file the skill ships and doesn't
+   * write itself: SKL-003 checks the skill tree; a write in the same file
+   * already makes the flow `dynamic`.
+   */
+  ownHelpers?: string[];
   /**
    * eval-exec: a process started directly (no shell, not an interpreter
    * given code) — what runs is a program with arguments, not code built at
@@ -294,8 +306,8 @@ export function analyzeCode(code: string, filename = 'unknown.js'): DataFlowResu
   if (cached) return cached.map(r => ({ ...r }));
   // Per file: resolved npm packages are several modules joined with headers,
   // which don't parse as one program.
-  const results = sourceChunks(code).flatMap((chunk) =>
-    analyzeUncached(chunk.code).map((r) => ({ ...r, line: r.line + chunk.startLine - 1 })));
+  const results = markWrittenHelpers(sourceChunks(code).flatMap((chunk) =>
+    analyzeUncached(chunk.code).map((r) => ({ ...r, line: r.line + chunk.startLine - 1 }))));
   if (analysisCache.size >= MAX_CACHED_ANALYSES) {
     analysisCache.delete(analysisCache.keys().next().value!);
   }
@@ -756,6 +768,13 @@ function analyzeUncached(code: string): DataFlowResult[] {
         // Detect eval/exec — aliased, destructured, required inline or
         // dynamically imported child_process, execa/shelljs, indirect eval —
         // and any bare call named like one.
+        const written = ownWriteTarget(node, path.scope);
+        if (written) {
+          results.push({
+            type: 'own-write', resolvedPath: written, line, ...cutLine(snippet),
+            description: `Writes ${written} into the skill's own folder`,
+          });
+        }
         const sink = sinkCallee(path);
         if (sink || (node.callee.type === 'Identifier' && EXEC_FUNCTIONS.has(node.callee.name))) {
           const name = sink?.display ?? (node.callee as { name: string }).name;
@@ -1588,14 +1607,18 @@ function ownScriptPath(n: Node, scope: Scope): string | undefined {
   return undefined;
 }
 
-function commandText(args: ArgNode[], scope?: Scope): Pick<DataFlowResult, 'command' | 'dynamic' | 'decoded'> {
+function commandText(args: ArgNode[], scope?: Scope): Pick<DataFlowResult, 'command' | 'dynamic' | 'decoded' | 'ownHelpers'> {
   let dynamic = false;
   let decoded = false;
+  const helpers: string[] = [];
   const text = (node: ArgNode | null | undefined, depth = 0): string => {
     if (!node || depth > 6) return '';
     const n = node as Node;
     const own = scope ? ownScriptPath(n, scope) : undefined;
-    if (own !== undefined) return own;
+    if (own !== undefined) {
+      helpers.push(own.slice('<skill>/'.length));
+      return own;
+    }
     switch (n.type) {
       case 'StringLiteral':
         return n.value;
@@ -1624,7 +1647,49 @@ function commandText(args: ArgNode[], scope?: Scope): Pick<DataFlowResult, 'comm
     }
   };
   const command = args.slice(0, 2).map((a) => text(a)).filter(Boolean).join(' ').trim();
-  return { ...(command && command !== '${…}' ? { command } : {}), ...(dynamic ? { dynamic } : {}), ...(decoded ? { decoded } : {}) };
+  return {
+    ...(command && command !== '${…}' ? { command } : {}), ...(dynamic ? { dynamic } : {}), ...(decoded ? { decoded } : {}),
+    ...(helpers.length > 0 ? { ownHelpers: [...new Set(helpers)] } : {}),
+  };
+}
+
+/** Writers whose first argument is the file written (fs, fs/promises, fs-extra, Bun.write). */
+const WRITE_FIRST = /^(?:writeFile|writeFileSync|appendFile|appendFileSync|createWriteStream|outputFile|outputFileSync|outputJson|outputJsonSync|writeJson|writeJsonSync|write)$/;
+/** Copiers/movers/linkers whose second argument is where the file lands. */
+const WRITE_SECOND = /^(?:copyFile|copyFileSync|cp|cpSync|copy|copySync|rename|renameSync|move|moveSync|symlink|symlinkSync|link|linkSync)$/;
+
+/**
+ * The file in the script's own folder a call writes (`writeFileSync(join(__dirname, 'x.sh'), …)`,
+ * `fs.renameSync(tmp, p)` with `p` a constant bound to such a path): `<skill>/x.sh`,
+ * `<skill>/*` when the folder is given but the name is chosen at runtime (or the
+ * folder itself is the target of a copy/move), undefined when it writes elsewhere.
+ * `write` counts only as `Bun.write`.
+ */
+function ownWriteTarget(node: Node & { type: 'CallExpression' }, scope: Scope): string | undefined {
+  const name = node.callee.type === 'Identifier' ? node.callee.name : memberName(node.callee as Node);
+  if (!name) return undefined;
+  if (name === 'write' && calleeText(node.callee as Node) !== 'Bun.write') return undefined;
+  const index = WRITE_FIRST.test(name) ? 0 : WRITE_SECOND.test(name) ? 1 : -1;
+  const arg = index < 0 ? undefined : node.arguments[index] as Node | undefined;
+  if (!arg) return undefined;
+  const of = (n: Node, depth = 0): string | undefined => {
+    const own = ownScriptPath(n, scope);
+    if (own !== undefined) return own;
+    if (isOwnDir(n, scope)) return index === 1 ? '<skill>/*' : undefined;
+    // the folder joined with a name chosen at runtime
+    if (n.type === 'CallExpression' && isPathModuleCall(n, scope) && n.arguments.length >= 2 && isOwnDir(n.arguments[0] as Node, scope)) return '<skill>/*';
+    if ((n.type === 'BinaryExpression' && n.operator === '+' && isOwnDir(n.left as Node, scope))
+      || (n.type === 'TemplateLiteral' && n.expressions.length >= 1 && (n.quasis[0]?.value.cooked ?? '') === '' && isOwnDir(n.expressions[0] as Node, scope))) {
+      return '<skill>/*';
+    }
+    if (n.type === 'Identifier' && depth < 3) {
+      const binding = scope.getBinding(n.name);
+      const decl = binding?.path.node;
+      if (binding?.constant && decl?.type === 'VariableDeclarator' && decl.id.type === 'Identifier' && decl.init) return of(decl.init as Node, depth + 1);
+    }
+    return undefined;
+  };
+  return of(arg);
 }
 
 function memberIs(m: Node, name: string): boolean {

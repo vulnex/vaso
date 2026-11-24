@@ -1,9 +1,11 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
 	"os"
 )
 
@@ -37,10 +39,28 @@ func main() {
 
 	snapshot := Collect(manifest, *escalate)
 
-	enc := json.NewEncoder(os.Stdout)
-	enc.SetIndent("", "  ")
-	if err := enc.Encode(snapshot); err != nil {
+	if err := writeSnapshot(os.Stdout, &snapshot); err != nil {
 		fmt.Fprintf(os.Stderr, "Error encoding snapshot: %v\n", err)
 		os.Exit(1)
 	}
+}
+
+// writeSnapshot encodes the snapshot as indented JSON, names that are not
+// UTF-8 written without loss (fs_names.go).
+func writeSnapshot(w io.Writer, snapshot *ProbeSnapshot) error {
+	token := newEscapeToken()
+	escaped := escapeSnapshotNames(snapshot, token)
+	if !escaped {
+		enc := json.NewEncoder(w)
+		enc.SetIndent("", "  ")
+		return enc.Encode(snapshot)
+	}
+	var buf bytes.Buffer
+	enc := json.NewEncoder(&buf)
+	enc.SetIndent("", "  ")
+	if err := enc.Encode(snapshot); err != nil {
+		return err
+	}
+	_, err := w.Write(restoreEscapes(buf.Bytes(), token))
+	return err
 }

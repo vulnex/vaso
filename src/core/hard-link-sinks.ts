@@ -1,4 +1,5 @@
 import { readdir, lstat, stat } from 'node:fs/promises';
+import { encodeFsPath } from './fs-names.js';
 import { join } from 'node:path';
 import { classifySensitivePath } from '../analyzers/sensitive-paths.js';
 import type { FSProvider } from './fs-provider.js';
@@ -135,7 +136,7 @@ export class LocalHardLinkIndex {
     // A hard link to a store file makes that file multiply linked too: with
     // none in the stores (the usual case) no file needs a stat
     if (indexes.length === 0) return undefined;
-    const s = await stat(path, { bigint: true });
+    const s = await stat(encodeFsPath(path) ?? path, { bigint: true });
     if (!s?.isFile() || s.nlink < 2n) return undefined;
     const id = `${s.dev}:${s.ino}`;
     for (const index of indexes) {

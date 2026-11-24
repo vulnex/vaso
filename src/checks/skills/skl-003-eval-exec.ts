@@ -1,4 +1,6 @@
+import { dirname, join } from 'node:path';
 import type { Evidence, Severity } from '../../core/types.js';
+import type { DataFlowResult } from '../../analyzers/ast-analyzer.js';
 import { defineCheck } from '../../core/check-builder.js';
 import { skillFilesOf, skillsDirsOf, noSkillsDirResult } from './skill-files.js';
 import { analyzeSkillSource, readSkillSource } from './skill-source.js';
@@ -19,13 +21,44 @@ export const skl003 = defineCheck({
     const evidence: Evidence[] = [];
     const levels: Severity[] = [];
     const files = await skillFilesOf(ctx);
-
+    const shipped = new Set(files);
+    const analyzed: Array<{ file: string; flows: DataFlowResult[] }> = [];
     for (const file of files) {
       try {
         const src = await readSkillSource(ctx, file, 'code');
         if (src === undefined) continue;
         // Python skill scripts go through the Python analyzer; Babel can't read them.
-        const flows = analyzeSkillSource(src);
+        analyzed.push({ file, flows: analyzeSkillSource(src) });
+      } catch {}
+    }
+    // Files the skill's code writes into its own folders (downloaded, decoded,
+    // copied in), and folders it writes files of runtime-chosen names into
+    const writtenFiles = new Set<string>();
+    const writtenDirs = new Set<string>();
+    for (const { file, flows } of analyzed) {
+      for (const f of flows) {
+        if (f.type !== 'own-write' || !f.resolvedPath?.startsWith('<skill>/')) continue;
+        const rel = f.resolvedPath.slice('<skill>/'.length);
+        if (rel === '*') writtenDirs.add(dirname(file));
+        else writtenFiles.add(join(dirname(file), rel));
+      }
+    }
+    // A helper in the script's own folder is a fixed command only while the
+    // skill ships it and none of its code writes it: one it downloads or
+    // decodes there and runs is code chosen at runtime
+    const notShipped = (file: string, flow: DataFlowResult): string | undefined => {
+      for (const rel of flow.ownHelpers ?? []) {
+        const path = join(dirname(file), rel);
+        if (writtenFiles.has(path) || writtenDirs.has(dirname(path))) {
+          return `runs <skill>/${rel}, a file the skill writes itself (downloaded or decoded code, not a shipped helper)`;
+        }
+        if (!shipped.has(path)) return `runs <skill>/${rel}, which the skill doesn't ship`;
+      }
+      return undefined;
+    };
+
+    for (const { file, flows } of analyzed) {
+      try {
         const execFlows = flows.filter(f => f.type === 'eval-exec');
 
         for (const flow of execFlows) {
@@ -48,13 +81,14 @@ export const skl003 = defineCheck({
           // A fixed command (`execFileSync('git', ['status'])`) is a skill doing
           // its job; only commands built at runtime or decoded are dynamic
           // execution. Constant ones stay listed, informationally (as MCP-004).
-          const constant = flow.command !== undefined && !flow.dynamic && !flow.decoded;
+          const helper = notShipped(file, flow);
+          const constant = flow.command !== undefined && !flow.dynamic && !flow.decoded && !helper;
           // A program started directly (no shell, no interpreter given code)
           // runs with runtime arguments; it isn't code built at runtime
-          const direct = !constant && flow.noShell === true && !flow.decoded;
+          const direct = !constant && !helper && flow.noShell === true && !flow.decoded;
           // An interpreter given literal code (`python -c "import sys; …"`)
           // runs fixed code, whichever interpreter path it is
-          const fixedCode = !constant && !direct && flow.fixedCode === true && !flow.decoded;
+          const fixedCode = !constant && !direct && !helper && flow.fixedCode === true && !flow.decoded;
           evidence.push({
             file,
             line: flow.line,
@@ -62,7 +96,8 @@ export const skl003 = defineCheck({
             detail: constant
               ? `${flow.description} — constant command "${flow.command}"`
               : direct ? `${flow.description} — runs a program directly (no shell)`
-                : fixedCode ? `${flow.description} — runs fixed code through -c` : flow.description,
+                : fixedCode ? `${flow.description} — runs fixed code through -c`
+                  : helper ? `${flow.description} — ${helper}` : flow.description,
             ...(constant || direct || fixedCode ? { mitigated: true } : {}),
           });
           levels.push('critical');

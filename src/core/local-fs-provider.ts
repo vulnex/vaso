@@ -1,8 +1,7 @@
 import { access as fsAccess, lstat, open, readdir, readFile, stat, realpath, readlink } from 'node:fs/promises';
 import { execFileSync, execFile } from 'node:child_process';
 import { constants as fsConstants, type Dirent } from 'node:fs';
-import { isUtf8 } from 'node:buffer';
-import { dirname, join, posix } from 'node:path';
+import { join, posix } from 'node:path';
 import { homedir as osHomedir, hostname as osHostname } from 'node:os';
 import { promisify } from 'node:util';
 import type { FSProvider, DirentInfo, ExecResult, ExecOptions, PermissionQuery } from './fs-provider.js';
@@ -12,6 +11,7 @@ import { parsePrivateGroups } from './private-groups.js';
 import { planExec } from './exec-safety.js';
 import { runBounded, runBoundedSync, type BoundedRunResult } from './bounded-exec.js';
 import { LocalHardLinkIndex } from './hard-link-sinks.js';
+import { decodeFsName, encodeFsPath } from './fs-names.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -62,42 +62,34 @@ export class LocalFSProvider implements FSProvider {
 
   /**
    * Linux file names are bytes, not necessarily UTF-8 (`caf\xe9.js`). A
-   * listing decodes them as the probe's JSON does — invalid sequences become
-   * U+FFFD, so evidence paths match a remote scan — and remembers the raw
-   * bytes under that name, so a read of the listed path reaches the file
-   * instead of failing silently (a skill could hide code that way).
+   * listing decodes them without loss — a byte that isn't UTF-8 becomes
+   * U+DC00+byte (fs-names.ts), as the probe writes it — and a path holding
+   * such a byte is handed to the OS as its bytes, so a read of the listed
+   * path reaches the file. (Decoding to U+FFFD made `\xfe.js` and `\xff.js`
+   * one name: only one of them was read, and a skill could hide code so.)
    */
-  private readonly rawPaths = new Map<string, Buffer>();
-
-  /** The bytes to hand the OS for a path this provider listed. */
   private fsPath(path: string): FsPath {
-    if (this.rawPaths.size === 0 || !path.includes('\uFFFD')) return path;
-    for (let p = path; ; p = dirname(p)) {
-      const raw = this.rawPaths.get(p);
-      if (raw) return Buffer.concat([raw, Buffer.from(path.slice(p.length), 'utf-8')]);
-      if (dirname(p) === p) return path;
-    }
+    return encodeFsPath(path) ?? path;
   }
 
-  /** List `dir`, decoding names and remembering raw paths that aren't UTF-8. */
+  /** List `dir`, decoding names that aren't UTF-8 without loss. */
   private async list(dir: string): Promise<DirentInfo[]> {
     const raw = this.fsPath(dir);
     const entries = await readdir(raw as string, { withFileTypes: true });
-    await this.rememberRawNames(dir, raw, entries.map(e => e.name));
-    return entries.map(e => toDirentInfo(e, dir));
+    if (!this.mayHaveRawNames(entries.map(e => e.name))) return entries.map(e => toDirentInfo(e, dir));
+    // a replacement character may stand for bytes that aren't UTF-8: list again as bytes (rare)
+    const bytes = await readdir(raw, { withFileTypes: true, encoding: 'buffer' });
+    return bytes.map(e => ({
+      name: decodeFsName(e.name),
+      isFile: e.isFile(),
+      isDirectory: e.isDirectory(),
+      isSymbolicLink: e.isSymbolicLink(),
+      parentPath: dir,
+    }));
   }
 
-  /**
-   * A replacement character in a listed name may stand for bytes that aren't
-   * UTF-8: list again as bytes (rare) and remember each such name's raw path.
-   */
-  private async rememberRawNames(dir: string, raw: FsPath, names: string[]): Promise<void> {
-    if (this.platform === 'win32' || !names.some(n => typeof n === 'string' && n.includes('�'))) return;
-    const base = typeof raw === 'string' ? Buffer.from(raw, 'utf-8') : raw;
-    const sep = Buffer.from(base.at(-1) === 0x2f ? '' : '/');
-    for (const name of await readdir(raw, { encoding: 'buffer' })) {
-      if (!isUtf8(name)) this.rawPaths.set(join(dir, name.toString('utf-8')), Buffer.concat([base, sep, name]));
-    }
+  private mayHaveRawNames(names: string[]): boolean {
+    return this.platform !== 'win32' && names.some(n => n.includes('\uFFFD'));
   }
 
   async readFile(path: string): Promise<string> {
@@ -125,8 +117,8 @@ export class LocalFSProvider implements FSProvider {
   async readdir(path: string): Promise<string[]> {
     const raw = this.fsPath(path);
     const names = await readdir(raw as string);
-    await this.rememberRawNames(path, raw, names);
-    return names;
+    if (!this.mayHaveRawNames(names)) return names;
+    return (await readdir(raw, { encoding: 'buffer' })).map(n => decodeFsName(n));
   }
 
   async readdirEntries(path: string, options?: { recursive?: boolean }): Promise<DirentInfo[]> {
@@ -208,11 +200,13 @@ export class LocalFSProvider implements FSProvider {
   }
 
   async realpath(path: string): Promise<string> {
-    return realpath(this.fsPath(path));
+    if (this.platform === 'win32') return realpath(path);
+    return decodeFsName(await realpath(this.fsPath(path), { encoding: 'buffer' }));
   }
 
   async readlink(path: string): Promise<string> {
-    return readlink(this.fsPath(path));
+    if (this.platform === 'win32') return readlink(path);
+    return decodeFsName(await readlink(this.fsPath(path), { encoding: 'buffer' }));
   }
 
   private hardLinks?: LocalHardLinkIndex;
