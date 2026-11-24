@@ -6,6 +6,8 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.4.3] - 2026-11-24
+
 ### Security
 
 - **A world- or group-readable `openclaw.json` holding the gateway token or provider keys is now reported and fixed.** CFG-003 covers the main config, including one at `OPENCLAW_CONFIG_PATH`, and `vaso fix` removes group/other access.

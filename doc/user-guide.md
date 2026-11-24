@@ -11,7 +11,7 @@ VASO is distributed from GitHub. The npm name `vaso` is held by an unrelated pac
 curl -fsSL https://raw.githubusercontent.com/vulnex/vaso/main/install.sh | bash
 
 # Or download the prebuilt release tarball and install it with npm
-curl -fLO https://github.com/vulnex/vaso/releases/download/v1.4.2/vaso-1.4.2.tgz && npm install -g ./vaso-1.4.2.tgz
+curl -fLO https://github.com/vulnex/vaso/releases/download/v1.4.3/vaso-1.4.3.tgz && npm install -g ./vaso-1.4.3.tgz
 ```
 
 Requirements: Node.js 20 or later.
@@ -929,14 +929,14 @@ jobs:
   vaso:
     runs-on: self-hosted # a runner where the agents to check are installed
     steps:
-      - uses: vulnex/vaso@v1.4.2
+      - uses: vulnex/vaso@v1.4.3
         with:
           fail-on: warning
 ```
 
 | Input | Default | Meaning |
 |-------|---------|---------|
-| `version` | `v1.4.2` | VASO release to install (a `vX.Y.Z` tag installs the release tarball; a branch or SHA installs from git) |
+| `version` | `v1.4.3` | VASO release to install (a `vX.Y.Z` tag installs the release tarball; a branch or SHA installs from git) |
 | `agent` | all detected | Scan one agent only (`-a`) |
 | `format` | `sarif` | Report format |
 | `output` | `vaso-results.<ext>` | Report path |
@@ -973,7 +973,7 @@ jobs:
 
       - name: Install VASO
         run: |
-          curl -fsSLo "$RUNNER_TEMP/vaso.tgz" https://github.com/vulnex/vaso/releases/download/v1.4.2/vaso-1.4.2.tgz
+          curl -fsSLo "$RUNNER_TEMP/vaso.tgz" https://github.com/vulnex/vaso/releases/download/v1.4.3/vaso-1.4.3.tgz
           npm install -g "$RUNNER_TEMP/vaso.tgz"
 
       - name: Audit skills

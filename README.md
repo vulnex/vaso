@@ -21,11 +21,11 @@ VASO is distributed from GitHub. The npm name `vaso` is held by an unrelated pac
 curl -fsSL https://raw.githubusercontent.com/vulnex/vaso/main/install.sh | bash
 
 # Alternative: download the release tarball and install it with npm
-curl -fLO https://github.com/vulnex/vaso/releases/download/v1.4.2/vaso-1.4.2.tgz
-npm install -g ./vaso-1.4.2.tgz
+curl -fLO https://github.com/vulnex/vaso/releases/download/v1.4.3/vaso-1.4.3.tgz
+npm install -g ./vaso-1.4.3.tgz
 ```
 
-Requires Node.js 20+. Download the tarball before installing it: npm 12 refuses tarball URLs by default (`allow-remote=none`). Set `VASO_VERSION=v1.4.2` in front of `bash` to make the installer pick a specific release.
+Requires Node.js 20+. Download the tarball before installing it: npm 12 refuses tarball URLs by default (`allow-remote=none`). Set `VASO_VERSION=v1.4.3` in front of `bash` to make the installer pick a specific release.
 
 > **Note:** install the release **tarball**, not `npm install -g github:vulnex/vaso#<tag>`. On npm 11+, the global git-dependency install path mishandles the package and leaves an unusable install; the prebuilt tarball has no build step and installs cleanly.
 
@@ -214,7 +214,7 @@ When multiple agents are detected, the **headline score is worst-case** — the 
 The simplest path — drop one step into any workflow:
 
 ```yaml
-- uses: vulnex/vaso@v1.4.2
+- uses: vulnex/vaso@v1.4.3
   id: vaso
   with:
     fail-on: critical          # or warning, info, none
@@ -225,7 +225,7 @@ Inputs:
 
 | Input | Default | Description |
 |-------|---------|-------------|
-| `version` | `v1.4.2` | VASO version to install. A release tag installs the prebuilt release tarball; a branch or commit SHA installs from the git ref |
+| `version` | `v1.4.3` | VASO version to install. A release tag installs the prebuilt release tarball; a branch or commit SHA installs from the git ref |
 | `agent` | (all detected) | Scan a single agent only (any `--agent` value) |
 | `format` | `sarif` | `terminal`, `json`, `sarif`, `markdown`, `html`, `csv` or `junit` |
 | `output` | `vaso-results.<ext>` | Path for the report (none for `terminal`) |
@@ -241,7 +241,7 @@ Output: `report-path`, the absolute path of the report (`${{ steps.vaso.outputs.
 
 ```yaml
 - name: Install VASO
-  run: curl -fsSLo /tmp/vaso.tgz https://github.com/vulnex/vaso/releases/download/v1.4.2/vaso-1.4.2.tgz && npm install -g /tmp/vaso.tgz
+  run: curl -fsSLo /tmp/vaso.tgz https://github.com/vulnex/vaso/releases/download/v1.4.3/vaso-1.4.3.tgz && npm install -g /tmp/vaso.tgz
 
 - name: Run VASO scan
   run: vaso scan --format sarif -o results.sarif --fail-on critical
