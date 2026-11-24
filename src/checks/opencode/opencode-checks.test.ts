@@ -134,6 +134,52 @@ describe('OPC-002: Permissive permissions', () => {
     expect((await run({ external_directory: { '~/projects/shared/*': 'allow' } })).passed).toBe(true);
     expect((await run({ bash: { '*': 'ask', 'git status*': 'allow' } })).passed).toBe(true);
   });
+
+  // OpenCode deep-merges $OPENCODE_PERMISSION over the merged config
+  // (config.ts: result.permission = mergeDeep(result.permission, env))
+  describe('effective permission across layers ($OPENCODE_PERMISSION)', () => {
+    const file = makeConfig('/home/test/.config/opencode/opencode.json', { permission: { bash: 'ask', edit: 'ask', webfetch: 'ask', task: 'ask' } });
+    const env = (permission: unknown) => makeConfig('$OPENCODE_PERMISSION', { permission });
+
+    it('a later layer re-opens a tool the file gates', async () => {
+      const r = await check.run(makeCtx([file, env({ bash: 'allow' })]));
+      expect(r.passed).toBe(false);
+      expect(r.evidence?.find(e => e.snippet?.startsWith('permission: bash'))).toMatchObject({ file: '$OPENCODE_PERMISSION' });
+    });
+
+    it('the tester repro: bash and external_directory both reported', async () => {
+      const r = await check.run(makeCtx([file, env({ bash: 'allow', external_directory: 'allow' })]));
+      expect(r.severity).toBe('critical');
+      const snippets = r.evidence?.map(e => e.snippet) ?? [];
+      expect(snippets).toContain('permission.external_directory = "allow"');
+      expect(snippets).toContain('permission: bash = "allow"');
+    });
+
+    it('a later layer that gates a tool wins over an earlier allow', async () => {
+      const loose = makeConfig('/home/test/.config/opencode/opencode.json', { permission: { bash: 'allow', external_directory: 'allow', edit: 'ask', webfetch: 'ask', task: 'ask' } });
+      expect((await check.run(makeCtx([loose, env({ bash: 'ask', external_directory: 'ask' })]))).passed).toBe(true);
+    });
+
+    it('objects deep-merge: a later scoped allow keeps the earlier catch-all', async () => {
+      const r = await check.run(makeCtx([file, env({ bash: { 'curl *': 'allow' } })]));
+      // bash becomes { "*": "ask", "curl *": "allow" } — curl runs unconfirmed
+      expect(r.severity).toBe('critical');
+      expect(r.evidence?.[0]).toMatchObject({ file: '$OPENCODE_PERMISSION', snippet: 'permission.bash["curl *"] = "allow"' });
+    });
+
+    it('a string layer is { "*": s }, appended after the per-tool keys (last rule wins)', async () => {
+      // {"*":"allow"} appended after bash:"ask" — "*" is the last match for bash
+      const r = await check.run(makeCtx([file, env('allow')]));
+      expect(r.severity).toBe('critical');
+      expect(r.evidence?.find(e => e.snippet?.startsWith('permission: '))?.snippet).toBe('permission: bash, edit, task, webfetch = "allow"');
+    });
+
+    it('a scoped allow followed by a catch-all ask no longer applies', async () => {
+      const ask = { edit: 'ask', webfetch: 'ask', task: 'ask' };
+      const r = await check.run(makeCtx([makeConfig('opencode.json', { permission: { ...ask, bash: { 'curl *': 'allow' }, '*': 'ask' } })]));
+      expect(r.passed).toBe(true);
+    });
+  });
 });
 
 describe('OPC-003: MCP server pinning & transport', () => {

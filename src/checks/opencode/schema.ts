@@ -132,3 +132,80 @@ export function updatesOff(data: Obj): string | undefined {
   if (data.autoupdate === false) return 'autoupdate = false';
   return undefined;
 }
+
+/** One V1 permission rule: `permission.<key>` (string → pattern `*`) or `permission.<key>.<pattern>`. */
+export interface V1PermissionRule {
+  key: string;
+  pattern: string;
+  action: string;
+  /** The config layer that set it. */
+  file: string;
+  /** From a whole-config string (`permission: "allow"`). */
+  fromString?: boolean;
+}
+
+type V1Entry = { action: string; file: string; fromString?: boolean } | Map<string, { action: string; file: string }>;
+
+/**
+ * V1 `permission` as OpenCode builds it: every layer (config files,
+ * $OPENCODE_CONFIG_CONTENT, then $OPENCODE_PERMISSION over the result) is
+ * deep-merged in load order (remeda `mergeDeep`: a key already present keeps
+ * its place, new keys are appended, objects merge, anything else replaces),
+ * a string is `{ "*": s }`, and the result is flattened into rules in key
+ * order (`Permission.fromConfig`) — the last matching rule wins. Undefined
+ * when no layer sets `permission`.
+ */
+export function v1PermissionRules(configs: Array<{ filePath: string; data: Obj }>): V1PermissionRule[] | undefined {
+  const merged = new Map<string, V1Entry>();
+  let seen = false;
+  for (const config of configs) {
+    const raw = config.data.permission;
+    const fromString = typeof raw === 'string';
+    const perm = fromString ? { '*': raw } : obj(raw);
+    if (!perm) continue;
+    seen = true;
+    for (const [key, value] of Object.entries(perm)) {
+      if (typeof value === 'string') {
+        merged.set(key, { action: value.toLowerCase(), file: config.filePath, ...(fromString ? { fromString } : {}) });
+        continue;
+      }
+      const rules = obj(value);
+      if (!rules) continue;
+      const prev = merged.get(key);
+      const target = prev instanceof Map ? prev : new Map<string, { action: string; file: string }>();
+      for (const [pattern, action] of Object.entries(rules)) {
+        if (typeof action === 'string') target.set(pattern, { action: action.toLowerCase(), file: config.filePath });
+      }
+      merged.set(key, target);
+    }
+  }
+  if (!seen) return undefined;
+  const out: V1PermissionRule[] = [];
+  for (const [key, entry] of merged) {
+    if (entry instanceof Map) {
+      for (const [pattern, r] of entry) out.push({ key, pattern, action: r.action, file: r.file });
+    } else {
+      out.push({ key, pattern: '*', ...entry });
+    }
+  }
+  return out;
+}
+
+/** The last V1 rule that gives every call of `tool` its action (catch-all pattern), and its index. */
+export function v1CatchAll(rules: V1PermissionRule[], tool: string): { rule: V1PermissionRule; index: number } | undefined {
+  for (let i = rules.length - 1; i >= 0; i--) {
+    const r = rules[i];
+    if (isCatchAllResource(r.pattern) && actionMatches(r.key, tool)) return { rule: r, index: i };
+  }
+  return undefined;
+}
+
+/**
+ * Scoped `pattern → "allow"` rules of `tool` that still apply: no later rule
+ * for the tool takes the same pattern or every call back to ask/deny.
+ */
+export function v1ScopedAllows(rules: V1PermissionRule[], tool: string): V1PermissionRule[] {
+  return rules.filter((r, i) => r.key === tool && r.action === 'allow' && !isCatchAllResource(r.pattern)
+    && !rules.slice(i + 1).some(l => actionMatches(l.key, tool) && l.action !== 'allow'
+      && (isCatchAllResource(l.pattern) || l.pattern === r.pattern)));
+}

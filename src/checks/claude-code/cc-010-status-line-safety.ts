@@ -4,6 +4,7 @@ import { truncateSnippet } from '../../core/patterns.js';
 import { hookCommandRisks, hookExpansion, topTier } from '../../analyzers/hook-commands.js';
 import { commandWords, scriptCommands } from '../../mcp/script-command.js';
 import { isPinnedOrLocal, runnerPackage } from '../../mcp/package-pin.js';
+import { allHooksOffReason, claudeManagedLocks } from './managed-locks.js';
 
 /**
  * The status line command runs in a shell on every refresh with the session
@@ -12,6 +13,9 @@ import { isPinnedOrLocal, runnerPackage } from '../../mcp/package-pin.js';
  * data out, re-evaluating input as code. `$HOME` and Claude's path
  * placeholders are constant. A package runner (`npx ccstatusline`) without a
  * pinned version runs whatever the registry serves next.
+ * `disableAllHooks` also stops the status line (settings schema: "Disable
+ * all hooks and statusLine execution"), so a status line it covers is
+ * reported as mitigated.
  */
 const EXPANSION = hookExpansion(['CLAUDE_PROJECT_DIR', 'CLAUDE_CONFIG_DIR']);
 
@@ -38,6 +42,7 @@ export const cc010 = defineCheck({
 
   async run(ctx, h) {
     const evidence: Evidence[] = [];
+    const locks = await claudeManagedLocks(ctx);
 
     for (const config of ctx.configs) {
       const sl = config.data.statusLine as Record<string, unknown> | undefined;
@@ -56,11 +61,12 @@ export const cc010 = defineCheck({
         if (tier !== 'critical') tier = 'warning';
       }
       if (!tier) continue;
+      const off = tier === 'info' ? undefined : allHooksOffReason(ctx, locks, config.filePath);
       evidence.push({
         file: config.filePath,
         snippet: `statusLine.command: ${truncateSnippet(cmd, 120)}`,
-        detail: `Status line command ${reasons.join('; ')}`,
-        ...(tier === 'info' ? { mitigated: true } : {}),
+        detail: `Status line command ${reasons.join('; ')}${off ? ` (mitigated: not run — ${off})` : ''}`,
+        ...(tier === 'info' || off ? { mitigated: true } : {}),
       });
     }
 

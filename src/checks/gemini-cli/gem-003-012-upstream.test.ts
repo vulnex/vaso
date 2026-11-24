@@ -96,4 +96,19 @@ describe('GEM-011 flags a folder above a broad path (Gemini trusts every subpath
     expect(r.passed).toBe(false);
     expect(r.evidence?.map(e => e.snippet)).toEqual(['"/home": "TRUST_FOLDER"', '"/private/tmp": "TRUST_FOLDER"']);
   });
+
+  // Gemini CLI normalizePath / isSubpath lowercase both sides on darwin
+  it('matches case-insensitively on macOS only', async () => {
+    const mac = (): FSProvider => ({ ...makeFs(), homedir: () => '/Users/test', platform: 'darwin' } as unknown as FSProvider);
+    const data = { '/users': 'TRUST_FOLDER', '/PRIVATE/TMP': 'TRUST_FOLDER', '/Users/TEST': 'TRUST_FOLDER', '/Users/TEST/code/app': 'TRUST_FOLDER' };
+    const ctxFor = (fs: FSProvider): ScanContext => ({
+      installation: { agent: 'gemini-cli', installDir: '/Users/test/.gemini', configFiles: [] },
+      configs: [makeConfig('/Users/test/.gemini/trustedFolders.json', data)], platform: fs.platform, fs,
+    });
+    const r = await check.run(ctxFor(mac()));
+    expect(r.evidence?.map(e => e.snippet)).toEqual(['"/users": "TRUST_FOLDER"', '"/PRIVATE/TMP": "TRUST_FOLDER"', '"/Users/TEST": "TRUST_FOLDER"']);
+    // Linux compares case-sensitively: none of these is a broad path there
+    const linux = await check.run(ctxFor({ ...mac(), platform: 'linux' } as unknown as FSProvider));
+    expect(linux.passed).toBe(true);
+  });
 });
