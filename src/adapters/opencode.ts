@@ -40,7 +40,12 @@ export function xdgDataDir(home: string, fs: FSProvider): string {
   return xdg ? join(xdg, 'opencode') : join(home, '.local', 'share', 'opencode');
 }
 
-const CONFIG_FILENAMES = ['opencode.jsonc', 'opencode.json'];
+// In OpenCode's merge order — a later file wins (OpenCode 1.19 config.ts):
+// the global dir merges config.json, opencode.json, then opencode.jsonc;
+// project dirs (ConfigPaths.files) and $OPENCODE_CONFIG_DIR merge
+// opencode.json then opencode.jsonc
+const CONFIG_FILENAMES = ['opencode.json', 'opencode.jsonc'];
+const GLOBAL_CONFIG_FILENAMES = ['config.json', ...CONFIG_FILENAMES];
 
 async function loadOpenCodeConfig(filePath: string, fs: FSProvider): Promise<ParsedConfig | undefined> {
   // The shared loader parses JSON, JSONC and JSON5 and reports an unreadable
@@ -48,9 +53,9 @@ async function loadOpenCodeConfig(filePath: string, fs: FSProvider): Promise<Par
   return loadConfigIfPresent(filePath, fs);
 }
 
-async function loadConfigsIn(dir: string, fs: FSProvider): Promise<ParsedConfig[]> {
+async function loadConfigsIn(dir: string, fs: FSProvider, names = CONFIG_FILENAMES): Promise<ParsedConfig[]> {
   const out: ParsedConfig[] = [];
-  for (const name of CONFIG_FILENAMES) {
+  for (const name of names) {
     const filePath = join(dir, name);
     const parsed = await loadOpenCodeConfig(filePath, fs);
     if (parsed) out.push(parsed);
@@ -122,7 +127,7 @@ export const opencodeAdapter: AgentAdapter = {
       });
       const cliBinary = installs.primary?.path;
 
-      const configFiles: ParsedConfig[] = await loadConfigsIn(configDir, fs);
+      const configFiles: ParsedConfig[] = await loadConfigsIn(configDir, fs, GLOBAL_CONFIG_FILENAMES);
       // Environment layers (the scanning user's environment only), in
       // OpenCode's merge order: $OPENCODE_CONFIG (an extra file),
       // $OPENCODE_CONFIG_DIR (an extra config dir: opencode.json, agents,
@@ -201,7 +206,7 @@ export const opencodeAdapter: AgentAdapter = {
     const fs = new LocalFSProvider();
     const home = fs.homedir();
     const configDir = xdgConfigDir(home, fs);
-    return CONFIG_FILENAMES.map(f => join(configDir, f));
+    return GLOBAL_CONFIG_FILENAMES.map(f => join(configDir, f));
   },
 
   getSkillsDir(_installDir: string): string | undefined {
@@ -256,6 +261,7 @@ export const opencodeAdapter: AgentAdapter = {
       filePaths: [
         // extra config file named by $OPENCODE_CONFIG (expanded by the probe)
         '${OPENCODE_CONFIG}',
+        '~/.config/opencode/config.json',
         '~/.config/opencode/opencode.json',
         '~/.config/opencode/opencode.jsonc',
         '~/.config/opencode/AGENTS.md',

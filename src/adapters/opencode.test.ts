@@ -141,6 +141,24 @@ describe('OpenCode adapter', () => {
     }
   });
 
+  it('loads config files in OpenCode\'s merge order: config.json, opencode.json, opencode.jsonc (dt25 g3-F3)', async () => {
+    const cwd = vi.spyOn(process, 'cwd').mockReturnValue('/work/repo');
+    process.env.OPENCODE_CONFIG_DIR = '/srv/oc';
+    try {
+      const global = ['config.json', 'opencode.json', 'opencode.jsonc'].map(f => join(configDir, f));
+      setExistingPaths([...global, '/srv/oc/opencode.jsonc', '/srv/oc/opencode.json', '/work/repo/.git', '/work/repo/opencode.jsonc', '/work/repo/opencode.json']);
+      mockReadFile.mockImplementation(async () => '{}');
+      const result = await opencodeAdapter.detect();
+      const user = result.find(r => r.profile !== 'project');
+      expect(user?.configFiles.map(c => c.filePath)).toEqual([...global, '/srv/oc/opencode.json', '/srv/oc/opencode.jsonc']);
+      const project = result.find(r => r.profile === 'project');
+      expect(project?.configFiles.map(c => c.filePath)).toEqual(['/work/repo/opencode.json', '/work/repo/opencode.jsonc']);
+    } finally {
+      delete process.env.OPENCODE_CONFIG_DIR;
+      cwd.mockRestore();
+    }
+  });
+
   it('loads project opencode.json from the cwd up to the git root', async () => {
     const cwd = vi.spyOn(process, 'cwd').mockReturnValue('/work/repo/pkg');
     try {
