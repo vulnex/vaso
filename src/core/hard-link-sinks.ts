@@ -1,6 +1,6 @@
 import { readdir, lstat, stat } from 'node:fs/promises';
 import { encodeFsPath } from './fs-names.js';
-import { join } from 'node:path';
+import { isAbsolute, join, normalize } from 'node:path';
 import { classifySensitivePath } from '../analyzers/sensitive-paths.js';
 import type { FSProvider } from './fs-provider.js';
 
@@ -51,7 +51,29 @@ export const SINK_SEARCH_ROOTS: ReadonlyArray<{ path: string; depth: number }> =
   { path: '.config/openshell', depth: 5 },
   { path: '.local/state/openshell', depth: 5 },
   { path: 'Library/Cookies', depth: 1 },
+  // stores the 1.4.3 sink list added below the home's top level (dt25
+  // g9-F3): shell sessions and histories (zsh's ZDOTDIR conventions too),
+  // rclone, terraform, cargo, GNOME keyring
+  { path: '.zsh_sessions', depth: 1 },
+  { path: '.local/share/fish', depth: 1 },
+  { path: '.config/zsh', depth: 1 },
+  { path: '.zsh', depth: 1 },
+  { path: '.config/rclone', depth: 1 },
+  { path: '.terraform.d', depth: 1 },
+  { path: '.cargo', depth: 1 },
+  { path: '.local/share/keyrings', depth: 2 },
 ];
+
+/**
+ * $ZDOTDIR when it lies inside `home` (zsh keeps .zsh_history there),
+ * undefined otherwise. Mirrors zdotdirIn in probe/hard_links.go.
+ */
+export function zdotdirIn(home: string, env: Record<string, string | undefined> = process.env): string | undefined {
+  const z = env.ZDOTDIR;
+  if (!z || !isAbsolute(z)) return undefined;
+  const clean = normalize(z).replace(/\/+$/, '');
+  return clean.startsWith(`${home.replace(/\/+$/, '')}/`) ? clean : undefined;
+}
 
 /** Entries read to build one home's index, at most (maxSinkIdentityEntries). */
 export const MAX_SINK_IDENTITY_ENTRIES = 20000;
@@ -63,6 +85,8 @@ export async function buildSinkIdentityIndex(home: string): Promise<Map<string, 
   for (const r of SINK_SEARCH_ROOTS) {
     await indexSinkTree(r.path === '.' ? home : join(home, r.path), r.depth, budget, out);
   }
+  const zdotdir = zdotdirIn(home);
+  if (zdotdir) await indexSinkTree(zdotdir, 1, budget, out);
   return out;
 }
 

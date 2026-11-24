@@ -8,7 +8,7 @@
 
 import { spawn, execFileSync, type ChildProcess, type SpawnOptions } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { writeFile, unlink, access, stat } from 'node:fs/promises';
+import { writeFile, access, stat, mkdtemp, chmod, rm } from 'node:fs/promises';
 import { isIP } from 'node:net';
 import { openSync, readFileSync, closeSync, unlinkSync, constants } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
@@ -256,7 +256,7 @@ const CONNECT_TIMEOUT_SLACK_MS = 500;
  * Uses stdio: 'inherit' so the SSH password prompt works interactively;
  * `quiet` captures stderr only (the prompt goes through /dev/tty).
  */
-function establishControlMaster(target: SSHTarget, controlPath: string, timeout: number, quiet = false): Promise<void> {
+function establishControlMaster(target: SSHTarget, controlPath: string, timeout: number, quiet = false, logDir = tmpdir()): Promise<void> {
   return new Promise((resolve, reject) => {
     const args = [
       '-o', 'ControlMaster=yes',
@@ -273,7 +273,7 @@ function establishControlMaster(target: SSHTarget, controlPath: string, timeout:
     // Quiet: stderr to a private temp file, not a pipe — the backgrounded
     // master inherits it, and a pipe would hold 'close' open for
     // ControlPersist's 120 s (or SIGPIPE the master once read and closed).
-    const log = quiet ? openQuietLog() : undefined;
+    const log = quiet ? openQuietLog(logDir) : undefined;
     const started = Date.now();
     const child = spawnTimed('ssh', args, {
       stdio: log ? ['inherit', 'inherit', log.fd] : 'inherit', // Full terminal access for password prompts
@@ -296,8 +296,8 @@ function establishControlMaster(target: SSHTarget, controlPath: string, timeout:
  * closes and removes the file; the background master keeps writing to the
  * removed inode harmlessly.
  */
-function openQuietLog(): { fd: number; finish: () => void } {
-  const path = join(tmpdir(), `vaso-ssh-${randomUUID()}.log`);
+function openQuietLog(dir: string): { fd: number; finish: () => void } {
+  const path = join(dir, `vaso-ssh-${randomUUID()}.log`);
   const fd = openSync(path, 'wx+', 0o600);
   let done = false;
   return {
@@ -486,8 +486,9 @@ export async function withRetry<T>(opts: WithRetryOptions<T>): Promise<T> {
 
 /**
  * Run executeRemoteProbe with exponential backoff retry.
- * Cleanup of remote /tmp files happens in executeRemoteProbe's finally block,
- * so retries are safe — each attempt uses a fresh UUID.
+ * Cleanup of the remote and local temp directories happens in
+ * executeRemoteProbe's finally block, so retries are safe — each attempt
+ * makes fresh ones.
  */
 export async function executeRemoteProbeWithRetry(
   target: SSHTarget,
@@ -525,6 +526,52 @@ export function parseProbeOutput(stdout: string, target: Pick<SSHTarget, 'user' 
 /** Upper bound for uploading and running the probe (independent of --ssh-timeout). */
 export const PROBE_RUN_TIMEOUT_MS = 10 * 60 * 1000;
 
+/**
+ * A unix socket path is limited to 104 bytes on macOS (108 on Linux), and ssh
+ * appends a 17-character suffix while it creates the ControlMaster socket.
+ */
+const MAX_CONTROL_PATH = 80;
+
+/**
+ * A directory only this user can enter, for the ControlMaster socket, the
+ * --silent ssh log and the manifest copy that is uploaded. Names under a
+ * shared /tmp are guessable (the ssh ControlPath shows in `ps`), and another
+ * local user who pre-creates or swaps the manifest picks the commands the
+ * probe runs — as the scanning user, or root with --sudo. mkdtemp creates the
+ * directory exclusively, with a random name and mode 0700. A $TMPDIR too long
+ * for a unix socket path falls back to /tmp.
+ */
+export async function makePrivateLocalDir(base = tmpdir()): Promise<string> {
+  const root = join(base, 'vaso-XXXXXX', 'ctl').length > MAX_CONTROL_PATH && process.platform !== 'win32' ? '/tmp' : base;
+  const dir = await mkdtemp(join(root, 'vaso-'));
+  await chmod(dir, 0o700);
+  return dir;
+}
+
+/** What `mktemp -d` may print for REMOTE_MKTEMP's template — nothing else is used. */
+const REMOTE_DIR_RE = /^\/tmp\/vaso-probe\.[A-Za-z0-9]{6,}$/;
+
+/**
+ * Creates the target's private directory (mode 0700, random name, made
+ * exclusively by mktemp) over the control connection. Run through `sh -c`, so
+ * a csh or fish login shell reads it the same way.
+ */
+export const REMOTE_MKTEMP = `sh -c 'umask 077 && d=$(mktemp -d /tmp/vaso-probe.XXXXXXXXXX) && [ -d "$d" ] && [ ! -h "$d" ] && chmod 700 "$d" && printf "%s\\n" "$d"'`;
+
+/**
+ * The directory the target's mktemp created. Anything but one well-formed
+ * path means the upload would land somewhere not known to be private, so the
+ * host is not scanned (fail closed).
+ */
+export function parseRemoteTempDir(stdout: string, target: Pick<SSHTarget, 'user' | 'host'>): string {
+  const dir = stdout.trim();
+  if (!REMOTE_DIR_RE.test(dir)) {
+    const shown = escapeControlChars(dir.slice(0, 120), { lineBreaks: true });
+    throw new Error(`${target.user}@${target.host}: could not create a private temporary directory for the probe (mktemp -d printed "${shown}"), host not scanned`);
+  }
+  return dir;
+}
+
 export async function executeRemoteProbe(
   target: SSHTarget,
   options: SSHTransportOptions,
@@ -533,16 +580,18 @@ export async function executeRemoteProbe(
   // and running the probe take longer on large hosts and get their own limit.
   const timeout = options.timeout ?? 60000;
   const runTimeout = Math.max(timeout, PROBE_RUN_TIMEOUT_MS);
-  const uuid = randomUUID().slice(0, 8);
-  const controlPath = `/tmp/vaso-ssh-${uuid}`;
-  const remoteProbePath = `/tmp/vaso-probe-${uuid}`;
-  const remoteManifestPath = `/tmp/vaso-manifest-${uuid}.json`;
-  const localManifestPath = `/tmp/vaso-manifest-local-${uuid}.json`;
+  // Everything this run writes lives in private directories: the scanner's
+  // (control socket, --silent log, manifest copy) and the target's (probe,
+  // manifest)
+  const localDir = await makePrivateLocalDir();
+  const controlPath = join(localDir, 'ctl');
+  const localManifestPath = join(localDir, 'manifest.json');
+  let remoteDir: string | undefined;
   let connected = false;
 
   try {
     // 1. Establish authenticated connection (may prompt for password once)
-    await establishControlMaster(target, controlPath, timeout, options.quiet);
+    await establishControlMaster(target, controlPath, timeout, options.quiet, localDir);
     connected = true;
 
     // All subsequent commands reuse the authenticated connection — no more prompts
@@ -556,32 +605,40 @@ export async function executeRemoteProbe(
       probeBinDir: options.probeBinDir,
     });
 
-    // 4. Write manifest locally
-    await writeFile(localManifestPath, JSON.stringify(options.manifest), 'utf-8');
+    // 4. Write manifest locally (a new, owner-only file)
+    await writeFile(localManifestPath, JSON.stringify(options.manifest), { encoding: 'utf-8', flag: 'wx', mode: 0o600 });
 
-    // 5. Push binary + manifest to remote
+    // 5. Private directory on the target; fail closed when it can't be made
+    const { stdout: made } = await runOverControl('ssh', controlSSHArgs(target, controlPath, [REMOTE_MKTEMP]), { timeout: 10000 });
+    remoteDir = parseRemoteTempDir(made, target);
+    const remoteProbePath = `${remoteDir}/vaso-probe`;
+    const remoteManifestPath = `${remoteDir}/manifest.json`;
+
+    // 6. Push binary + manifest into it
     await runOverControl('scp', controlSCPArgs(target, controlPath, localBinary, remoteProbePath), { timeout: runTimeout });
     await runOverControl('scp', controlSCPArgs(target, controlPath, localManifestPath, remoteManifestPath), { timeout: runTimeout });
 
-    // 6. Make probe executable
-    await runOverControl('ssh', controlSSHArgs(target, controlPath, [`chmod +x ${remoteProbePath}`]), { timeout: 10000 });
+    // 7. Make probe executable (owner only)
+    await runOverControl('ssh', controlSSHArgs(target, controlPath, [`chmod 700 ${remoteProbePath}`]), { timeout: 10000 });
 
-    // 7. Execute probe
+    // 8. Execute probe
     const probeCmd = `${remoteProbePath} --manifest ${remoteManifestPath}${target.sudo ? ' --escalate' : ''}`;
     const { stdout } = await runOverControl('ssh', controlSSHArgs(target, controlPath, [probeCmd]), { timeout: runTimeout });
 
-    // 8. Parse snapshot
+    // 9. Parse snapshot
     return parseProbeOutput(stdout, target);
   } finally {
-    // Clean up local temp file
-    await unlink(localManifestPath).catch(() => {});
     // Remote cleanup needs the control connection; without it ssh would dial
     // the (unreachable) host again and stall the failure by up to 10 s.
     if (connected) {
-      try {
-        await runOverControl('ssh', controlSSHArgs(target, controlPath, [`rm -f ${remoteProbePath} ${remoteManifestPath}`]), { timeout: 10000 });
-      } catch { /* best effort */ }
+      if (remoteDir !== undefined) {
+        try {
+          await runOverControl('ssh', controlSSHArgs(target, controlPath, [`rm -rf -- ${remoteDir}`]), { timeout: 10000 });
+        } catch { /* best effort */ }
+      }
       closeControlMaster(target, controlPath);
     }
+    // The local directory (manifest copy, socket) goes once the master is gone
+    await rm(localDir, { recursive: true, force: true }).catch(() => {});
   }
 }

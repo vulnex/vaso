@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 )
 
 // A hard link has no target to resolve: a skills-tree file hard-linked to
@@ -55,6 +56,31 @@ var sinkSearchRoots = []sinkSearchRoot{
 	{".config/openshell", true, 5},
 	{".local/state/openshell", true, 5},
 	{"Library/Cookies", true, 1},
+	// stores the 1.4.3 sink list added below the home's top level (dt25
+	// g9-F3): shell sessions and histories (zsh's ZDOTDIR conventions too),
+	// rclone, terraform, cargo, GNOME keyring
+	{".zsh_sessions", true, 1},
+	{".local/share/fish", true, 1},
+	{".config/zsh", true, 1},
+	{".zsh", true, 1},
+	{".config/rclone", true, 1},
+	{".terraform.d", true, 1},
+	{".cargo", true, 1},
+	{".local/share/keyrings", true, 2},
+}
+
+// zdotdirIn is $ZDOTDIR when it lies inside home (zsh keeps .zsh_history
+// there), "" otherwise. Mirrors zdotdirIn in src/core/hard-link-sinks.ts.
+func zdotdirIn(home string) string {
+	z := os.Getenv("ZDOTDIR")
+	if z == "" || !filepath.IsAbs(z) {
+		return ""
+	}
+	z = filepath.Clean(z)
+	if !strings.HasPrefix(z, strings.TrimSuffix(home, string(filepath.Separator))+string(filepath.Separator)) {
+		return ""
+	}
+	return z
 }
 
 // maxSinkIdentityEntries bounds the entries read to build one home's index.
@@ -119,6 +145,9 @@ func buildSinkIdentities(homes []string) map[fileID]string {
 		budget := maxSinkIdentityEntries
 		for _, r := range sinkSearchRoots {
 			indexSinkTree(filepath.Join(h, filepath.FromSlash(r.path)), r.depth, &budget, out)
+		}
+		if z := zdotdirIn(h); z != "" {
+			indexSinkTree(z, 1, &budget, out)
 		}
 	}
 	return out

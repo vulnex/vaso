@@ -6,7 +6,7 @@ import type { ScanContext, AgentInstallation } from './types.js';
 import { LocalFSProvider } from './local-fs-provider.js';
 import { SnapshotFSProvider, foldCase } from './snapshot-fs-provider.js';
 import type { ProbeSnapshot } from './snapshot-types.js';
-import { hardLinkedSink, homeOfPath, LocalHardLinkIndex } from './hard-link-sinks.js';
+import { hardLinkedSink, homeOfPath, LocalHardLinkIndex, SINK_SEARCH_ROOTS, zdotdirIn } from './hard-link-sinks.js';
 import { walkSkillTree, skillFileInSink } from './skill-walk.js';
 import { linkedIntoSink } from './config-loader.js';
 import { classifySensitivePath } from '../analyzers/sensitive-paths.js';
@@ -157,5 +157,60 @@ describe('sink classification folds like the probe', () => {
     expect(homeOfPath('/home/u')).toBe('/home/u');
     expect(homeOfPath('/root/x')).toBe('/root');
     expect(homeOfPath('/opt/x')).toBeUndefined();
+  });
+});
+
+describe('hard links into the stores the 1.4.3 sink list added (dt25 g9-F3)', () => {
+  // one file per store, where the tool keeps it
+  const STORES = [
+    '.zsh_history',
+    '.zsh_sessions/ABCD.history',
+    '.local/share/fish/fish_history',
+    '.config/zsh/.zsh_history',
+    '.zsh/.zsh_history',
+    '.config/rclone/rclone.conf',
+    '.terraform.d/credentials.tfrc.json',
+    '.cargo/credentials.toml',
+    '.local/share/keyrings/login.keyring',
+    '.vault-token',
+    '.my.cnf',
+  ];
+  let home: string;
+
+  beforeEach(() => {
+    home = realpathSync(mkdtempSync(join(tmpdir(), 'hardlink-stores-')));
+    mkdirSync(join(home, '.claude', 'skills', 's'), { recursive: true });
+  });
+  afterEach(() => rmSync(home, { recursive: true, force: true }));
+
+  it('every store file is a sink a search root reaches', () => {
+    for (const rel of STORES) {
+      expect(classifySensitivePath(join(home, rel)), rel).not.toEqual([]);
+      const reached = SINK_SEARCH_ROOTS.some(r => {
+        const under = r.path === '.' ? rel : rel.startsWith(`${r.path}/`) ? rel.slice(r.path.length + 1) : undefined;
+        return under !== undefined && under.split('/').length <= r.depth;
+      });
+      expect(reached, rel).toBe(true);
+    }
+  });
+
+  it('names the store file a skills-tree hard link is', async () => {
+    STORES.forEach((rel, i) => {
+      mkdirSync(join(home, rel, '..'), { recursive: true });
+      writeFileSync(join(home, rel), `password=CANARY${i}\n`, { mode: 0o600 });
+      linkSync(join(home, rel), join(home, '.claude', 'skills', 's', `notes${i}.md`));
+    });
+    const fs = new HomeFS(home);
+    for (const [i, rel] of STORES.entries()) {
+      expect(await hardLinkedSink(fs, join(home, '.claude', 'skills', 's', `notes${i}.md`)), rel).toBe(join(home, rel));
+    }
+  });
+
+  it('indexes $ZDOTDIR only inside the home', () => {
+    expect(zdotdirIn('/home/u', { ZDOTDIR: '/home/u/dots/zsh/' })).toBe('/home/u/dots/zsh');
+    expect(zdotdirIn('/home/u', { ZDOTDIR: '/home/u/../v/zsh' })).toBeUndefined();
+    expect(zdotdirIn('/home/u', { ZDOTDIR: '/' })).toBeUndefined();
+    expect(zdotdirIn('/home/u', { ZDOTDIR: 'rel/zsh' })).toBeUndefined();
+    expect(zdotdirIn('/home/u', {})).toBeUndefined();
   });
 });

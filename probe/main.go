@@ -24,7 +24,7 @@ func main() {
 
 	var manifest ProbeManifest
 	if *manifestPath != "" {
-		data, err := os.ReadFile(*manifestPath)
+		data, err := readManifest(*manifestPath)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Error reading manifest: %v\n", err)
 			os.Exit(1)
