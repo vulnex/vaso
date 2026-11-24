@@ -27,7 +27,7 @@ export const gem011 = defineCheck({
   async run(ctx, h) {
     const evidence: Evidence[] = [];
     const home = ctx.fs.homedir();
-    const broadPaths = buildBroadPaths(home);
+    const broadPaths = buildBroadPaths(home, ctx.platform);
 
     // trustedFolders.json is not a settings file the adapter loads: read it
     // from the user install (Gemini CLI keeps folder trust user-level only).

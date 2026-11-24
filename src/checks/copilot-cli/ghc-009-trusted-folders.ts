@@ -17,7 +17,7 @@ export const ghc009 = defineCheck({
     if (ctx.installation.profile === 'project') return h.passed('Project configuration — trusted folders are read from ~/.copilot/config.json only');
     const evidence: Evidence[] = [];
     const home = ctx.fs.homedir();
-    const broadPaths = buildBroadPaths(home);
+    const broadPaths = buildBroadPaths(home, ctx.platform);
 
     for (const config of ctx.configs) {
       const folders = config.data.trustedFolders;

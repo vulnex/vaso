@@ -8,6 +8,12 @@ import { canonicalSystemPath, markUntrustedProject, settingsConfigs } from './sh
 const RULE = /^([A-Za-z_]+)\s*(?:\((.*)\))?$/;
 const WRITE_TOOLS = new Set(['Edit', 'Write', 'MultiEdit', 'NotebookEdit']);
 const ANY = new Set(['', '*', '**']);
+// The CLI folds rule tool names through a lowercase map before matching
+// (2.10.15: `function O_(e){return _9n.get(e.toLowerCase())??e}`), so
+// `bash(*)`, `BASH` and `edit(~/**)` are the Bash and Edit rules. Names
+// outside the map (MultiEdit, NotebookEdit) stay case-sensitive.
+const FOLDED_TOOLS = new Map(['Bash', 'Write', 'Edit', 'Read', 'Delete'].map(t => [t.toLowerCase(), t]));
+const canonicalTool = (name: string): string => FOLDED_TOOLS.get(name.toLowerCase()) ?? name;
 
 // Commands whose wildcard allowance hands the agent code execution or egress.
 const RISKY_COMMANDS = new Set(['sh', 'bash', 'zsh', 'sudo', 'su', 'curl', 'wget', 'eval', 'python', 'python3', 'node', 'perl', 'ruby', 'ssh', 'nc', 'rm', 'chmod', 'npx']);
@@ -40,7 +46,7 @@ export const aba002 = defineCheck({
     const critical: Evidence[] = [];
     const warning: Evidence[] = [];
     const home = ctx.fs.homedir();
-    const broadPaths = buildBroadPaths(home).filter(b => !b.path.endsWith('tmp'));
+    const broadPaths = buildBroadPaths(home, ctx.platform).filter(b => !b.path.endsWith('tmp'));
 
     for (const config of settingsConfigs(ctx.configs)) {
       const permissions = config.data.permissions as Record<string, unknown> | undefined;
@@ -49,7 +55,8 @@ export const aba002 = defineCheck({
         if (typeof entry !== 'string') continue;
         const m = RULE.exec(entry.trim());
         if (!m) continue;
-        const [, tool, rawPattern] = m;
+        const tool = canonicalTool(m[1]);
+        const rawPattern = m[2];
         const pattern = (rawPattern ?? '').trim();
         const snippet = `permissions.allow: "${entry}"`;
 
@@ -70,7 +77,7 @@ export const aba002 = defineCheck({
           if (!pattern || ANY.has(pattern)) continue;
           const target = hostPath(pattern);
           if (target === undefined) continue;
-          const base = canonicalSystemPath(target.replace(/(?:[\\/]\*{1,2})+$/, '') || '/');
+          const base = canonicalSystemPath(target.replace(/(?:[\\/]\*{1,2})+$/, '') || '/', ctx.platform);
           const broad = isBroadPath(base, broadPaths, home);
           const sinks = classifySensitivePath(base.replace(/^~/, home));
           if (broad) {

@@ -128,8 +128,11 @@ describe('ABA-002 broad permission rules', () => {
   it('treats an all-wildcard Bash pattern as any command and /private/etc as /etc', async () => {
     const r0 = await check('ABA-002').run(userCtx([cfg(USER_CFG, { permissions: { allow: ['Bash(* *)'] } })]));
     expect(r0.severity).toBe('critical');
-    const etc = await check('ABA-002').run(userCtx([cfg(USER_CFG, { permissions: { allow: ['Write(//private/etc/**)'] } })]));
+    const rule = [cfg(USER_CFG, { permissions: { allow: ['Write(//private/etc/**)'] } })];
+    const etc = await check('ABA-002').run({ ...userCtx(rule), platform: 'darwin' });
     expect(etc.severity).toBe('critical');
+    // /private/etc is an ordinary directory off macOS (dt25 g4-F21)
+    expect((await check('ABA-002').run(userCtx(rule))).passed).toBe(true);
   });
 
   it('treats /path, ./path and path as workspace-anchored and // as the filesystem root', async () => {
@@ -140,6 +143,17 @@ describe('ABA-002 broad permission rules', () => {
     const root = await check('ABA-002').run(userCtx([cfg(USER_CFG, { permissions: { allow: ['Edit(//etc/**)', 'Write(~/**)'] } })]));
     expect(root.severity).toBe('critical');
     expect(root.evidence).toHaveLength(2);
+  });
+
+  it('folds tool-name case like the CLI (dt25 g4-F2)', async () => {
+    const r = await check('ABA-002').run(userCtx([cfg(USER_CFG, {
+      permissions: { allow: ['bash(*)', 'BASH', 'edit(~/**)', 'write(//etc/**)', 'bash(curl *)'] },
+    })]));
+    expect(r.severity).toBe('critical');
+    expect(r.evidence?.map(e => e.snippet)).toEqual([
+      'permissions.allow: "bash(*)"', 'permissions.allow: "BASH"', 'permissions.allow: "edit(~/**)"',
+      'permissions.allow: "write(//etc/**)"', 'permissions.allow: "bash(curl *)"',
+    ]);
   });
 
   it('passes scoped rules', async () => {
@@ -402,11 +416,14 @@ describe('ABA-013 additional directories', () => {
 
 describe('ABA-013 macOS /private paths', () => {
   it('judges /private/etc like /etc', async () => {
-    const etc = await check('ABA-013').run(userCtx([cfg(USER_CFG, { additionalDirectories: ['/etc'] })]));
-    const priv = await check('ABA-013').run(userCtx([cfg(USER_CFG, { additionalDirectories: ['/private/etc'] })]));
+    const mac = (configs: ParsedConfig[]): ScanContext => ({ ...userCtx(configs), platform: 'darwin' });
+    const etc = await check('ABA-013').run(mac([cfg(USER_CFG, { additionalDirectories: ['/etc'] })]));
+    const priv = await check('ABA-013').run(mac([cfg(USER_CFG, { additionalDirectories: ['/private/etc'] })]));
     expect(etc.passed).toBe(false);
     expect(priv.passed).toBe(false);
     expect(priv.severity).toBe(etc.severity);
+    // off macOS /private/etc is an ordinary directory (dt25 g4-F21)
+    expect((await check('ABA-013').run(userCtx([cfg(USER_CFG, { additionalDirectories: ['/private/etc'] })]))).passed).toBe(true);
   });
 });
 

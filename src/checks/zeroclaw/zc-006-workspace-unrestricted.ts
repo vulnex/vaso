@@ -31,7 +31,7 @@ export const zc006 = defineCheck({
     if (!config) return h.passed('No ZeroClaw config.toml found');
     const evidence: Evidence[] = [];
     const home = ctx.fs.homedir();
-    const broad = buildBroadPaths(home);
+    const broad = buildBroadPaths(home, ctx.platform);
     let writable = false;
 
     for (const p of effectiveProfiles(config.data)) {

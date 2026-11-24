@@ -1,0 +1,8 @@
+{
+  "agent": "claude-code",
+  "source": "dt25 g3-F1 regression: disableAllHooks in ~/.claude.json (not a settings file) does not stop settings.json hooks or the status line",
+  "fail": {
+    "CC-003": "critical",
+    "CC-010": "warning"
+  }
+}

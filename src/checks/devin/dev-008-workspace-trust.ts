@@ -59,7 +59,7 @@ export const dev008 = defineCheck({
       });
       if (data) {
         const home = ctx.fs.homedir();
-        const broadPaths = buildBroadPaths(home);
+        const broadPaths = buildBroadPaths(home, ctx.platform);
         for (const entry of Array.isArray(data.trusted_paths) ? data.trusted_paths : []) {
           if (typeof entry !== 'string') continue;
           const broad = isBroadPath(entry, broadPaths, home);

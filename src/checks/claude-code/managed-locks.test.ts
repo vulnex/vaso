@@ -20,7 +20,11 @@ function ctx(configs: ParsedConfig[], files: Record<string, string> = {}, agents
       if (p in all) return all[p];
       throw Object.assign(new Error('ENOENT'), { code: 'ENOENT' });
     }),
-    readdir: vi.fn(async () => { throw new Error('ENOENT'); }),
+    readdir: vi.fn(async (d: string) => {
+      const names = Object.keys(all).filter(p => p.startsWith(`${d}/`)).map(p => p.slice(d.length + 1));
+      if (names.length === 0) throw new Error('ENOENT');
+      return names;
+    }),
     readdirEntries: vi.fn(async (d: string) => {
       if (d !== '/home/test/.claude/agents') throw new Error('ENOENT');
       return Object.keys(agents).map(p => ({ name: p.split('/').pop()!, isFile: true, isDirectory: false, parentPath: d }));
@@ -124,5 +128,51 @@ describe('CC-010 under disableAllHooks (status line not run)', () => {
     expect(r.severity).not.toBe('info');
     r = await byId('CC-010').run(ctx([config(USER, statusLine), config(MANAGED, { allowManagedHooksOnly: true })]));
     expect(r.severity).not.toBe('info');
+  });
+});
+
+describe('disableAllHooks is read from settings files after precedence (dt25 g3-F1/F2/F5/F11)', () => {
+  const PROJECT = '/work/.claude/settings.json';
+  const LOCAL = '/work/.claude/settings.local.json';
+  const DROPIN = '/etc/claude-code/managed-settings.d/20-hooks.json';
+  const projectHooks = config(PROJECT, { hooks: userHooks.data.hooks, statusLine: { type: 'command', command: CURL } });
+  const live = async (configs: ParsedConfig[], files: Record<string, string> = {}) => {
+    for (const id of ['CC-003', 'CC-010']) {
+      const r = await byId(id).run(ctx(configs, files));
+      expect(r.severity, id).toBe(id === 'CC-003' ? 'critical' : 'warning');
+      expect(r.passed, id).toBe(false);
+      expect(r.evidence?.some(e => e.mitigated), id).toBe(false);
+    }
+  };
+
+  it('~/.claude.json and .mcp.json are not settings files', async () => {
+    await live([config(USER, projectHooks.data), config('/home/test/.claude.json', { disableAllHooks: true })]);
+    await live([projectHooks, config('/work/.mcp.json', { mcpServers: {}, disableAllHooks: true })]);
+  });
+
+  it('a settings.local.json false overrides a project true', async () => {
+    await live([config(PROJECT, { ...projectHooks.data, disableAllHooks: true }), config(LOCAL, { disableAllHooks: false })]);
+    // and the other way round, a local true still mitigates
+    const r = await byId('CC-003').run(ctx([config(PROJECT, { ...projectHooks.data, disableAllHooks: false }), config(LOCAL, { disableAllHooks: true })]));
+    expect(r.severity).toBe('info');
+    expect(r.evidence?.[0].detail).toContain(`${LOCAL} sets disableAllHooks`);
+  });
+
+  it('a project false overrides a user true', async () => {
+    await live([config(USER, { disableAllHooks: true }), config(PROJECT, { ...projectHooks.data, disableAllHooks: false })]);
+  });
+
+  it('a managed drop-in false overrides the base managed true', async () => {
+    await live([projectHooks], { [MANAGED]: JSON.stringify({ disableAllHooks: true }), [DROPIN]: JSON.stringify({ disableAllHooks: false }) });
+    const r = await byId('CC-003').run(ctx([projectHooks], { [MANAGED]: JSON.stringify({ disableAllHooks: false }), [DROPIN]: JSON.stringify({ disableAllHooks: true }) }));
+    expect(r.evidence?.[0].detail).toContain(`${DROPIN} sets disableAllHooks`);
+  });
+
+  it('a managed false wins over a user/project true', async () => {
+    await live([config(PROJECT, { ...projectHooks.data, disableAllHooks: true })], { [MANAGED]: JSON.stringify({ disableAllHooks: false }) });
+  });
+
+  it('a drop-in false lifts the base allowManagedHooksOnly too', async () => {
+    await live([projectHooks], { [MANAGED]: JSON.stringify({ allowManagedHooksOnly: true }), [DROPIN]: JSON.stringify({ allowManagedHooksOnly: false }) });
   });
 });

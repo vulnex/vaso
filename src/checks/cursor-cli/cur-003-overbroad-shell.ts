@@ -22,7 +22,7 @@ export const cur003 = defineCheck({
         const list = Array.isArray(config.data.terminalAllowlist) ? config.data.terminalAllowlist : [];
         for (const entry of list) {
           if (typeof entry !== 'string') continue;
-          const reason = entry.trim() === '' ? undefined : overbroadShellReason(`Shell(${entry.trim()})`);
+          const reason = entry.trim() === '' ? undefined : overbroadShellReason(`Shell(${entry.trim()})`, { foldCase: true });
           if (!reason) continue;
           evidence.push({
             file: config.filePath,
