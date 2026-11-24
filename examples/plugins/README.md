@@ -4,6 +4,8 @@ Example user plugins demonstrating the VASO plugin API. Each file is a standalon
 
 > **Warning:** a plugin is code that runs as your user, with your permissions, every time you run any `vaso` command. Only install plugins you have read or trust.
 
+VASO loads a plugin only when nobody else could have changed it: the plugin file (or a link's target), the folder holding it, `~/.vaso/plugins` and `~/.vaso` must be owned by you (or root) and not writable by group or others. Otherwise it is refused with a warning naming the path (`chmod 600` the file, `chmod 700` the folder).
+
 The examples live in the GitHub repository; they are not part of the npm tarball that `install.sh` installs.
 
 ## Installation

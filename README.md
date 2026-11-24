@@ -331,7 +331,7 @@ bash bin/vaso-quick.sh
 
 ## Plugin System
 
-VASO supports user plugins in `~/.vaso/plugins/` (`.js` or `.mjs` files, or a folder with an `index.mjs`/`index.js`). Plugins can add custom checks, output formatters, and agent adapters. A plugin is code that runs as your user on every `vaso` command: only install plugins you trust. See [examples/plugins/README.md](examples/plugins/README.md) for the plugin API (`registerCheck`, `registerAdapter`, `registerReporter`) with working examples, and [doc/development-guide.md](doc/development-guide.md) for VASO's internals.
+VASO supports user plugins in `~/.vaso/plugins/` (`.js` or `.mjs` files, or a folder with an `index.mjs`/`index.js`). Plugins can add custom checks, output formatters, and agent adapters. A plugin is code that runs as your user on every `vaso` command: only install plugins you trust. VASO refuses (with a warning) a plugin that someone else could have changed: the plugin file (or a link's target), its folder, `~/.vaso/plugins` and `~/.vaso` must be owned by you (or root) and not writable by group or others. See [examples/plugins/README.md](examples/plugins/README.md) for the plugin API (`registerCheck`, `registerAdapter`, `registerReporter`) with working examples, and [doc/development-guide.md](doc/development-guide.md) for VASO's internals.
 
 ## Files VASO keeps
 

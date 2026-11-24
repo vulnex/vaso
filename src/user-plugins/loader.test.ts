@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { mkdtemp, rm, writeFile, mkdir } from 'node:fs/promises';
+import { chmod, mkdtemp, rm, stat, symlink, writeFile, mkdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { loadUserPlugins, getLoadedPlugins, _resetForTesting, registeredAnything } from './loader.js';
@@ -280,5 +280,77 @@ describe('plugin meta and partial registration', () => {
     const [p] = await loadUserPlugins(tempDir);
     expect(p.status).toBe('error');
     expect(registeredAnything(p)).toBe(true);
+  });
+});
+
+/**
+ * dt25 g8-F1: plugin code someone else could have written is refused — never
+ * imported — like ~/.vaso/trusted-projects and ~/.vaso/rules.
+ */
+describe.runIf(process.platform !== 'win32')('loadUserPlugins refuses plugins others can write', () => {
+  const marker = (name: string) => `
+    import { writeFileSync } from 'node:fs';
+    writeFileSync(process.env.VASO_PLUGIN_MARKER_DIR + '/' + ${JSON.stringify(name)}, 'ran');
+    export default { register() {} };
+  `;
+  let pluginDir: string;
+  beforeEach(async () => {
+    pluginDir = join(tempDir, 'plugins');
+    await mkdir(pluginDir, { mode: 0o700 });
+    process.env.VASO_PLUGIN_MARKER_DIR = tempDir;
+  });
+  afterEach(() => { delete process.env.VASO_PLUGIN_MARKER_DIR; });
+
+  const ran = async (name: string) => stat(join(tempDir, name)).then(() => true, () => false);
+
+  it('loads an owner-only plugin', async () => {
+    await writeFile(join(pluginDir, 'ok.mjs'), marker('ok'), { mode: 0o600 });
+    const [p] = await loadUserPlugins(pluginDir);
+    expect(p.status).toBe('loaded');
+    expect(await ran('ok')).toBe(true);
+  });
+
+  it('refuses a world-writable plugin file', async () => {
+    const f = join(pluginDir, 'ww.mjs');
+    await writeFile(f, marker('ww'));
+    await chmod(f, 0o666);
+    const [p] = await loadUserPlugins(pluginDir);
+    expect(p.status).toBe('error');
+    expect(p.error).toMatch(/^refused: .*ww\.mjs is writable by group or others — not loaded/);
+    expect(await ran('ww')).toBe(false);
+  });
+
+  it('refuses every plugin in a world-writable plugins directory', async () => {
+    await writeFile(join(pluginDir, 'a.mjs'), marker('a'), { mode: 0o600 });
+    await mkdir(join(pluginDir, 'b'));
+    await writeFile(join(pluginDir, 'b', 'index.mjs'), marker('b'), { mode: 0o600 });
+    await chmod(pluginDir, 0o777);
+    const result = await loadUserPlugins(pluginDir);
+    expect(result.map(p => p.status)).toEqual(['error', 'error']);
+    expect(result[0].error).toContain(`${pluginDir} is writable by group or others — the plugins in ${pluginDir} are not loaded`);
+    expect(await ran('a')).toBe(false);
+    expect(await ran('b')).toBe(false);
+  });
+
+  it('refuses a directory plugin whose own folder others can write', async () => {
+    await mkdir(join(pluginDir, 'd'));
+    await writeFile(join(pluginDir, 'd', 'index.mjs'), marker('d'), { mode: 0o600 });
+    await chmod(join(pluginDir, 'd'), 0o777);
+    const [p] = await loadUserPlugins(pluginDir);
+    expect(p.status).toBe('error');
+    expect(p.error).toContain('is writable by group or others');
+    expect(await ran('d')).toBe(false);
+  });
+
+  it('refuses a link to a plugin in a world-writable (non-sticky) directory', async () => {
+    const open = join(tempDir, 'open');
+    await mkdir(open);
+    await writeFile(join(open, 'real.mjs'), marker('l'), { mode: 0o600 });
+    await chmod(open, 0o777);
+    await symlink(join(open, 'real.mjs'), join(pluginDir, 'l.mjs'));
+    const [p] = await loadUserPlugins(pluginDir);
+    expect(p.status).toBe('error');
+    expect(p.error).toMatch(/links to .*real\.mjs, in a directory group or others can write/);
+    expect(await ran('l')).toBe(false);
   });
 });

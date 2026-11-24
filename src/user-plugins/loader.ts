@@ -1,5 +1,5 @@
 import { readdir, stat, readFile } from 'node:fs/promises';
-import { join, basename, extname } from 'node:path';
+import { join, basename, dirname, extname } from 'node:path';
 import { homedir } from 'node:os';
 import { pathToFileURL } from 'node:url';
 import { checkRegistry } from '../core/check-registry.js';
@@ -10,6 +10,8 @@ import type { CheckModule } from '../core/types.js';
 import type { AgentAdapter } from '../adapters/adapter.js';
 import type { Reporter } from '../reporting/reporter.js';
 import { VERSION } from '../version.js';
+import { LocalFSProvider } from '../core/local-fs-provider.js';
+import { ownedDirsProblem, ownedFileProblem } from '../core/owned-file.js';
 
 let loadedPlugins: LoadedPlugin[] = [];
 
@@ -103,6 +105,14 @@ function buildPluginAPI(plugin: LoadedPlugin): VasoPluginAPI {
  * (defaults to ~/.vaso/plugins/).
  *
  * Broken plugins are recorded with status 'error' but never crash VASO.
+ *
+ * A plugin runs as the person running VASO, so it is loaded only when
+ * nobody else could have written it (as ~/.vaso/trusted-projects and
+ * ~/.vaso/rules require): the plugins directory and the directory holding
+ * it, and each plugin's entry file (a link's target too) and the directory
+ * holding it, must be the user's own (or root's) and not group/world
+ * writable. A refused plugin is recorded with status 'error' and the reason
+ * — it is never imported.
  */
 export async function loadUserPlugins(dir?: string): Promise<LoadedPlugin[]> {
   const pluginDir = dir ?? defaultPluginDir();
@@ -115,6 +125,10 @@ export async function loadUserPlugins(dir?: string): Promise<LoadedPlugin[]> {
   } catch {
     return loadedPlugins;
   }
+
+  const fs = new LocalFSProvider();
+  const dirProblem = await ownedDirsProblem([pluginDir, dirname(pluginDir)], `the plugins in ${pluginDir} are not loaded`, 'them', fs)
+    .catch((err: Error) => `${pluginDir} could not be checked (${err.message}) — the plugins in it are not loaded`);
 
   for (const entry of entries.sort()) {
     // Skip hidden files/dirs (dot or underscore prefix)
@@ -147,6 +161,16 @@ export async function loadUserPlugins(dir?: string): Promise<LoadedPlugin[]> {
       status: 'loaded',
       registered: { checks: [], adapters: [], reporters: [] },
     };
+
+    // Refuse code someone else could have written: never import it
+    const problem = dirProblem ?? await ownedFileProblem(entryPoint, 'not loaded', fs)
+      .catch((err: Error) => `${entryPoint} could not be checked (${err.message}) — not loaded`);
+    if (problem) {
+      plugin.status = 'error';
+      plugin.error = `refused: ${problem}`;
+      loadedPlugins.push(plugin);
+      continue;
+    }
 
     try {
       const fileUrl = pathToFileURL(entryPoint).href;
