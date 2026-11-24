@@ -38,8 +38,29 @@ describe('Nanobot websocket channel', () => {
   it('CFG-001 ignores the host of a channel served on a unix socket', async () => {
     const r = await cfg001.run(ctx({ unixSocketPath: '/run/nanobot.sock', host: '0.0.0.0' }));
     expect(r.passed).toBe(true);
-    // An empty unixSocketPath keeps the TCP listener
-    expect((await cfg001.run(ctx({ unix_socket_path: '', host: '0.0.0.0' }))).passed).toBe(false);
+    // An empty unixSocketPath keeps the TCP listener (a token keeps the
+    // config loadable — see below)
+    expect((await cfg001.run(ctx({ unix_socket_path: '', host: '0.0.0.0', token: 't' }))).passed).toBe(false);
+  });
+
+  // nanobot-ai 0.4.1 channels/websocket/runtime.py WebSocketConfig
+  // wildcard_host_requires_auth: host exactly "0.0.0.0" or "::" with no
+  // token, token_issue_secret or trusted_proxy_auth raises — config.json is
+  // rejected and nothing listens (NB-008 reports it)
+  it('CFG-001 skips a wildcard websocket nanobot refuses to load, and a host that never binds', async () => {
+    for (const ws of [
+      { unix_socket_path: '', host: '0.0.0.0' },
+      { enabled: true, host: '::' },
+      { host: '0.0.0.0', token: '  ' },
+      { host: '[::]' },
+      { host: '[::]', token: 't' },
+    ]) {
+      expect((await cfg001.run(ctx(ws))).passed, JSON.stringify(ws)).toBe(true);
+    }
+    // loadable wildcard binds are still reported
+    for (const ws of [{ host: '::', token: 't' }, { host: '0.0.0.0', tokenIssueSecret: 's' }, { host: '0.0.0.0', trusted_proxy_auth: {} }, { host: '' }]) {
+      expect((await cfg001.run(ctx(ws))).passed, JSON.stringify(ws)).toBe(false);
+    }
   });
 
   it('CFG-001 names the IPv6 wildcard it found', async () => {

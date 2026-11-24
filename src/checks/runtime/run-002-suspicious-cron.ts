@@ -2,7 +2,7 @@ import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
 import { CODING_AGENTS } from '../../core/types.js';
 import { truncateSnippet } from '../../core/patterns.js';
-import { agentExecutable, keep, SUSPICIOUS_KEYWORDS } from './run-001-launch-agents.js';
+import { agentExecutable, SUSPICIOUS_KEYWORDS } from './run-001-launch-agents.js';
 
 /** The command of a crontab line: after the five schedule fields, or an `@reboot`-style nickname. */
 export function cronCommand(line: string): string[] {
@@ -35,16 +35,18 @@ export const run002 = defineCheck({
         const lower = line.toLowerCase();
         const keyword = SUSPICIOUS_KEYWORDS.find(k => lower.includes(k));
         if (!keyword) continue;
-        // A job that runs an installed agent (its CLI, or an agent-named
-        // program under a standard install root) is the agent's own
-        // schedule, as RUN-001 judges services; reported once, under that
-        // agent, as info
+        // A job that runs this installation (its CLI, another copy of it, or
+        // a program in its install dir / CLI package) is the agent's own
+        // schedule, as RUN-001 judges services: info. Anything else naming
+        // an agent is a warning — an agent-named program elsewhere proves
+        // nothing. Another detected agent's own job is left to that agent
+        // by the engine (dedupeOwnPersistence), never dropped here.
         const command = cronCommand(line);
-        const own = command.length > 0 ? agentExecutable(command, keyword, ctx) : undefined;
+        const own = command.length > 0 ? await agentExecutable(command, ctx) : undefined;
         const item: Evidence = own
           ? { file: 'crontab', line: i + 1, snippet: truncateSnippet(line, 120), detail: `Cron entry runs an installed agent — ${own}`, mitigated: true }
-          : { file: 'crontab', line: i + 1, snippet: truncateSnippet(line, 120), detail: `Cron entry references "${keyword}", not a recognized agent install location` };
-        keep(evidence, line, ctx, item);
+          : { file: 'crontab', line: i + 1, snippet: truncateSnippet(line, 120), detail: `Cron entry references "${keyword}", not the installed agent's own program` };
+        evidence.push(item);
       }
     } catch {
       // No crontab or access denied

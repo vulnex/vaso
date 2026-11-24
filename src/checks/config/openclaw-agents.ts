@@ -3,6 +3,8 @@ import { getNestedValue } from '../../core/utils.js';
 
 export interface OpenclawAgentEntry {
   id: string;
+  /** Where the entry sits: `agents.entries.<id>` or `agents.list[<i>]`. */
+  path: string;
   config: ParsedConfig;
   data: Record<string, unknown>;
 }
@@ -24,14 +26,14 @@ export function openclawAgentEntries(configs: ParsedConfig[]): OpenclawAgentEntr
     const entries = asRecord(getNestedValue(config.data, 'agents.entries'));
     for (const [id, value] of Object.entries(entries ?? {})) {
       const data = asRecord(value);
-      if (data) out.push({ id, config, data });
+      if (data) out.push({ id, path: `agents.entries.${id}`, config, data });
     }
     const list = getNestedValue(config.data, 'agents.list');
     if (Array.isArray(list)) {
-      for (const item of list) {
+      list.forEach((item, i) => {
         const data = asRecord(item);
-        if (data && typeof data.id === 'string') out.push({ id: data.id, config, data });
-      }
+        if (data && typeof data.id === 'string') out.push({ id: data.id, path: `agents.list[${i}]`, config, data });
+      });
     }
   }
   return out;

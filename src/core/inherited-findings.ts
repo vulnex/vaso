@@ -29,6 +29,7 @@ export function dedupeInheritedFindings(agents: AgentScanResult[]): void {
     }
   }
   dedupeHostWideFindings(agents);
+  dedupeOwnPersistence(agents);
 }
 
 /**
@@ -123,4 +124,68 @@ function inheritFrom(
 
 function evidenceKey(e: Evidence): string {
   return `${e.file}\u0000${e.line ?? ''}\u0000${e.detail ?? ''}\u0000${e.snippet ?? ''}`;
+}
+
+/** Service and cron checks: a unit/job is judged against the scanned installation's own paths. */
+const PERSISTENCE_CHECKS = new Set(['RUN-001', 'RUN-002']);
+
+function persistenceKey(e: Evidence): string {
+  return `${e.file}\u0000${e.line ?? ''}\u0000${e.snippet ?? ''}`;
+}
+
+/**
+ * A service or cron job that runs one detected agent is info under that
+ * agent and, judged by its paths, a warning under every other agent on the
+ * host (it is not theirs). Report it once, under the agent it runs: the
+ * other agents drop that item. Items no detected agent claims stay a
+ * warning everywhere — nothing is dropped by name.
+ */
+export function dedupeOwnPersistence(agents: AgentScanResult[]): void {
+  const owners = new Map<string, AgentScanResult>();
+  for (const a of agents) {
+    for (const r of a.results) {
+      if (!PERSISTENCE_CHECKS.has(r.id)) continue;
+      for (const e of r.evidence ?? []) {
+        const key = `${r.id}\u0000${persistenceKey(e)}`;
+        if (e.mitigated && !owners.has(key)) owners.set(key, a);
+      }
+    }
+  }
+  if (owners.size === 0) return;
+
+  for (const a of agents) {
+    let changed = false;
+    a.results = a.results.map((r): CheckResult => {
+      if (!PERSISTENCE_CHECKS.has(r.id) || r.passed || r.errored || !r.evidence) return r;
+      const claimedBy = new Set<AgentScanResult>();
+      const kept = r.evidence.filter(e => {
+        const owner = e.mitigated ? undefined : owners.get(`${r.id}\u0000${persistenceKey(e)}`);
+        if (owner && owner !== a) { claimedBy.add(owner); return false; }
+        return true;
+      });
+      if (kept.length === r.evidence.length) return r;
+      changed = true;
+      const labels = [...claimedBy].map(o => `${o.agent} (${o.installation.installDir})`).join(', ');
+      if (kept.length === 0) {
+        return { ...r, passed: true, inherited: true, evidence: undefined, fixable: undefined,
+          message: `Runs another detected agent — reported under ${labels}` };
+      }
+      const dropped = r.evidence.length - kept.length;
+      const suspicious = kept.filter(e => !e.mitigated).length;
+      const what = r.id === 'RUN-002' ? 'cron entry/entries' : 'persistence mechanism(s)';
+      const head = suspicious === 0
+        ? `Found ${kept.length} ${r.id === 'RUN-002' ? 'cron entry/entries' : 'agent service(s)'} — all run an installed agent`
+        : `Found ${suspicious} suspicious ${what}`;
+      return {
+        ...r,
+        evidence: kept,
+        severity: suspicious === 0 ? 'info' : r.severity,
+        message: `${head} (${dropped} more run${dropped === 1 ? 's' : ''} another detected agent, reported under ${labels})`,
+      };
+    });
+    if (changed) {
+      a.score = computeScore(a.results);
+      a.grade = scoreToGrade(a.score);
+    }
+  }
 }

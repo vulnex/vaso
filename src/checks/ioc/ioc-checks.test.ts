@@ -428,6 +428,21 @@ describe('IOC-004: Malicious Publishers', () => {
     expect(result.evidence?.map(e => e.file.split('/').slice(-2).join('/')).sort()).toEqual(['a/SKILL.md', 'b/SKILL.md']);
   });
 
+  it('reads an author list (flow or block) and list entries with a name; ignores the non-standard `authors` key', async () => {
+    for (const [name, fm] of [
+      ['flow', 'author: [hightower6eu]'],
+      ['block', 'author:\n  - Acme Inc.\n  - hightower6eu'],
+      ['meta', 'metadata:\n  author: [hightower6eu]'],
+      ['named', 'author:\n  - name: hightower6eu'],
+      ['authors', 'authors: [hightower6eu]'],
+    ]) {
+      await mkdir(join(tempDir, name), { recursive: true });
+      await writeFile(join(tempDir, name, 'SKILL.md'), `---\nname: ${name}\ndescription: x\n${fm}\n---\nbody\n`);
+    }
+    const result = await ioc004.run(makeContext(tempDir));
+    expect(result.evidence?.map(e => e.file.split('/').slice(-2)[0]).sort()).toEqual(['block', 'flow', 'meta', 'named']);
+  });
+
   it('passes for skills with benign publishers', async () => {
     const skillDir = join(tempDir, 'good-skill');
     await mkdir(skillDir, { recursive: true });

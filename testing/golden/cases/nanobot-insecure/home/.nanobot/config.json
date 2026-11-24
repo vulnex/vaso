@@ -30,7 +30,8 @@
       "enabled": true,
       "host": "0.0.0.0",
       "port": 8765,
-      "websocketRequiresToken": false
+      "websocketRequiresToken": false,
+      "token": "golden-static-ws-token-0002"
     }
   },
   "tools": {

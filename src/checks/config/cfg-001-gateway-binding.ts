@@ -9,6 +9,7 @@ import { managedOverride } from '../../adapters/hermes-managed.js';
 import { containerEnvironment, isOpenclawAutoBind, openclawAutoBindDetail } from '../../adapters/openclaw-bind.js';
 import { hostPort, isWildcardAddress } from '../../core/listen-address.js';
 import { picoclawPublicLauncher } from '../../adapters/picoclaw.js';
+import { nanobotWebsocketHost, nanobotWebsocketRejected } from '../../adapters/nanobot.js';
 import { configFixTargets } from '../../remediation/fix-refusal.js';
 
 const LISTENER_KEY = /host|bind|listen/i;
@@ -51,12 +52,19 @@ function wildcardListeners(data: unknown, isWildcard: WildcardTest, path = '', d
   return hits;
 }
 
-/** Nanobot's websocket channel served on a unix socket instead of TCP (runtime.py runner). */
-function nanobotUnixSocket(data: Record<string, unknown>): boolean {
+/**
+ * Nanobot's websocket channel opens no TCP listener on its host: served on a
+ * unix socket instead (runtime.py runner), a wildcard host without auth that
+ * WebSocketConfig's `wildcard_host_requires_auth` rejects (nanobot does not
+ * start — NB-008 reports it), or a host that never resolves (`[::]`).
+ */
+function nanobotWebsocketNoTcpListener(data: Record<string, unknown>): boolean {
   const ws = getNestedValue(data, 'channels.websocket');
-  if (!ws || typeof ws !== 'object') return false;
-  const path = (ws as Record<string, unknown>).unixSocketPath ?? (ws as Record<string, unknown>).unix_socket_path;
-  return typeof path === 'string' && path.trim().length > 0;
+  if (!ws || typeof ws !== 'object' || Array.isArray(ws)) return false;
+  const rec = ws as Record<string, unknown>;
+  const path = rec.unixSocketPath ?? rec.unix_socket_path;
+  if (typeof path === 'string' && path.trim().length > 0) return true;
+  return nanobotWebsocketRejected(rec) || nanobotWebsocketHost(rec.host) === undefined;
 }
 
 /** The wildcard address the evidence names (`::` binds IPv6 too), for the headline. */
@@ -198,9 +206,10 @@ export const cfg001 = defineCheck({
           if (reported.has(hit.path)) continue;
           // Hermes: a value its administrator-managed layer replaces binds nothing
           if (managedOverride(ctx.configs, config, hit.path)) continue;
-          // Nanobot: channels.websocket.unixSocketPath replaces the TCP listener
+          // Nanobot: a unix socket replaces the TCP listener; a rejected or
+          // unresolvable websocket host binds nothing
           if (ctx.installation.agent === 'nanobot' && /^channels\.websocket\.host$/i.test(hit.path)
-              && nanobotUnixSocket(config.data)) continue;
+              && nanobotWebsocketNoTcpListener(config.data)) continue;
           const line = lines.findIndex(l => l.includes(hit.key) && l.includes(hit.value));
           evidence.push({
             file: config.filePath,
