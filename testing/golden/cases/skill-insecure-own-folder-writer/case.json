@@ -1,0 +1,7 @@
+{
+  "agent": "claude-code",
+  "source": "dt25 rv g6-R1/R2, user decision D2 (strict): skills that run a shipped helper from their own folder while something in the skill writes files — a child-process download over it (curl -o, JS and Python), a shell script's wget -O, a plain output write — critical",
+  "fail": {
+    "SKL-003": "critical"
+  }
+}
