@@ -47,6 +47,8 @@ export const aba002 = defineCheck({
     const warning: Evidence[] = [];
     const home = ctx.fs.homedir();
     const broadPaths = buildBroadPaths(home, ctx.platform).filter(b => !b.path.endsWith('tmp'));
+    // On a case-insensitive filesystem `CURL` and `/BIN/BASH` run curl and bash
+    const foldName = (name: string): string => (ctx.platform === 'darwin' || ctx.platform === 'win32') ? name.toLowerCase() : name;
 
     for (const config of settingsConfigs(ctx.configs)) {
       const permissions = config.data.permissions as Record<string, unknown> | undefined;
@@ -64,7 +66,7 @@ export const aba002 = defineCheck({
           // `*`, `* *`, `**` … — every token a wildcard still matches any command
           if (ANY.has(pattern) || /^[\s*]+$/.test(pattern)) {
             critical.push({ file: config.filePath, snippet, detail: 'Allows any shell command without approval' });
-          } else if (RISKY_COMMANDS.has(firstToken(pattern)) && /\*/.test(pattern)) {
+          } else if (RISKY_COMMANDS.has(foldName(firstToken(pattern))) && /\*/.test(pattern)) {
             warning.push({ file: config.filePath, snippet, detail: `Wildcard allowance for "${firstToken(pattern)}" — runs arbitrary code or reaches the network without approval` });
           }
           continue;

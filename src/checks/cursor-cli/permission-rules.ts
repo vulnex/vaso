@@ -7,10 +7,13 @@ import { classifySensitivePath } from '../../analyzers/sensitive-paths.js';
  * `Shell(commandBase)` or `Shell(command:args)` (`Shell(curl:*)` = curl with
  * any arguments), `Read(pathOrGlob)` / `Write(pathOrGlob)` with relative
  * (workspace) or absolute paths, `WebFetch(domain)`, `Mcp(server:tool)`.
- * `Bash(...)` is an alias of `Shell(...)`; both names are case-sensitive and
- * so are the command patterns (picomatch without nocase) — cursor-agent
- * 2026.11.05: `t.match(/^\s*(Shell|Bash)\s*\((.*)\)\s*$/)`, so
- * `shell(sh)` and `Shell(BASH)` match nothing.
+ * `Bash(...)` is an alias of `Shell(...)`; every tool name is case-sensitive
+ * (cursor-agent 2026.11.05: `/^\s*(Shell|Bash)\s*\((.*)\)\s*$/`,
+ * `/^\s*Read\s*\(/`, `/^\s*Write\s*\(/`, `/^\s*WebFetch\s*\(/`,
+ * `/^\s*Mcp\s*\(/`), so `shell(sh)` is no rule. Command patterns are
+ * matched case-sensitively too (picomatch without nocase): `Shell(BASH)`
+ * matches only a command typed `BASH` — which runs bash where the
+ * filesystem ignores case (macOS, Windows) and nothing on Linux.
  */
 export interface CursorRule {
   /** The tool name, lowercased. */
@@ -32,6 +35,14 @@ function isShellRule(parsed: CursorRule): boolean {
   return parsed.name === 'Shell' || parsed.name === 'Bash';
 }
 
+/** The rule names Cursor reads, exactly as spelled. */
+const RULE_TOOLS = new Set(['Shell', 'Bash', 'Read', 'Write', 'WebFetch', 'Mcp']);
+
+/** Where `BASH` or `/BIN/SH` runs the real binary (case-insensitive filesystem). */
+export function caseInsensitiveFs(platform: string | undefined): boolean {
+  return platform === 'darwin' || platform === 'win32';
+}
+
 const WILDCARD = /^\*+$/;
 const RISKY_COMMANDS = new Set(['rm', 'curl', 'wget', 'nc', 'ncat', 'netcat', 'telnet', 'ssh', 'scp']);
 
@@ -47,18 +58,21 @@ function shellBase(arg: string, foldCase = false): string {
  * command, a shell / interpreter / wrapper (which runs whatever it is
  * given), or a risky command — with any arguments, and however the base is
  * spelled (`python3`, `/usr/bin/curl`). Command patterns are matched
- * case-sensitively unless `foldCase` (IDE terminalAllowlist entries).
+ * case-sensitively unless `foldCase` (IDE terminalAllowlist entries); on a
+ * case-insensitive filesystem (`platform` darwin/win32) an uppercase name
+ * still runs the lowercase binary, so it is judged folded.
  */
-export function overbroadShellReason(rule: string, opts: { foldCase?: boolean } = {}): string | undefined {
+export function overbroadShellReason(rule: string, opts: { foldCase?: boolean; platform?: string } = {}): string | undefined {
   const parsed = parseCursorRule(rule);
   if (!parsed || !isShellRule(parsed)) return undefined;
   if (parsed.arg === undefined || parsed.arg === '') return 'allows every shell command';
   const base = shellBase(parsed.arg, opts.foldCase);
   if (WILDCARD.test(base)) return 'allows every shell command';
-  // Command names below are all lowercase: `BASH` matches no command
+  // Command names below are all lowercase: on Linux `BASH` runs no command
   const name = base.split(/[/\\]/).pop() ?? base;
-  if (name !== name.toLowerCase()) return undefined;
-  const stem = commandStem(base);
+  const fold = caseInsensitiveFs(opts.platform);
+  if (!fold && name !== name.toLowerCase()) return undefined;
+  const stem = commandStem(fold ? base.toLowerCase() : base);
   if (SHELL_COMMANDS.has(stem) || WRAPPER_COMMANDS.has(stem)) return `allows ${base}, which runs any command it is given`;
   if (INTERPRETER_COMMANDS.has(stem)) return `allows the ${base} interpreter, which runs any code it is given`;
   if (RISKY_COMMANDS.has(stem)) return `allows any ${base} command (network transfer or deletion)`;
@@ -83,10 +97,11 @@ export function shellDenied(rule: string, deny: readonly string[]): boolean {
   });
 }
 
-/** A rule whose whole argument is a wildcard: `X(*)`, `X(**)`, `Shell(*:*)`, `Mcp(*:*)`. */
+/** A rule whose whole argument is a wildcard: `X(*)`, `X(**)`, `Shell(*:*)`,
+ *  `Mcp(*:*)` — for a tool name Cursor reads (`shell(*)` is no rule). */
 export function isCatchAll(rule: string): boolean {
   const parsed = parseCursorRule(rule);
-  if (!parsed?.arg) return false;
+  if (!parsed?.arg || !RULE_TOOLS.has(parsed.name)) return false;
   return parsed.arg.split(':').every(part => WILDCARD.test(part.trim()));
 }
 
