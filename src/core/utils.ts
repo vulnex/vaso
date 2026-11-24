@@ -297,6 +297,9 @@ export async function listSkillTree(dir: string, fs?: FSProvider, opts: { uncapp
     if (!files.includes(skillMd) && await provider.access(skillMd)) files.push(skillMd);
   }
   // Sorted: a local walk and a snapshot list folders in different orders
+  // (and the checks report evidence in file order)
+  files.sort();
+  codeFiles.sort();
   const unlistableNested = (await unlistableSubdirs(provider, dir, entries)).filter(d => !unlistable.includes(d)).sort();
   return { entries, files, codeFiles, vendorDirRefs: vendorDirRefs.sort(), unlistable: unlistable.sort(), unlistableNested, refusedLinks, overLimitLinks, overTotalLinks, unrecordedLinks, ...(error ? { error } : {}) };
 }

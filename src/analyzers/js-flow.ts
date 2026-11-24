@@ -177,6 +177,19 @@ function isPathCall(n: Node, scope: Scope, names: RegExp): string | undefined {
   return undefined;
 }
 
+/** `path.sep` (also `require('path').sep`, `path.posix.sep`): joins like `/` for a path check. */
+function isPathSep(n: Node, scope: Scope): boolean {
+  if (n.type !== 'MemberExpression' || memberName(n) !== 'sep') return false;
+  let o = n.object;
+  if (o.type === 'MemberExpression' && /^(?:posix|win32)$/.test(memberName(o) ?? '')) o = o.object;
+  if (o.type === 'Identifier') {
+    const mod = bindingModule(scope.getBinding(o.name));
+    return mod ? /^(?:node:)?path(?:\/posix)?$/.test(mod) : o.name === 'path';
+  }
+  return o.type === 'CallExpression' && o.callee.type === 'Identifier' && o.callee.name === 'require'
+    && o.arguments[0]?.type === 'StringLiteral' && /^(?:node:)?path$/.test(o.arguments[0].value);
+}
+
 /** `import.meta.url` / `import.meta.dirname` / `import.meta.filename`. */
 function importMeta(n: Node): string | undefined {
   if (n.type !== 'MemberExpression' || n.object.type !== 'MetaProperty') return undefined;
@@ -256,7 +269,7 @@ export function analyzeFlows(ast: JsAst): FlowAnalysis {
       // `[HOME, '.ssh', 'id_rsa'].join('/')`: the parts joined with a known separator
       if (n.callee.type === 'MemberExpression' && memberName(n.callee) === 'join' && n.callee.object.type === 'ArrayExpression'
         && n.arguments.length <= 1) {
-        const sep = n.arguments.length === 0 ? ',' : staticString(n.arguments[0] as Node, scope);
+        const sep = n.arguments.length === 0 ? ',' : isPathSep(n.arguments[0] as Node, scope) ? '/' : staticString(n.arguments[0] as Node, scope);
         const parts = n.callee.object.elements;
         if (sep !== undefined && parts.length <= 16 && parts.every(e => e && e.type !== 'SpreadElement')) {
           let acc = [''];
@@ -274,7 +287,10 @@ export function analyzeFlows(ast: JsAst): FlowAnalysis {
       }
       if (fn) {
         let acc = [''];
-        for (const a of n.arguments) {
+        // `path.join(...[HOME, '.aws', 'credentials'])`: a spread array literal is its elements
+        const args = n.arguments.flatMap(a => a.type === 'SpreadElement' && a.argument.type === 'ArrayExpression'
+          && a.argument.elements.every(e => e && e.type !== 'SpreadElement') ? a.argument.elements as Node[] : [a as Node]);
+        for (const a of args) {
           const vals = pathValues(a as Node, scope, depth + 1);
           acc = acc.flatMap(prev => vals.map(v => {
             if (fn === 'resolve' && (v.startsWith('/') || v.startsWith('~') || v.startsWith('<'))) return v;
