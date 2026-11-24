@@ -228,18 +228,23 @@ export function isSecretReference(value: string): boolean {
 
 /**
  * A `.env` value that names where a credential is kept: a variable reference
- * (`${VAR}` — python-dotenv expands it; a `$`-form Node's dotenv keeps as
- * literal text is a broken value, not a stored secret), a secret manager
- * reference (`op://…`, resolved by `op run --env-file`) or a key file. Not a
- * bare variable NAME or a profile name: dotenv loaders read the value
- * literally, so `EMAIL_PASSWORD=admin-2024` or `DB_PASSWORD=MY_DB_PASS_2024`
- * is the password itself.
+ * (`${VAR}` or `${VAR:-default}` — python-dotenv expands only those; Node's
+ * dotenv expands nothing, and a `${VAR}` it keeps as literal text is a broken
+ * value, not a stored secret), a secret manager reference (`op://…`, resolved
+ * by `op run --env-file`) or a key file. Not `$VAR` (python-dotenv's
+ * `dotenv_values` returns `$Hunter2024` literally), a bare variable NAME or a
+ * profile name: dotenv loaders read the value literally, so
+ * `EMAIL_PASSWORD=admin-2024` or `DB_PASSWORD=MY_DB_PASS_2024` is the
+ * password itself.
  */
+/** What python-dotenv 1.x expands: `${NAME}` and `${NAME:-default}`. */
+const DOTENV_EXPANSION = /^\$\{[A-Za-z_][A-Za-z0-9_]*(?::-[^}]*)?\}$/;
+
 export function isDotenvReference(value: string): boolean {
   const v = value.trim().replace(/^(['"])(.*)\1$/, '$2');
   if (v === '') return false;
   const form = envReference(v);
-  if (form !== undefined) return form !== 'name';
+  if (form !== undefined) return form === 'dollar-brace' && DOTENV_EXPANSION.test(v);
   if (API_KEY_PATTERNS.some((p) => p.pattern.test(v))) return false;
   return SECRET_MANAGER_REFERENCE.test(v) || FILE_REFERENCE.test(v) && (!PATH_PREFIX.test(v) || isPathValue(v));
 }

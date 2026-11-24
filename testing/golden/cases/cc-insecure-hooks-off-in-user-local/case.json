@@ -1,0 +1,8 @@
+{
+  "agent": "claude-code",
+  "source": "dt25 g3-N1: disableAllHooks in ~/.claude/settings.local.json does not stop ~/.claude/settings.json hooks or the status line — Claude Code 2.1.281 reads user settings from ~/.claude/settings.json only; settings.local.json in the user dir is local settings of a session started in ~ itself",
+  "fail": {
+    "CC-003": "critical",
+    "CC-010": "warning"
+  }
+}

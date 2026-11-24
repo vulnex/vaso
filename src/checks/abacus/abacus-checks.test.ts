@@ -156,6 +156,15 @@ describe('ABA-002 broad permission rules', () => {
     ]);
   });
 
+  it('folds the command name on a case-insensitive filesystem (dt25 g4-N3)', async () => {
+    const allow = ['Bash(CURL *)', 'Bash(PYTHON3 *)', 'bash(/BIN/BASH *)'];
+    const mac = await check('ABA-002').run({ ...userCtx([cfg(USER_CFG, { permissions: { allow } })]), platform: 'darwin' });
+    expect(mac.passed).toBe(false);
+    expect(mac.evidence).toHaveLength(3);
+    // on Linux `CURL` runs no command
+    expect((await check('ABA-002').run(userCtx([cfg(USER_CFG, { permissions: { allow } })]))).passed).toBe(true);
+  });
+
   it('passes scoped rules', async () => {
     const r = await check('ABA-002').run(userCtx([cfg(USER_CFG, { permissions: { allow: ['Read', 'Edit', 'Bash(git status)'], deny: ['Bash(rm *)'] } })]));
     expect(r.passed).toBe(true);

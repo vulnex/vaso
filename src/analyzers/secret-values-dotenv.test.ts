@@ -36,4 +36,13 @@ describe('envSecretKeys: dotenv values are read literally', () => {
     expect(isDotenvReference('staging-eu')).toBe(false);
     expect(isDotenvReference('/Xq7Lk2Pz9Rt4Vw8Yb3Nc')).toBe(false);
   });
+
+  it('only ${VAR} / ${VAR:-default} are references, not $VAR (dt25 g2 5a)', () => {
+    expect(isDotenvReference('${DB_PASS:-}')).toBe(true);
+    for (const v of ['$Hunter2024', '$uperSecretPw', '$DB_PASS', '${DB_PASS:?unset}', '$env:DB_PASS', '%DB_PASS%', '${env:DB_PASS}']) {
+      expect(isDotenvReference(v), v).toBe(false);
+    }
+    expect(envSecretKeys({ EMAIL_PASSWORD: '$Hunter2024' })).toEqual(['EMAIL_PASSWORD']);
+    expect(envSecretKeys({ EMAIL_PASSWORD: '$uperSecretPw' })).toEqual(['EMAIL_PASSWORD']);
+  });
 });

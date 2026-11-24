@@ -113,6 +113,21 @@ describe('CUR-003: Overbroad Shell', () => {
     expect(live.passed).toBe(false);
   });
 
+  it('on a case-insensitive filesystem an uppercase command still runs the binary (dt25 g4-N1)', async () => {
+    const allow = ['Shell(BASH:*)', 'Shell(/BIN/SH)', 'Bash(PYTHON3)', 'Shell(Curl:*)'];
+    for (const platform of ['darwin', 'win32'] as const) {
+      const ctx = { ...makeCtx([makeConfig('cli-config.json', { permissions: { allow, deny: [] } })]), platform };
+      const result = await check.run(ctx);
+      expect(result.severity, platform).toBe('critical');
+      expect(result.evidence, platform).toHaveLength(4);
+    }
+    // the tool name stays case-sensitive everywhere
+    const ctx = { ...makeCtx([makeConfig('cli-config.json', { permissions: { allow: ['shell(sh)', 'SHELL(*)', 'bash(CURL:*)'], deny: [] } })]), platform: 'darwin' as const };
+    expect((await check.run(ctx)).passed).toBe(true);
+    // …and Linux runs nothing for BASH
+    expect((await check.run(makeCtx([makeConfig('cli-config.json', { permissions: { allow, deny: [] } })]))).passed).toBe(true);
+  });
+
   it('passes on Shell(git) (the real config we saw also had Shell(ls))', async () => {
     const result = await check.run(makeCtx([makeConfig('cli-config.json', {
       permissions: { allow: ['Shell(git)', 'Shell(ls)'], deny: [] },
@@ -170,6 +185,17 @@ describe('CUR-005: Deny vs Allow', () => {
       permissions: { allow: ['Write(*)'], deny: ['Write(**/*.env)'] },
     })]));
     expect(result.passed).toBe(true);
+  });
+
+  it('ignores catch-alls under a tool name Cursor does not read (dt25 g4-N2)', async () => {
+    const result = await check.run(makeCtx([makeConfig('cli-config.json', {
+      permissions: { allow: ['shell(*)', 'SHELL(*)', 'write(**)', 'mcp(*:*)'], deny: [] },
+    })]));
+    expect(result.passed).toBe(true);
+    for (const rule of ['Shell(*)', 'Bash(*)', 'Read(**)', 'WebFetch(*)', 'Mcp(*:*)']) {
+      const r = await check.run(makeCtx([makeConfig('cli-config.json', { permissions: { allow: [rule], deny: [] } })]));
+      expect(r.passed, rule).toBe(false);
+    }
   });
 });
 

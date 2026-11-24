@@ -1,6 +1,5 @@
 import type { ScanContext } from '../../core/types.js';
-import { basename } from 'node:path';
-import { parseJsonLenient } from '../../core/jsonc.js';
+import { basename, dirname } from 'node:path';
 import { claudeManagedSettingsPaths } from '../../adapters/claude-code.js';
 
 /**
@@ -27,18 +26,34 @@ export interface ManagedLocks {
   managedFiles: Set<string>;
 }
 
+/**
+ * A settings file as Claude Code reads it: strict JSON (a leading BOM is
+ * fine). A file with comments or trailing commas is rejected whole —
+ * `claude doctor` 2.1.281 reports "Invalid settings … Expected object" and
+ * none of its keys apply — so VASO's lenient parse must not lend it a lock.
+ */
+function strictSettings(raw: string): Record<string, unknown> | undefined {
+  try {
+    const data: unknown = JSON.parse(raw.replace(/^\uFEFF/, ''));
+    return data && typeof data === 'object' && !Array.isArray(data) ? data as Record<string, unknown> : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 export async function claudeManagedLocks(ctx: ScanContext): Promise<ManagedLocks> {
   const paths = await claudeManagedSettingsPaths(ctx.fs);
   const locks: ManagedLocks = { managedFiles: new Set(paths) };
   for (const file of paths) {
-    let data: unknown = ctx.configs.find(c => c.filePath === file)?.data;
-    if (data === undefined) {
+    let raw = ctx.configs.find(c => c.filePath === file)?.raw;
+    if (raw === undefined) {
       try {
-        data = parseJsonLenient(await ctx.fs.readFile(file));
+        raw = await ctx.fs.readFile(file);
       } catch {
         continue; // absent or unreadable
       }
     }
+    const data = strictSettings(raw);
     if (!data || typeof data !== 'object' || Array.isArray(data)) continue;
     const d = data as Record<string, unknown>;
     // Later files replace earlier values; only booleans are valid settings
@@ -57,8 +72,19 @@ export async function claudeManagedLocks(ctx: ScanContext): Promise<ManagedLocks
  * user/shared-project `settings.json`, then `settings.local.json`
  * (code.claude.com/docs/en/settings#settings-precedence). `~/.claude.json`
  * and `.mcp.json` are not settings files — a key there does nothing.
+ *
+ * User settings are `~/.claude/settings.json` only (Claude Code 2.1.281
+ * `dAe("userSettings")` = config dir + `settings.json`, or
+ * `cowork_settings.json`): a `settings.local.json` in the user dir is read
+ * only as the local settings of a session started in `~` itself, so for the
+ * user installation it does not rank.
  */
 const SETTINGS_RANK: Record<string, number> = { 'settings.json': 0, 'settings.local.json': 1 };
+
+/** `settings.local.json` in the user installation's own config dir. */
+function isUserDirLocal(ctx: ScanContext, file: string): boolean {
+  return ctx.installation.profile !== 'project' && dirname(file) === ctx.installation.installDir;
+}
 
 /** The non-managed settings file whose `disableAllHooks` is left after
  *  precedence, with its value; undefined when none sets it. */
@@ -68,7 +94,8 @@ function scopedAllHooks(ctx: ScanContext, locks: ManagedLocks): { file: string; 
     if (locks.managedFiles.has(c.filePath)) continue;
     const rank = SETTINGS_RANK[basename(c.filePath)];
     if (rank === undefined) continue;
-    const value = (c.data as Record<string, unknown> | undefined)?.disableAllHooks;
+    if (rank === 1 && isUserDirLocal(ctx, c.filePath)) continue;
+    const value = strictSettings(c.raw)?.disableAllHooks;
     if (typeof value !== 'boolean') continue;
     // Same rank: the later file wins (the repo-root settings.local.json is
     // loaded after the working directory's, and its value applies)

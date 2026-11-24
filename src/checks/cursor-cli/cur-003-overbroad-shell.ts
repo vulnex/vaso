@@ -39,7 +39,7 @@ export const cur003 = defineCheck({
 
       for (const rule of allow) {
         if (shellDenied(rule, deny)) continue; // deny wins
-        const reason = overbroadShellReason(rule);
+        const reason = overbroadShellReason(rule, { platform: ctx.platform });
         if (!reason) continue;
         evidence.push({
           file: config.filePath,

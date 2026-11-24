@@ -7,15 +7,36 @@ import { checkRegistry } from '../core/check-registry.js';
 import { owaspAgenticForCheckId, OWASP_AGENTIC_TITLES } from './owasp-agentic.js';
 import { owaspMcpForCheckId, OWASP_MCP_TITLES } from './owasp-mcp.js';
 import { escapeJsonUnsafe, escapeControlChars } from './text-safety.js';
+import { hasEscapedBytes } from '../core/fs-names.js';
 
 /**
  * SARIF `artifactLocation.uri` must be a URI reference: absolute paths become
  * file: URIs, other references are percent-encoded per segment (scanned file
- * names may hold spaces, `#`, `?` or `<`).
+ * names may hold spaces, `#`, `?` or `<`). A byte of a non-UTF-8 name
+ * (held as U+DC00+byte, `src/core/fs-names.ts`) is percent-encoded as that
+ * raw byte (`caf\xe9` → `caf%E9`), not as U+FFFD — names that differ only
+ * in such bytes keep distinct URIs.
  */
 export function toSarifUri(file: string | undefined): string | undefined {
   if (!file) return file;
+  // Each escaped byte travels as NUL + its two hex digits (no path holds a
+  // NUL), which both encoders below turn into `%00XX`
+  const marked = hasEscapedBytes(file);
+  const text = marked ? file.replace(ESCAPED_BYTES, c => `\0${(c.charCodeAt(0) - 0xdc00).toString(16).toUpperCase().padStart(2, '0')}`) : file;
+  const uri = uriOf(text);
+  return marked ? uri.replace(/%00([0-9A-F]{2})/g, '%$1') : uri;
+}
+
+const ESCAPED_BYTES = /(?<![\uD800-\uDBFF])[\uDC80-\uDCFF]/g;
+
+function uriOf(file: string): string {
   if (file.startsWith('/')) return pathToFileURL(file).href;
+  // already a URI (an advisory link as the evidence "file"): keep its scheme
+  if (/^[A-Za-z][A-Za-z0-9+.-]*:\/\//.test(file)) {
+    try {
+      return new URL(file).href;
+    } catch { /* not a URL after all: encode it as a path */ }
+  }
   const win = /^([A-Za-z]):[\\/](.*)$/.exec(file);
   if (win) return `file:///${win[1]}:/${encodeSegments(win[2].replace(/\\/g, '/'))}`;
   return encodeSegments(file);
