@@ -631,8 +631,37 @@ export function staticString(node: Node | null | undefined, scope?: Scope, depth
       if (!binding?.constant || decl?.type !== 'VariableDeclarator' || decl.id.type !== 'Identifier') return undefined;
       return staticString(decl.init, binding.scope, depth + 1);
     }
+    case 'CallExpression': {
+      // `['ev', 'al'].join('')`: constant parts joined with a constant separator
+      const { callee, arguments: args } = node;
+      if (callee.type !== 'MemberExpression' || memberName(callee) !== 'join' || args.length > 1) return undefined;
+      const list = constantArray(callee.object as Node, scope);
+      const sep = args.length === 0 ? ',' : staticString(args[0] as Node, scope, depth + 1);
+      if (!list || sep === undefined) return undefined;
+      const parts: string[] = [];
+      for (const e of list) {
+        const v = staticString(e, scope, depth + 1);
+        if (v === undefined) return undefined;
+        parts.push(v);
+      }
+      return parts.join(sep);
+    }
     default: return undefined;
   }
+}
+
+/** The elements of an array literal (or a never-reassigned constant bound to one) without holes or spreads. */
+function constantArray(node: Node, scope?: Scope): Node[] | undefined {
+  let n: Node | null | undefined = node;
+  if (n.type === 'Identifier') {
+    const binding = scope?.getBinding(n.name);
+    const decl = binding?.path.node;
+    if (!binding?.constant || decl?.type !== 'VariableDeclarator' || decl.id.type !== 'Identifier') return undefined;
+    n = decl.init;
+  }
+  if (n?.type !== 'ArrayExpression' || n.elements.length > 32) return undefined;
+  if (!n.elements.every((e) => e && e.type !== 'SpreadElement')) return undefined;
+  return n.elements as Node[];
 }
 
 /**
@@ -766,40 +795,52 @@ export function sinkCallee(path: NodePath): SinkCallee | undefined {
   // (0, eval)(code): the last expression of a sequence is the callee.
   if (callee.type === 'SequenceExpression') callee = callee.expressions[callee.expressions.length - 1];
 
-  if (callee.type === 'Identifier') {
-    const name = callee.name;
-    const binding = path.scope.getBinding(name);
-    // `const exec = promisify(execFile)`: the function it wraps, not its name
-    const wrapped = promisifiedSink(path, binding);
-    if (wrapped) return { display: `${name} (promisify(${wrapped}))`, kind: 'process', fn: wrapped };
-    const mod = bindingModule(binding);
-    if (mod && binding) {
-      const imported = importedName(binding);
-      if (CHILD_PROCESS_MODULE.test(mod) && PROCESS_SINKS.has(imported)) {
-        return { display: imported === name ? name : `${name} (child_process.${imported})`, kind: 'process', fn: imported };
-      }
-      if (mod === 'execa' && EXECA_FUNCTIONS[imported]) return { display: name, kind: 'process', fn: imported };
-      return undefined;
-    }
-    // `const run = cp.exec` / `const run = require('child_process').exec`:
-    // the function the alias was taken from
-    const decl = binding?.path.node;
-    if (binding?.constant && decl?.type === 'VariableDeclarator' && decl.init?.type === 'MemberExpression') {
-      const target = memberSink(binding.path as NodePath, decl.init);
-      return target ? { ...target, display: `${name} (${target.display})` } : undefined;
-    }
-    // `const e = eval; e(code)`: the global eval or Function under another name
-    if (binding?.constant && decl?.type === 'VariableDeclarator' && decl.init?.type === 'Identifier'
-      && CODE_SINKS.has(decl.init.name) && !binding.path.scope.getBinding(decl.init.name)) {
-      return { display: `${name} (${decl.init.name})`, kind: 'code', fn: decl.init.name };
-    }
-    if (CODE_SINKS.has(name) && !binding) return { display: name, kind: 'code', fn: name };
-    if (PROCESS_SINKS.has(name) && path.isCallExpression()) return { display: name, kind: 'process', fn: name };
-    return undefined;
-  }
+  if (callee.type === 'Identifier') return identifierSink(path, callee.name, path.scope.getBinding(callee.name), 0, path.isCallExpression());
 
   if (callee.type !== 'MemberExpression') return undefined;
   return memberSink(path, callee);
+}
+
+/** The sink a name stands for at `path` (the call, or for an alias chain, the alias's declaration). */
+function identifierSink(path: NodePath, name: string, binding: Binding | undefined, depth: number, isCall = true): SinkCallee | undefined {
+  // `const exec = promisify(execFile)`: the function it wraps, not its name
+  const wrapped = promisifiedSink(path, binding);
+  if (wrapped) return { display: `${name} (promisify(${wrapped}))`, kind: 'process', fn: wrapped };
+  const mod = bindingModule(binding);
+  if (mod && binding) {
+    const imported = importedName(binding);
+    if (CHILD_PROCESS_MODULE.test(mod) && PROCESS_SINKS.has(imported)) {
+      return { display: imported === name ? name : `${name} (child_process.${imported})`, kind: 'process', fn: imported };
+    }
+    if (mod === 'execa' && EXECA_FUNCTIONS[imported]) return { display: name, kind: 'process', fn: imported };
+    // (`const r = run` where `run` is an imported function: followed below)
+    const own = binding.path.node;
+    if (own.type !== 'VariableDeclarator' || own.init?.type !== 'Identifier') return undefined;
+  }
+  const decl = binding?.path.node;
+  // `const e = eval; const f = e; f(code)`: an alias of an alias — the name it copies
+  if (binding?.constant && decl?.type === 'VariableDeclarator' && decl.id.type === 'Identifier'
+    && decl.init?.type === 'Identifier' && depth < 4) {
+    const inner = binding.path.scope.getBinding(decl.init.name);
+    if (inner?.constant && inner.path.node.type === 'VariableDeclarator') {
+      const target = identifierSink(binding.path as NodePath, decl.init.name, inner, depth + 1);
+      return target ? { ...target, display: `${name} (${target.display})` } : undefined;
+    }
+  }
+  // `const run = cp.exec` / `const run = require('child_process').exec`:
+  // the function the alias was taken from
+  if (binding?.constant && decl?.type === 'VariableDeclarator' && decl.init?.type === 'MemberExpression') {
+    const target = memberSink(binding.path as NodePath, decl.init);
+    return target ? { ...target, display: `${name} (${target.display})` } : undefined;
+  }
+  // `const e = eval; e(code)`: the global eval or Function under another name
+  if (binding?.constant && decl?.type === 'VariableDeclarator' && decl.init?.type === 'Identifier'
+    && CODE_SINKS.has(decl.init.name) && !binding.path.scope.getBinding(decl.init.name)) {
+    return { display: `${name} (${decl.init.name})`, kind: 'code', fn: decl.init.name };
+  }
+  if (CODE_SINKS.has(name) && !binding) return { display: name, kind: 'code', fn: name };
+  if (PROCESS_SINKS.has(name) && isCall && depth === 0) return { display: name, kind: 'process', fn: name };
+  return undefined;
 }
 
 /**
@@ -825,8 +866,19 @@ function memberSink(path: NodePath, callee: Node & { type: 'MemberExpression' })
   if ((prop === 'call' || prop === 'apply' || prop === 'bind') && unboundCodeSink(object)) {
     return { display: `${object.name}.${prop}`, kind: 'code', fn: object.name };
   }
-  if (prop === 'eval' && object.type === 'Identifier' && GLOBAL_OBJECTS.has(object.name)) {
-    return { display: `${object.name}.eval`, kind: 'code', fn: 'eval' };
+  // `cp.execSync.call(cp, cmd)`, `Reflect.apply(cp.execSync, cp, [cmd])`: a
+  // command or code sink reached through the function-call helpers
+  if ((prop === 'call' || prop === 'apply') && object.type === 'MemberExpression') {
+    const inner = memberSink(path, object);
+    if (inner) return { ...inner, display: `${inner.display}.${prop}` };
+  }
+  if (prop === 'apply' && object.type === 'Identifier' && object.name === 'Reflect' && !path.scope.getBinding('Reflect')
+    && args[0]?.type === 'MemberExpression') {
+    const inner = memberSink(path, args[0]);
+    if (inner) return { ...inner, display: `Reflect.apply(${inner.display})` };
+  }
+  if (prop === 'eval' && isGlobalObject(object, path.scope)) {
+    return { display: `${(object as { name: string }).name}.eval`, kind: 'code', fn: 'eval' };
   }
   // Module.prototype._compile(source, filename): compiles and runs source as a module
   // (two arguments; a template engine's own `_compile()` takes none or one)
@@ -861,6 +913,17 @@ function memberSink(path: NodePath, callee: Node & { type: 'MemberExpression' })
     return { display: `${object.name}.${prop}`, kind: 'code', fn: prop };
   }
   return undefined;
+}
+
+/** `globalThis`/`window`/`global`/`self`, or a constant bound to one (`const g = globalThis`). */
+function isGlobalObject(n: Node, scope: Scope, depth = 0): boolean {
+  if (n.type !== 'Identifier') return false;
+  if (GLOBAL_OBJECTS.has(n.name)) return true;
+  const binding = scope.getBinding(n.name);
+  if (!binding) return false;
+  const decl = binding.path.node;
+  if (!binding.constant || decl.type !== 'VariableDeclarator' || decl.id.type !== 'Identifier' || !decl.init || depth > 3) return false;
+  return isGlobalObject(decl.init, binding.scope, depth + 1);
 }
 
 /**

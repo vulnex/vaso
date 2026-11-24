@@ -408,8 +408,9 @@ describe('ScanEngine', () => {
     await engine.scan({});
 
     expect(captured).toEqual([
-      '/snap/openclaw/skills/shared.js',
+      // (each directory's files sorted by path)
       '/snap/openclaw/skills/common.py',
+      '/snap/openclaw/skills/shared.js',
       '/snap/openclaw/agents/researcher/skills/agent-specific.ts',
     ]);
   });

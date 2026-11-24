@@ -40,19 +40,19 @@ export const SECURITY_PATTERNS: PatternRule[] = [
   { id: 'RS-009', pattern: /\bexec\s+\d+<>\s*\/dev\/(?:tcp|udp)\//i, category: 'reverse-shell', severity: 'critical', description: 'Bash /dev/tcp socket descriptor' },
 
   // Curl-pipe execution
-  // The shell may be run through sudo/env and named by path (`| sudo bash`,
+  // The shell may be run through sudo/doas/env/command/exec and named by path (`| sudo bash`,
   // `| /bin/zsh`); `\b` keeps `| shasum` out. Only the first download word
   // before a `|` is tried (the lookbehind): later ones reach the same pipe,
   // and `\s+[^|]*` overlapped on a space run (each quadratic on 100 KB).
-  { id: 'CP-001', pattern: /curl\s(?<!curl\s[^|]*?curl\s)[^|]*\|\s*(?:(?:tee|cat)\b[^|\n]*\|\s*)*(?:sudo\s+(?:-[ugCDhprRTU]\s+[^\s|-][^\s|]*\s+|-\S+\s+)*)?(?:(?:\S*\/)?env\s+(?:-\S+\s+)*(?:[^\s=]+=\S*\s+)*)?(?:\S*\/)?(?:ba|z|k|da|fi)?sh\b/i, category: 'curl-pipe', severity: 'critical', description: 'Curl-pipe-shell execution' },
-  { id: 'CP-002', pattern: /wget\s(?<!wget\s[^|]*?wget\s)[^|]*\|\s*(?:(?:tee|cat)\b[^|\n]*\|\s*)*(?:sudo\s+(?:-[ugCDhprRTU]\s+[^\s|-][^\s|]*\s+|-\S+\s+)*)?(?:(?:\S*\/)?env\s+(?:-\S+\s+)*(?:[^\s=]+=\S*\s+)*)?(?:\S*\/)?(?:ba|z|k|da|fi)?sh\b/i, category: 'curl-pipe', severity: 'critical', description: 'Wget-pipe-shell execution' },
+  { id: 'CP-001', pattern: /curl\s(?<!curl\s[^|]*?curl\s)[^|]*\|\s*(?:(?:tee|cat)\b[^|\n]*\|\s*)*(?:(?:sudo|doas)\s+(?:-[ugCDhprRTU]\s+[^\s|-][^\s|]*\s+|-\S+\s+)*)?(?:(?:command|exec|nohup)\s+(?:-\S+\s+)*)?(?:(?:\S*\/)?env\s+(?:-\S+\s+)*(?:[^\s=]+=\S*\s+)*)?(?:\S*\/)?(?:ba|z|k|da|fi)?sh\b/i, category: 'curl-pipe', severity: 'critical', description: 'Curl-pipe-shell execution' },
+  { id: 'CP-002', pattern: /wget\s(?<!wget\s[^|]*?wget\s)[^|]*\|\s*(?:(?:tee|cat)\b[^|\n]*\|\s*)*(?:(?:sudo|doas)\s+(?:-[ugCDhprRTU]\s+[^\s|-][^\s|]*\s+|-\S+\s+)*)?(?:(?:command|exec|nohup)\s+(?:-\S+\s+)*)?(?:(?:\S*\/)?env\s+(?:-\S+\s+)*(?:[^\s=]+=\S*\s+)*)?(?:\S*\/)?(?:ba|z|k|da|fi)?sh\b/i, category: 'curl-pipe', severity: 'critical', description: 'Wget-pipe-shell execution' },
   // Only when Python runs the download: its program from stdin (`| python`,
   // `| python3 - --args`, `| python3 /dev/stdin`) or `-c` code that executes
   // stdin however it is spelled (`exec(sys.stdin.read())`, `import sys as s;
   // exec(s.stdin.read())`, `exec(compile(sys.stdin.read(), …))`, `from sys
   // import stdin; exec(stdin.read())`). `| python -m json.tool` and
   // `| python -c "print(…)"` read the download as data.
-  { id: 'CP-003', pattern: /(?:curl|wget)\s(?<!(?:curl|wget)\s[^|]*?(?:curl|wget)\s)[^|]*\|\s*(?:(?:tee|cat)\b[^|\n]*\|\s*)*(?:sudo\s+(?:-[ugCDhprRTU]\s+[^\s|-][^\s|]*\s+|-\S+\s+)*)?(?:(?:\S*\/)?env\s+(?:-\S+\s+)*(?:[^\s=]+=\S*\s+)*)?(?:\S*\/)?python[\d.]*\b(?:\s+-(?![cm]\b)[A-Za-z]+)*(?:\s*(?=$|[;&|)'"`#\n])|\s+-(?=\s|$)|\s+\/dev\/stdin\b|\s+-c\s+["'](?=[^"'\n]{0,300}\b(?:exec|eval)\s*\()(?=[^"'\n]{0,300}(?:\bstdin\b|\bopen\(\s*(?:0|["']\/dev\/stdin["']))))/i, category: 'curl-pipe', severity: 'critical', description: 'Curl-pipe-python execution' },
+  { id: 'CP-003', pattern: /(?:curl|wget)\s(?<!(?:curl|wget)\s[^|]*?(?:curl|wget)\s)[^|]*\|\s*(?:(?:tee|cat)\b[^|\n]*\|\s*)*(?:(?:sudo|doas)\s+(?:-[ugCDhprRTU]\s+[^\s|-][^\s|]*\s+|-\S+\s+)*)?(?:(?:command|exec|nohup)\s+(?:-\S+\s+)*)?(?:(?:\S*\/)?env\s+(?:-\S+\s+)*(?:[^\s=]+=\S*\s+)*)?(?:\S*\/)?python[\d.]*\b(?:\s+-(?![cm]\b)[A-Za-z]+)*(?:\s*(?=$|[;&|)'"`#\n])|\s+-(?=\s|$)|\s+\/dev\/stdin\b|\s+-c\s+["'](?=[^"'\n]{0,300}\b(?:exec|eval)\s*\()(?=[^"'\n]{0,300}(?:\bstdin\b|\bopen\(\s*(?:0|["']\/dev\/stdin["']))))/i, category: 'curl-pipe', severity: 'critical', description: 'Curl-pipe-python execution' },
   // Download executed without a pipe: `bash <(curl …)`, `sh -c "$(curl …)"`,
   // `eval "$(wget -qO- …)"`, `source <(curl …)`
   { id: 'CP-004', pattern: /(?:\b(?:ba|z|k|da)?sh|\bsource|(?:^|[\s;&|])\.)\s+<\(\s*(?:curl|wget)\b/i, category: 'curl-pipe', severity: 'critical', description: 'Shell process substitution of a download' },
@@ -92,7 +92,7 @@ export const SECURITY_PATTERNS: PatternRule[] = [
   // `require(m)[k]`). postMessage transfer is a browser API.
 
   // Prompt injection indicators
-  { id: 'PI-001', pattern: /\b(?:ignore|disregard)\s+(?:(?:all|the|any)\s+){0,2}(?:previous|above|prior|earlier|preceding)\s+instructions/i, category: 'prompt-injection', severity: 'warning', description: 'Prompt injection — instruction override' },
+  { id: 'PI-001', pattern: /\b(?:ignore|disregard)\s+(?:(?:all|the|any)\s+){0,2}(?:previous|above|prior|earlier|preceding)\s+instructions|\bforget\s+(?:everything|all)\s+(?:(?:the|your)\s+)?(?:above\b|(?:previous|prior|earlier|preceding)\s+(?:instructions|rules|directions|messages|context)\b)/i, category: 'prompt-injection', severity: 'warning', description: 'Prompt injection — instruction override' },
   { id: 'PI-002', pattern: /you\s+are\s+now\s+(?:(?:a|an)\s+|in\s+(?:[\w-]+\s+){0,2}(?:mode|persona)\b)/i, category: 'prompt-injection', severity: 'warning', description: 'Prompt injection — role reassignment' },
   { id: 'PI-003', pattern: /system\s*:\s*you\s+(?:must|should|are)/i, category: 'prompt-injection', severity: 'warning', description: 'Prompt injection — fake system prompt' },
   // Not a markdown table cell holding only the tag (`| [System] | [Type] |` is a

@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import _traverse from '@babel/traverse';
 import type { Node } from '@babel/types';
-import type { Binding, NodePath } from '@babel/traverse';
+import type { Binding, NodePath, Scope } from '@babel/traverse';
 import { cutLine } from './finding-snippet.js';
 import { mayBeJavaScript, parseLenientReport, recordedEvasion, sourceChunks, type JsAst } from './js-parse.js';
 import { bindingModule, memberName, sinkCallee } from './tool-input-taint.js';
@@ -766,7 +766,7 @@ function analyzeUncached(code: string): DataFlowResult[] {
             description: sink && node.callee.type === 'MemberExpression' && sink.kind === 'process'
               ? `${name}() — command execution`
               : `${name}() call detected`,
-            ...commandText(node.arguments),
+            ...commandText(node.arguments, path.scope),
             ...(runsDirectly(sink?.fn ?? name, path, constStrings) ? { noShell: true } : {}),
           });
           if (sink?.kind === 'process' || !sink) {
@@ -946,7 +946,7 @@ function analyzeUncached(code: string): DataFlowResult[] {
                 line,
                 ...cutLine(snippet),
                 description: `${obj.name}.${propName}() — command execution`,
-                ...commandText(node.arguments),
+                ...commandText(node.arguments, path.scope),
                 ...(runsDirectly(propName, path, constStrings) ? { noShell: true } : {}),
               });
             }
@@ -1182,7 +1182,7 @@ function analyzeUncached(code: string): DataFlowResult[] {
             line,
             ...cutLine(lineText(line)),
             description: `new ${vmSink.display}() — dynamic code execution`,
-            ...commandText(node.arguments),
+            ...commandText(node.arguments, path.scope),
           });
         }
         if (node.callee.type === 'Identifier' && node.callee.name === 'Function') {
@@ -1193,7 +1193,7 @@ function analyzeUncached(code: string): DataFlowResult[] {
             line,
             ...cutLine(snippet),
             description: 'new Function() constructor — dynamic code execution',
-            ...commandText(node.arguments),
+            ...commandText(node.arguments, path.scope),
           });
         }
         // (not one to this machine or over TLS: `ws://127.0.0.1:9222/devtools`,
@@ -1510,12 +1510,92 @@ function numericValue(n: Node): boolean {
   return /^(?:Number|parseInt|parseFloat|Number\.parseInt|Number\.parseFloat|Math\.(?:floor|ceil|round|trunc|abs|max|min))$/.test(callee);
 }
 
-function commandText(args: ArgNode[]): Pick<DataFlowResult, 'command' | 'dynamic' | 'decoded'> {
+/** A relative path inside the script's own folder, written out: no `..`, not absolute. */
+const OWN_RELATIVE = /^(?!\/)(?![\s\S]*\.\.)[\w./-]{1,200}$/;
+
+/** The script's own folder: `__dirname`, `import.meta.dirname`, or a constant bound once to it (`const here = dirname(fileURLToPath(import.meta.url))`). */
+function isOwnDir(n: Node, scope: Scope, depth = 0): boolean {
+  if (n.type === 'Identifier') {
+    const binding = scope.getBinding(n.name);
+    if (!binding) return n.name === '__dirname';
+    const decl = binding.path.node;
+    if (!binding.constant || decl.type !== 'VariableDeclarator' || decl.id.type !== 'Identifier' || !decl.init || depth > 2) return false;
+    return isOwnDir(decl.init, binding.scope, depth + 1);
+  }
+  if (n.type === 'MemberExpression' && n.object.type === 'MetaProperty') return memberName(n) === 'dirname';
+  // dirname(fileURLToPath(import.meta.url)) / path.dirname(url.fileURLToPath(import.meta.url))
+  if (n.type === 'CallExpression' && /^(?:path\.)?dirname$/.test(calleeText(n.callee)) && n.arguments.length === 1) {
+    const inner = n.arguments[0];
+    return inner.type === 'CallExpression' && /^(?:url\.)?fileURLToPath$/.test(calleeText(inner.callee)) && inner.arguments.length === 1
+      && inner.arguments[0].type === 'MemberExpression' && inner.arguments[0].object.type === 'MetaProperty' && memberName(inner.arguments[0]) === 'url';
+  }
+  return false;
+}
+
+/** The path module under its usual names: `path.join`, `require('path').join`, an imported `join`. */
+function isPathModuleCall(n: Node & { type: 'CallExpression' }, scope: Scope): boolean {
+  const c = n.callee;
+  if (c.type === 'MemberExpression' && /^(?:join|resolve)$/.test(memberName(c) ?? '')) {
+    const o = c.object;
+    if (o.type === 'Identifier') {
+      const mod = bindingModule(scope.getBinding(o.name));
+      return mod ? /^(?:node:)?path$/.test(mod) : o.name === 'path';
+    }
+    return o.type === 'CallExpression' && o.callee.type === 'Identifier' && o.callee.name === 'require'
+      && o.arguments[0]?.type === 'StringLiteral' && /^(?:node:)?path$/.test(o.arguments[0].value);
+  }
+  if (c.type === 'Identifier' && /^(?:join|resolve)$/.test(c.name)) {
+    const mod = bindingModule(scope.getBinding(c.name));
+    return !!mod && /^(?:node:)?path$/.test(mod);
+  }
+  return false;
+}
+
+/**
+ * A path into the script's own folder (`path.join(__dirname, 'h.js')`,
+ * `` `${__dirname}/h.js` ``, `__dirname + '/h.js'`) as the literal
+ * `<skill>/h.js`: running a helper the skill ships is a fixed command, not
+ * one built at runtime (same rule as the Python analyzer). A path with `..`
+ * never counts.
+ */
+function ownScriptPath(n: Node, scope: Scope): string | undefined {
+  const rel = (parts: Node[]): string | undefined => {
+    const out: string[] = [];
+    for (const p of parts) {
+      const v = p.type === 'StringLiteral' ? p.value
+        : p.type === 'TemplateLiteral' && p.expressions.length === 0 ? p.quasis[0]?.value.cooked : undefined;
+      if (v === undefined) return undefined;
+      out.push(v);
+    }
+    // (an absolute part replaces the folder under path.resolve)
+    if (out.some((v) => v.startsWith('/'))) return undefined;
+    const joined = out.join('/').replace(/\/+/g, '/').replace(/^\.\//, '');
+    return OWN_RELATIVE.test(joined) ? `<skill>/${joined}` : undefined;
+  };
+  if (n.type === 'CallExpression' && isPathModuleCall(n, scope) && n.arguments.length >= 2 && isOwnDir(n.arguments[0] as Node, scope)) {
+    return rel(n.arguments.slice(1) as Node[]);
+  }
+  // `__dirname + '/h.js'`, `${__dirname}/h.js`: the rest starts with a separator
+  const tail = (v: string | undefined): string | undefined =>
+    v !== undefined && v.startsWith('/') ? rel([{ type: 'StringLiteral', value: v.slice(1) } as Node]) : undefined;
+  if (n.type === 'BinaryExpression' && n.operator === '+' && isOwnDir(n.left as Node, scope)) {
+    return n.right.type === 'StringLiteral' ? tail(n.right.value) : undefined;
+  }
+  if (n.type === 'TemplateLiteral' && n.expressions.length === 1 && (n.quasis[0]?.value.cooked ?? '') === ''
+    && isOwnDir(n.expressions[0] as Node, scope)) {
+    return tail(n.quasis[1]?.value.cooked ?? undefined);
+  }
+  return undefined;
+}
+
+function commandText(args: ArgNode[], scope?: Scope): Pick<DataFlowResult, 'command' | 'dynamic' | 'decoded'> {
   let dynamic = false;
   let decoded = false;
   const text = (node: ArgNode | null | undefined, depth = 0): string => {
     if (!node || depth > 6) return '';
     const n = node as Node;
+    const own = scope ? ownScriptPath(n, scope) : undefined;
+    if (own !== undefined) return own;
     switch (n.type) {
       case 'StringLiteral':
         return n.value;

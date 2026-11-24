@@ -8,6 +8,10 @@ import { hookStatements } from '../../analyzers/hook-commands.js';
 import { truncateSnippet } from '../../core/patterns.js';
 
 const CURL_PIPE_RULES = SECURITY_PATTERNS.filter(r => r.category === 'curl-pipe');
+/** Files where `#` doesn't start a comment. */
+const JS_FAMILY = /\.(?:[cm]?[jt]sx?)$/i;
+/** A line continued onto the next one (its match may come from there). */
+const CONTINUED_LINE = /\\\r?$/;
 /** Hosts that hide where a script really comes from. */
 const OPAQUE_HOSTS = /^(?:bit\.ly|tinyurl\.com|t\.co|is\.gd|goo\.gl|cutt\.ly|rb\.gy|pastebin\.com|paste\.ee|hastebin\.com|termbin\.com|transfer\.sh|0x0\.st|ngrok(?:-free)?\.(?:io|app|dev)|[\w-]+\.ngrok(?:-free)?\.(?:io|app|dev)|[\w-]+\.trycloudflare\.com)$/i;
 /** Official installers of widely used developer tools. */
@@ -55,6 +59,25 @@ export function hintLine(line: string): boolean {
   // only to the terminal: nothing more on the line but a redirect to
   // stderr/stdout, a closing `)` or `;`, or a comment (`> run.sh` saves it)
   return /^\s*\)?\s*(?:[12]?>&[12]|>\s*\/dev\/(?:stderr|stdout|tty))?\s*;?\s*(?:#.*)?$/.test(rest);
+}
+
+/**
+ * The code of a shell-style line before a trailing `#` comment (a `#` outside
+ * quotes, after whitespace): `echo hi # curl … | bash` runs only `echo hi`.
+ * Undefined when the line has no such comment.
+ */
+export function beforeTrailingComment(line: string): string | undefined {
+  let quote: string | undefined;
+  for (let i = 0; i < line.length; i++) {
+    const c = line[i];
+    if (quote) {
+      if (c === '\\' && quote === '"') i++;
+      else if (c === quote) quote = undefined;
+    } else if (c === '\\') i++;
+    else if (c === '"' || c === "'" || c === '`') quote = c;
+    else if (c === '#' && i > 0 && /\s/.test(line[i - 1])) return line.slice(0, i);
+  }
+  return undefined;
 }
 
 export const skl004 = defineCheck({
@@ -105,7 +128,11 @@ export const skl004 = defineCheck({
         for (const match of matches) {
           const onLoad = loadFormAt(src, match.line, cmd => scanWithPatterns(cmd, CURL_PIPE_RULES).length > 0);
           // …and in a script, a comment or a printed hint shows the command, as documentation does
-          const hint = !doc && hintLine(lines[match.line - 1] ?? '');
+          const at = lines[match.line - 1] ?? '';
+          // (`#` starts a comment in shell, Python, Ruby…, not in JavaScript: `{ #field = … }`)
+          const code = JS_FAMILY.test(file) ? undefined : beforeTrailingComment(at);
+          const hint = !doc && (hintLine(at) || (code !== undefined && !CONTINUED_LINE.test(at)
+            && scanWithPatterns(code, CURL_PIPE_RULES).length === 0));
           let tier = (doc && !onLoad) || hint ? docTier(lines[match.line - 1] ?? match.snippet) : 'critical';
           // A sentence (no code block, no inline code) installing from a
           // named https host describes the install; an opaque source stays critical

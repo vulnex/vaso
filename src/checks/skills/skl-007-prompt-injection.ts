@@ -35,7 +35,8 @@ async function getDocFiles(dir: string, fs: ScanContext['fs'], uncapped: boolean
     const skillMd = join(skillDir, 'SKILL.md');
     if (!files.includes(skillMd) && await fs.access(skillMd)) files.push(skillMd);
   }
-  return files;
+  // Sorted: a local walk and a snapshot list folders in different orders
+  return files.sort();
 }
 
 export const skl007 = defineCheck({
@@ -57,6 +58,16 @@ export const skl007 = defineCheck({
       try {
         const content = await readCappedFile(ctx.fs, file);
         const matches = scanWithPatterns(content, PROMPT_INJECTION_RULES);
+        // A phrase wrapped onto the next line of a paragraph ("Ignore the previous /
+        // instructions."): two neighbouring lines, read as one, where neither matched alone
+        const matched = new Set(matches.map(m => m.line));
+        const lines = content.split('\n');
+        for (let i = 0; i + 1 < lines.length; i++) {
+          if (matched.has(i + 1) || matched.has(i + 2) || !lines[i].trim() || !lines[i + 1].trim()) continue;
+          const pair = scanWithPatterns(`${lines[i].trimEnd()} ${lines[i + 1].trimStart()}`, PROMPT_INJECTION_RULES)[0];
+          if (pair) matches.push({ ...pair, line: i + 1 });
+        }
+        matches.sort((a, b) => a.line - b.line);
 
         for (const match of matches) {
           evidence.push({
