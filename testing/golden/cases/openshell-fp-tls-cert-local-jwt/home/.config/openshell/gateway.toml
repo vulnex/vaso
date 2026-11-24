@@ -1,0 +1,7 @@
+[openshell]
+version = 2
+
+[openshell.gateway]
+[openshell.gateway.tls]
+cert_path = "/x/tls.crt"
+key_path = "/x/tls.key"

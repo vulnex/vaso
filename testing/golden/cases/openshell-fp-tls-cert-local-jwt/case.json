@@ -1,0 +1,9 @@
+{
+  "agent": "openshell",
+  "source": "dt25 g2-OSH-1: a gateway.toml that sets TLS cert/key without client_ca_path, OIDC or gateway_jwt, and no gateway.env. The packaged launchers (deb user unit, Homebrew wrapper) always set OPENSHELL_LOCAL_TLS_DIR, and openshell-gateway 0.0.116 then logs \"gateway-minted sandbox JWT enabled\" and rejects calls without credentials (verified with a scratch gateway on the test box), so the gateway is not unauthenticated",
+  "modes": {
+    ".config/openshell": "700",
+    ".config/openshell/gateway.toml": "600"
+  },
+  "pass": ["OSH-002"]
+}
