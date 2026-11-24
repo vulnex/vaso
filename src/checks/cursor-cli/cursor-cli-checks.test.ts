@@ -92,6 +92,27 @@ describe('CUR-003: Overbroad Shell', () => {
     expect(result.passed).toBe(false);
   });
 
+  it('reads Bash(...) as an alias of Shell(...) (dt25 g4-F1)', async () => {
+    for (const rule of ['Bash(*)', 'Bash(curl:*)', ' Bash ( python3 ) ']) {
+      const result = await check.run(makeCtx([makeConfig('cli-config.json', { permissions: { allow: [rule], deny: [] } })]));
+      expect(result.passed, rule).toBe(false);
+      expect(result.severity, rule).toBe('critical');
+    }
+    // a deny under either name cancels it
+    const denied = await check.run(makeCtx([makeConfig('cli-config.json', { permissions: { allow: ['Bash(curl:*)'], deny: ['Shell(curl)'] } })]));
+    expect(denied.passed).toBe(true);
+  });
+
+  it('ignores rules Cursor matches case-sensitively to nothing (dt25 g4-F14)', async () => {
+    const result = await check.run(makeCtx([makeConfig('cli-config.json', {
+      permissions: { allow: ['shell(sh)', 'bash(*)', 'SHELL(*)', 'Shell( BASH )', 'Shell(CURL:*)'], deny: [] },
+    })]));
+    expect(result.passed).toBe(true);
+    // a deny spelled in the wrong case does not cancel a live allow
+    const live = await check.run(makeCtx([makeConfig('cli-config.json', { permissions: { allow: ['Shell(curl:*)'], deny: ['shell(curl)', 'Shell(CURL)'] } })]));
+    expect(live.passed).toBe(false);
+  });
+
   it('passes on Shell(git) (the real config we saw also had Shell(ls))', async () => {
     const result = await check.run(makeCtx([makeConfig('cli-config.json', {
       permissions: { allow: ['Shell(git)', 'Shell(ls)'], deny: [] },
