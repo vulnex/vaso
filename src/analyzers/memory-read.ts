@@ -1,5 +1,6 @@
 import type { FSProvider } from '../core/fs-provider.js';
 import { pathPresent, readTextIfPresent } from '../adapters/load-if-present.js';
+import { linkedIntoSink } from '../core/config-loader.js';
 
 /**
  * Reads memory/instruction files for the memory-secret checks and remembers
@@ -19,6 +20,14 @@ export class MemoryReader {
    */
   async read(path: string): Promise<string | undefined> {
     if (!(await pathPresent(path, this.fs))) return undefined;
+    // A memory file that is a link into a credential store or shell history
+    // (CLAUDE.md → ~/.zsh_history, a hard link to a keyring): never read,
+    // as the probe never ships it (omitted: sensitive) — the same verdict
+    // locally and remotely (dt25 g9-F3)
+    if (this.fs.kind !== 'snapshot' && await linkedIntoSink(path, this.fs).catch(() => undefined) !== undefined) {
+      this.unverified.push(`${path} (omitted: sensitive)`);
+      return undefined;
+    }
     try {
       return await this.fs.readFile(path);
     } catch (err) {
@@ -37,8 +46,14 @@ export class MemoryReader {
     return this.unverified.length > 0 ? `; ${this.notVerified()}` : '';
   }
 
-  /** `<paths> not verified — content not in the snapshot (checked on local scans)`. */
+  /**
+   * `<paths> not verified — content not in the snapshot (checked on local
+   * scans)`; on a local scan (only links into a store are left unread)
+   * `<paths> not read — a link into a credential store or history file`.
+   */
   notVerified(): string {
-    return `${this.unverified.join(', ')} not verified — content not in the snapshot (checked on local scans)`;
+    return this.fs.kind === 'snapshot'
+      ? `${this.unverified.join(', ')} not verified — content not in the snapshot (checked on local scans)`
+      : `${this.unverified.join(', ')} not read — a link into a credential store or history file`;
   }
 }

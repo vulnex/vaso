@@ -874,7 +874,24 @@ const SKILL_HARD_LINKS: Record<string, string> = {
   '.claude/skills/canary-hard/id.txt': '.ssh/id_canary_hard',
   '.claude/skills/canary-hard/c.json': '.claude/.credentials.json',
   '.claude/skills/canary-hard/hosts.yml': '.config/gh/hosts.yml',
+  // the stores the 1.4.3 sink list added below the home's top level (dt25 g9-F3)
+  '.claude/skills/canary-hard/s1.md': '.zsh_sessions/ABCD.history',
+  '.claude/skills/canary-hard/s2.md': '.local/share/fish/fish_history',
+  '.claude/skills/canary-hard/s3.md': '.config/zsh/.zsh_history',
+  '.claude/skills/canary-hard/s4.md': '.config/rclone/rclone.conf',
+  '.claude/skills/canary-hard/s5.json': '.terraform.d/credentials.tfrc.json',
+  '.claude/skills/canary-hard/s6.toml': '.cargo/credentials.toml',
+  '.claude/skills/canary-hard/s7.md': '.local/share/keyrings/login.keyring',
+  '.claude/skills/canary-hard/s8.md': '.zsh_history',
+  '.claude/skills/canary-hard/s9.md': 'dots/zsh/.zsh_history', // $ZDOTDIR
 };
+
+/** Store files SKILL_HARD_LINKS reaches that nothing else plants. */
+const HARD_LINKED_STORES = [
+  '.zsh_sessions/ABCD.history', '.local/share/fish/fish_history', '.config/zsh/.zsh_history', '.config/rclone/rclone.conf',
+  '.terraform.d/credentials.tfrc.json', '.cargo/credentials.toml', '.local/share/keyrings/login.keyring', '.zsh_history',
+  'dots/zsh/.zsh_history',
+];
 
 /**
  * On a volume that folds names fully (APFS: `.ßh` opens `.ssh`, `.conﬁg`
@@ -916,6 +933,11 @@ async function plantSkillLinks(home: string): Promise<boolean> {
   await put('.claude/skills/canary-data/SKILL.md', '---\nname: canary-data\n---\n');
   for (const rel of SKILL_DATA_FILES) await put(rel, contentFor(rel));
   await put('.ssh/id_canary_hard', pemFile('.ssh/id_canary_hard'));
+  for (const rel of HARD_LINKED_STORES) {
+    await put(rel, `mysql -u root -p${canary(`${rel} behind a skills hard link (mysql -p)`, alnum)} prod\n` +
+      `export GITHUB_TOKEN=${canary(`${rel} behind a skills hard link (token)`, FORMATS[3][1])}\n` +
+      `${canary(`${rel} behind a skills hard link (raw)`, () => body(32))}\n`);
+  }
   await put('.claude/skills/canary-hard/SKILL.md', '---\nname: canary-hard\n---\n');
   for (const [rel, target] of Object.entries(SKILL_HARD_LINKS)) await link(join(home, target), join(home, rel));
   if (!existsSync(join(home, '.ßh')) || !existsSync(join(home, '.conﬁg'))) return false;
@@ -1017,6 +1039,8 @@ describe.skipIf(!goAvailable)('probe privacy canary', () => {
         environment: { API_TOKEN: canary('env OPENCODE_CONFIG_CONTENT environment', FORMATS[3][1]), DB_PASSWORD: canary('env OPENCODE_CONFIG_CONTENT password', lowerWord) } },
     })},\n}`;
     env.COPILOT_HOME = COPILOT_HOME_REL;
+    // zsh's history under $ZDOTDIR (SKILL_HARD_LINKS)
+    env.ZDOTDIR = join(home, 'dots/zsh');
     const r = await run(probe, ['--manifest', join(work, 'manifest.json')], env, home);
     expect(r.code, r.stderr).toBe(0);
     snapshot = r.stdout;

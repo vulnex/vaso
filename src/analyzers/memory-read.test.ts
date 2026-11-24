@@ -1,4 +1,8 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { linkSync, mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { LocalFSProvider } from '../core/local-fs-provider.js';
 import type { ScanContext, AgentType } from '../core/types.js';
 import type { ProbeSnapshot } from '../core/snapshot-types.js';
 import { SnapshotFSProvider } from '../core/snapshot-fs-provider.js';
@@ -45,6 +49,42 @@ describe('MemoryReader', () => {
     expect(new MemoryReader(fs).note()).toBe('');
   });
 });
+
+// dt25 g9-F3: a memory file that is a link into a credential store or shell
+// history is not read locally, as the probe never ships it — same verdict
+describe('memory checks leave a memory file linked into a store unread (local)', () => {
+  const SECRET = 'mysql -u root -pQ7xLm2Kv8Zq9xR7tLm2Kv prod\nexport GITHUB_TOKEN=ghp_Ab3dE5gH7jK9mN1pQ3sT5vX7zB9dF1hJ3lN5\n';
+  let home: string;
+  beforeEach(() => {
+    home = realpathSync(mkdtempSync(join(tmpdir(), 'memlink-')));
+    mkdirSync(join(home, '.claude', 'rules'), { recursive: true });
+    mkdirSync(join(home, '.codex'), { recursive: true });
+    mkdirSync(join(home, '.local', 'share', 'keyrings'), { recursive: true });
+    writeFileSync(join(home, '.zsh_history'), SECRET);
+    writeFileSync(join(home, '.local', 'share', 'keyrings', 'login.keyring'), SECRET);
+  });
+  afterEach(() => rmSync(home, { recursive: true, force: true }));
+
+  it('a symlink to a history file and a hard link to a keyring', async () => {
+    symlinkSync(join(home, '.zsh_history'), join(home, '.codex', 'AGENTS.md'));
+    linkSync(join(home, '.local', 'share', 'keyrings', 'login.keyring'), join(home, '.claude', 'rules', 'h.md'));
+    const fs = new HomeFS(home);
+    const cdx = await cdx007.run({ installation: { agent: 'codex', installDir: join(home, '.codex'), configFiles: [] }, configs: [], platform: process.platform, fs });
+    expect(cdx.passed).toBe(true);
+    expect(cdx.message).toContain('not read — a link into a credential store or history file');
+    const cc = await cc012.run({ installation: { agent: 'claude-code', installDir: join(home, '.claude'), configFiles: [] }, configs: [], platform: process.platform, fs });
+    expect(cc.passed).toBe(true);
+    // an ordinary memory file is still read
+    rmSync(join(home, '.codex', 'AGENTS.md'));
+    writeFileSync(join(home, '.codex', 'AGENTS.md'), SECRET);
+    expect((await cdx007.run({ installation: { agent: 'codex', installDir: join(home, '.codex'), configFiles: [] }, configs: [], platform: process.platform, fs })).passed).toBe(false);
+  });
+});
+
+class HomeFS extends LocalFSProvider {
+  constructor(private readonly home: string) { super(); }
+  override homedir(): string { return this.home; }
+}
 
 // g6-F10: a 40 MB CLAUDE.md the probe omitted for size read as clean remotely
 describe('memory checks say a size-omitted file was not verified', () => {

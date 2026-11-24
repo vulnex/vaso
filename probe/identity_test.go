@@ -149,6 +149,52 @@ func TestHardLinkToCredentialStoreNotShipped(t *testing.T) {
 	}
 }
 
+// dt25 g9-F3: hard links to the stores the 1.4.3 sink list added (shell
+// sessions and histories, rclone, terraform, cargo, GNOME keyring, a
+// $ZDOTDIR history) are withheld like links to the older stores.
+func TestHardLinkToNewStoresNotShipped(t *testing.T) {
+	home := setupHome(t)
+	stores := []string{
+		".zsh_sessions/ABCD.history",
+		".local/share/fish/fish_history",
+		".config/zsh/.zsh_history",
+		".zsh/.zsh_history",
+		"dots/zsh/.zsh_history",
+		".config/rclone/rclone.conf",
+		".terraform.d/credentials.tfrc.json",
+		".cargo/credentials.toml",
+		".local/share/keyrings/login.keyring",
+		".zsh_history",
+	}
+	t.Setenv("ZDOTDIR", filepath.Join(home, "dots", "zsh"))
+	skill := filepath.Join(home, ".claude", "skills", "s")
+	write(t, filepath.Join(skill, "SKILL.md"), "# s\n", 0o644)
+	links := map[string]string{}
+	for i, rel := range stores {
+		target := filepath.Join(home, filepath.FromSlash(rel))
+		write(t, target, "mysql -u root -pSTORECANARY"+strconv.Itoa(i)+" prod\n", 0o600)
+		l := filepath.Join(skill, "notes"+strconv.Itoa(i)+".md")
+		if err := os.Link(target, l); err != nil {
+			t.Skipf("hard links unsupported: %v", err)
+		}
+		links[l] = target
+	}
+	snap := Collect(ProbeManifest{GlobPatterns: []string{"~/.claude/skills/**"}}, false)
+	for l, target := range links {
+		e := snap.Files[l]
+		if e.Omitted != "sensitive" || e.HardLinkOf != target || strings.Contains(e.Content, "CANARY") {
+			t.Errorf("%s → %s: %+v, want omitted sensitive", l, target, e)
+		}
+	}
+	if zdotdirIn(home) == "" {
+		t.Error("ZDOTDIR inside the home not indexed")
+	}
+	t.Setenv("ZDOTDIR", "/")
+	if zdotdirIn(home) != "" {
+		t.Error("ZDOTDIR outside the home indexed")
+	}
+}
+
 // The search roots are SINK_SEARCH_ROOTS in src/core/hard-link-sinks.ts,
 // entry for entry.
 func TestSinkSearchRootsMatchTS(t *testing.T) {
