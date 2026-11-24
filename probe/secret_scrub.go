@@ -2058,6 +2058,10 @@ func replacePairs(re *regexp.Regexp, s string, v int, f func(submatch) (string, 
 // through a copy of the same length (scrubbableText) — one such byte used
 // to ship the whole file as it was.
 func (c *collector) scrubSecrets(path string, content []byte) []byte {
+	// a plist (XML or binary) by its structure (plist_output.go)
+	if out, ok := c.scrubPlist(path, content); ok {
+		return out
+	}
 	text, restore := scrubbableText(content)
 	return restore(c.scrubText(path, text))
 }

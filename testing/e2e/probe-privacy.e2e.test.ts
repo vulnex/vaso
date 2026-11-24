@@ -160,6 +160,87 @@ function textFile(label: string): string {
   return FORMATS.map(([name, make]) => `${name}: ${canary(`${label} ${name}`, make)}`).join('\n') + '\n';
 }
 
+/**
+ * A plist as LaunchAgents and preference files hold credentials (dt25
+ * g9-F2): under credential names in EnvironmentVariables and at the top,
+ * as flag values in ProgramArguments, under a credential container, and in
+ * every known key format.
+ */
+type PlistValue = string | PlistValue[] | { [key: string]: PlistValue };
+function plistValue(label: string): PlistValue {
+  const c = (what: string, make: () => string) => canary(`${label} plist ${what}`, make);
+  const formats: Record<string, string> = {};
+  for (const [name, make] of FORMATS) formats[name] = c(name, make);
+  return {
+    Label: 'com.example.canary',
+    ProgramArguments: ['/usr/local/bin/tunnel', 'start', '--authtoken', c('argv --authtoken', generic), `--password=${c('argv --password=', alnum)}`, '--api-key', c('argv --api-key', FORMATS[1][1]), '--port', '8080'],
+    EnvironmentVariables: {
+      DB_PASSWORD: c('env DB_PASSWORD passphrase', passphrase),
+      API_SERVER_KEY: c('env API_SERVER_KEY', generic),
+      WEBHOOK_SECRET: c('env WEBHOOK_SECRET short', short),
+      OPENCLAW_GATEWAY_TOKEN: c('env gateway token hex', hex),
+      PATH: '/usr/bin:/bin',
+    },
+    authToken: c('authToken', generic),
+    password: c('password', alnum),
+    creds: [{ label: 'work', k: c('creds container', generic) }],
+    ...formats,
+  };
+}
+
+const xmlText = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+function plistXml(v: PlistValue, indent = ''): string {
+  if (typeof v === 'string') return `${indent}<string>${xmlText(v)}</string>`;
+  if (Array.isArray(v)) return `${indent}<array>\n${v.map(x => plistXml(x, indent + '\t')).join('\n')}\n${indent}</array>`;
+  return `${indent}<dict>\n${Object.entries(v).map(([k, x]) => `${indent}\t<key>${xmlText(k)}</key>\n${plistXml(x, indent + '\t')}`).join('\n')}\n${indent}</dict>`;
+}
+function plistXmlFile(label: string): string {
+  return `<?xml version="1.0" encoding="UTF-8"?>\n<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">\n<plist version="1.0">\n${plistXml(plistValue(label))}\n</plist>\n`;
+}
+
+/** A bplist00 file (strings, arrays, dicts), as `defaults` writes preferences. */
+function binaryPlist(root: PlistValue): Buffer {
+  const objects: Buffer[] = [];
+  const count = (marker: number, n: number): Buffer => {
+    if (n < 15) return Buffer.from([marker | n]);
+    if (n < 256) return Buffer.from([marker | 0x0f, 0x10, n]);
+    return Buffer.from([marker | 0x0f, 0x11, n >> 8, n & 0xff]);
+  };
+  const ref = (id: number) => Buffer.from([id >> 8, id & 0xff]);
+  const add = (v: PlistValue): number => {
+    const id = objects.length;
+    objects.push(Buffer.alloc(0));
+    if (typeof v === 'string') {
+      // eslint-disable-next-line no-control-regex
+      objects[id] = /^[\x00-\x7f]*$/.test(v)
+        ? Buffer.concat([count(0x50, v.length), Buffer.from(v, 'ascii')])
+        : Buffer.concat([count(0x60, v.length), Buffer.from(v, 'utf16le').swap16()]);
+    } else if (Array.isArray(v)) {
+      const ids = v.map(add);
+      objects[id] = Buffer.concat([count(0xa0, ids.length), ...ids.map(ref)]);
+    } else {
+      const keys = Object.keys(v).map(k => add(k));
+      const values = Object.values(v).map(add);
+      objects[id] = Buffer.concat([count(0xd0, keys.length), ...keys.map(ref), ...values.map(ref)]);
+    }
+    return id;
+  };
+  add(root);
+  const header = Buffer.from('bplist00', 'ascii');
+  const offsets: number[] = [];
+  let at = header.length;
+  for (const o of objects) { offsets.push(at); at += o.length; }
+  const table = Buffer.alloc(offsets.length * 4);
+  offsets.forEach((o, i) => table.writeUInt32BE(o, i * 4));
+  const trailer = Buffer.alloc(32);
+  trailer[6] = 4; // offset size
+  trailer[7] = 2; // object reference size
+  trailer.writeBigUInt64BE(BigInt(objects.length), 8);
+  trailer.writeBigUInt64BE(0n, 16);
+  trailer.writeBigUInt64BE(BigInt(at), 24);
+  return Buffer.concat([header, ...objects, table, trailer]);
+}
+
 function envFile(label: string): string {
   return [
     `ANTHROPIC_API_KEY=${canary(`${label} env anthropic`, FORMATS[0][1])}`,
@@ -862,6 +943,8 @@ describe.skipIf(!goAvailable)('probe privacy canary', () => {
   let contentText = '';
   let storeLinks: { links: string[]; followed: string } = { links: [], followed: '' };
   let folded = false;
+  /** The plists planted along the manifest, as written. */
+  const plantedPlists = new Map<string, Buffer>();
 
   beforeAll(async () => {
     const work = await mkdtemp(join(tmpdir(), 'vaso-canary-'));
@@ -885,7 +968,11 @@ describe.skipIf(!goAvailable)('probe privacy canary', () => {
       const full = join(home, rel);
       try {
         await mkdir(dirname(full), { recursive: true });
-        await writeFile(full, encodeFor(i, contentFor(rel)), { flag: 'wx' });
+        // a plist as XML (in every encoding) or binary, alternately
+        const plist = extname(rel).toLowerCase() === '.plist';
+        const data = plist && i % 2 === 1 ? binaryPlist(plistValue(rel)) : encodeFor(i, plist ? plistXmlFile(rel) : contentFor(rel));
+        await writeFile(full, data, { flag: 'wx' });
+        if (plist) plantedPlists.set(full, data);
         planted++;
       } catch {
         // a path that another entry made a directory (or a file) — skip it
@@ -1075,6 +1162,39 @@ describe.skipIf(!goAvailable)('probe privacy canary', () => {
     const leaks = [...canaries].filter(([, value]) => haystack.includes(hidden(value))).map(([label]) => label);
     expect(leaks, `${leaks.length} canaries shipped:\n${leaks.slice(0, 40).join('\n')}`).toEqual([]);
   }, 300_000); // ~12k searches of the whole snapshot: minutes on a loaded machine
+
+  it('ships plists that still parse: XML elements closed, binary offsets intact (dt25 g9-F2/F6)', () => {
+    const files = (JSON.parse(snapshot) as { files: Record<string, { content?: string; encoding?: string }> }).files;
+    expect(plantedPlists.size).toBeGreaterThan(3);
+    let binary = 0;
+    let xml = 0;
+    for (const [path, planted] of plantedPlists) {
+      const e = files[path];
+      // metadata-only entries ship no content to judge
+      if (!e?.content) continue;
+      const shipped = e!.encoding === 'base64' ? Buffer.from(e!.content!, 'base64') : Buffer.from(e!.content!);
+      if (planted.subarray(0, 8).toString('latin1') === 'bplist00') {
+        binary++;
+        // same length, and only letters and digits changed (stand-ins)
+        expect(shipped.length, path).toBe(planted.length);
+        const alnum = (b: number) => (b >= 0x30 && b <= 0x39) || (b >= 0x41 && b <= 0x5a) || (b >= 0x61 && b <= 0x7a);
+        for (let i = 0; i < planted.length; i++) {
+          if (planted[i] !== shipped[i]) expect(alnum(planted[i]) && alnum(shipped[i]), `${path} byte ${i}`).toBe(true);
+        }
+        expect(shipped.equals(planted), path).toBe(false);
+      } else if (/^﻿?<\?xml/.test(planted.toString('utf8'))) {
+        // XML in UTF-8 (or with a Latin-1 byte): every element still closes
+        const count = (s: string, re: RegExp) => (s.match(re) ?? []).length;
+        const text = shipped.toString('utf8');
+        const was = planted.toString('utf8');
+        expect(count(text, /<string>[^<]*<\/string>/g), path).toBe(count(was, /<string>[^<]*<\/string>/g));
+        expect(text, path).toMatch(/<string>--password=[A-Za-z0-9]+<\/string>/);
+        xml++;
+      }
+    }
+    expect(binary).toBeGreaterThan(0);
+    expect(xml).toBeGreaterThan(0);
+  });
 
   it('disguises an inline JSONC config, not redacting it', () => {
     const v = (JSON.parse(snapshot) as { env: Record<string, string> }).env.OPENCODE_CONFIG_CONTENT;
