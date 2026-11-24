@@ -17,6 +17,14 @@ function envSet(ctx: ScanContext, key: string): string | undefined {
  * configured — the gateway has no authentication mechanism". Judged only
  * when the TOML sets the TLS paths itself: a gateway on the generated TLS
  * directory (OPENSHELL_LOCAL_TLS_DIR) has its client CA there.
+ *
+ * OPENSHELL_LOCAL_TLS_DIR also turns on the gateway-minted sandbox JWT: its
+ * jwt/ keys are generated there (`generate-certs`), and 0.0.116 then logs
+ * "gateway-minted sandbox JWT enabled" and rejects calls without
+ * credentials. The packaged launchers always set it — the deb user unit
+ * (`Environment=OPENSHELL_LOCAL_TLS_DIR=%h/.local/state/openshell/tls`,
+ * generate-certs as ExecStartPre) and the Homebrew wrapper — so only a
+ * gateway.env that blanks it leaves the gateway without one.
  */
 function noAuthMechanism(ctx: ScanContext): string | undefined {
   const gw = gateway(ctx);
@@ -31,7 +39,12 @@ function noAuthMechanism(ctx: ScanContext): string | undefined {
   if ((typeof oidc?.issuer === 'string' && oidc.issuer.trim()) || envSet(ctx, 'OPENSHELL_OIDC_ISSUER')) return undefined;
   const jwt = record(gw.gateway_jwt);
   if (typeof jwt?.signing_key_path === 'string' && jwt.signing_key_path.trim()) return undefined;
-  return clientCa ? 'mtls_auth.enabled = false, no OIDC issuer' : 'tls.cert_path set, no client_ca_path / OIDC issuer';
+  const envFile = gatewayEnv(ctx)?.data;
+  const sandboxJwt = !envFile || !('OPENSHELL_LOCAL_TLS_DIR' in envFile) || envSet(ctx, 'OPENSHELL_LOCAL_TLS_DIR') !== undefined;
+  if (sandboxJwt) return undefined;
+  return clientCa
+    ? 'mtls_auth.enabled = false, no OIDC issuer, OPENSHELL_LOCAL_TLS_DIR blank (no sandbox JWT)'
+    : 'tls.cert_path set, no client_ca_path / OIDC issuer, OPENSHELL_LOCAL_TLS_DIR blank (no sandbox JWT)';
 }
 
 export const osh002 = defineCheck({
@@ -62,7 +75,7 @@ export const osh002 = defineCheck({
     const none = noAuthMechanism(ctx);
     if (none) {
       return h.fromEvidence([settingEvidence(toml, none,
-        'TLS is on, but no client CA (mTLS user auth), OIDC issuer or gateway JWT is configured — the gateway logs "no authentication mechanism" and serves every caller'
+        'TLS is on, but no client CA (mTLS user auth), OIDC issuer or gateway JWT is configured, and gateway.env blanks OPENSHELL_LOCAL_TLS_DIR (no gateway-minted sandbox JWT) — the gateway logs "no authentication mechanism" and serves every caller'
         + (remote ? ` on ${ctx.installation.gateway?.host}` : ' (loopback listener: any local process)'))], {
         passed: 'Gateway requires authenticated users',
         failed: () => 'OpenShell gateway has no authentication mechanism',

@@ -1,0 +1,12 @@
+{
+  "agent": "hermes",
+  "source": "dt25 g2-HA-3: hermes-clean with a world-readable .env holding EMAIL_PASSWORD=admin-2024 and DB_PASSWORD=MY_DB_PASS_2024. Hermes loads .env with python-dotenv, which reads both values literally (only ${VAR} is expanded), so they are the passwords themselves, not a profile name or a variable reference",
+  "reachable": true,
+  "modes": {
+    ".hermes": "755",
+    ".hermes/config.yaml": "600",
+    ".hermes/.env": "644",
+    ".hermes/bin/tirith": "755"
+  },
+  "fail": { "HM-002": "critical" }
+}

@@ -1,8 +1,9 @@
-import { basename, join, normalize } from 'node:path';
+import { basename, dirname, join, normalize } from 'node:path';
 import type { Evidence, ScanContext } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
 import { CODING_AGENTS } from '../../core/types.js';
 import { agentsNamedIn } from './agent-names.js';
+import { cliCopyPaths } from '../../adapters/cli-installs.js';
 
 export const SUSPICIOUS_KEYWORDS = [
   'claw',          // catches openclaw, nanoclaw, picoclaw, ironclaw, zeroclaw, nemoclaw, clawdbot
@@ -79,12 +80,17 @@ export function cliPackageRoot(real: string): string | undefined {
 }
 
 /**
- * The installation's own executables (its CLI, every other copy, and what
- * each resolves to) and directories (its install dir, the CLI's package).
- * Only the installation's own paths are resolved — a job's command is judged
- * literally, so a local scan and a probe snapshot agree.
+ * The installation's own executables (its CLI, every other copy of it, and
+ * what each resolves to) and directories (its install dir, the CLI's
+ * package). Every copy counts, whatever its version — `otherInstalls` keeps
+ * only copies at another version, and the package an installer's service
+ * runs is often a same-version nvm copy behind a ~/.local/bin wrapper. A
+ * copy's package is taken both through its own link (as the job may spell
+ * the path) and fully resolved. Only the installation's own paths are
+ * resolved — a job's command is judged literally, so a local scan and a
+ * probe snapshot agree.
  */
-async function installationPaths(ctx: ScanContext): Promise<{ binaries: Set<string>; dirs: string[] }> {
+async function computeInstallationPaths(ctx: ScanContext): Promise<{ binaries: Set<string>; dirs: string[] }> {
   const home = ctx.fs.homedir();
   const shared = sharedDirs(home);
   const binaries = new Set<string>();
@@ -93,10 +99,16 @@ async function installationPaths(ctx: ScanContext): Promise<{ binaries: Set<stri
     if (d && d.startsWith('/') && !shared.has(normalize(d))) dirs.push(normalize(d));
   };
   addDir(ctx.installation.installDir);
-  const clis = [ctx.installation.cliBinary, ...(ctx.installation.otherInstalls ?? []).map(o => o.path)]
-    .filter((p): p is string => !!p && p.startsWith('/'));
-  for (const cli of clis) {
+  const known = [ctx.installation.cliBinary, ...(ctx.installation.otherInstalls ?? []).map(o => o.path)]
+    .filter((p): p is string => !!p && p.startsWith('/') && !p.endsWith('.app'));
+  const names = [...new Set(known.map(p => basename(p)))];
+  const copies = names.length > 0 ? await cliCopyPaths(home, ctx.fs, names) : [];
+  for (const cli of new Set([...known, ...copies])) {
     binaries.add(normalize(cli));
+    try {
+      const link = await ctx.fs.readlink(cli);
+      addDir(cliPackageRoot(link.startsWith('/') ? link : join(dirname(cli), link)));
+    } catch {}
     let real: string | undefined;
     try { real = await ctx.fs.realpath(cli); } catch {}
     if (real) {
@@ -104,7 +116,16 @@ async function installationPaths(ctx: ScanContext): Promise<{ binaries: Set<stri
       addDir(cliPackageRoot(real));
     }
   }
-  return { binaries, dirs };
+  return { binaries, dirs: [...new Set(dirs)] };
+}
+
+/** One computation per check run: every unit and cron line is judged against the same paths. */
+const pathsByContext = new WeakMap<ScanContext, Promise<{ binaries: Set<string>; dirs: string[] }>>();
+
+function installationPaths(ctx: ScanContext): Promise<{ binaries: Set<string>; dirs: string[] }> {
+  let p = pathsByContext.get(ctx);
+  if (!p) { p = computeInstallationPaths(ctx); pathsByContext.set(ctx, p); }
+  return p;
 }
 
 /**
@@ -140,6 +161,20 @@ export async function agentExecutable(rawParts: string[], ctx: ScanContext): Pro
     } catch {}
   }
   return undefined;
+}
+
+/**
+ * Names systemd reads from a unit directory: a unit file (systemd.unit(5):
+ * the name ends in its type suffix), a drop-in directory (`<unit>.d`) or a
+ * dependency directory (`.wants`/`.requires`/`.upholds`). Anything else there
+ * — an installer's `openclaw-gateway.service.bak`, a
+ * `….reconcile-<id>.receipt.bak` JSON receipt, an editor's `~` copy — is
+ * never loaded, so it starts nothing.
+ */
+const SYSTEMD_LOADED = /\.(?:service|socket|timer|path|mount|automount|swap|target|slice|scope|device)(?:\.(?:d|wants|requires|upholds))?$/;
+
+export function systemdLoads(name: string): boolean {
+  return SYSTEMD_LOADED.test(name.toLowerCase());
 }
 
 async function classify(
@@ -213,6 +248,7 @@ export const run001 = defineCheck({
           const entries = await ctx.fs.readdir(dir);
           for (const entry of entries) {
             const lower = entry.toLowerCase();
+            if (!systemdLoads(lower)) continue;
             for (const keyword of SUSPICIOUS_KEYWORDS) {
               if (lower.includes(keyword)) {
                 evidence.push(await classify(ctx, join(dir, entry), keyword, 'Systemd service', systemdCommand));

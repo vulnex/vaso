@@ -1,0 +1,10 @@
+{
+  "agent": "openclaw",
+  "source": "dt25 g1-F1: OpenClaw 2026.11.2 on the Linux test box — the installer's ~/.local/bin/openclaw sh wrapper (primary) runs the package of the same-version v24.16.0 nvm copy, and the gateway unit (systemd; LaunchAgent on macOS) runs that package directly. Every CLI copy counts as the agent's own whatever its version, so the unit is the agent's own service (info); the installer's .bak / .receipt.bak copies are never loaded by systemd and are not judged",
+  "clean": true,
+  "info": ["RUN-001"],
+  "modes": {
+    ".openclaw/openclaw.json": "600",
+    ".openclaw": "700"
+  }
+}

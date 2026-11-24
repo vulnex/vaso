@@ -107,22 +107,40 @@ describe('gateway settings', () => {
     expect((await check('OSH-001').run(ctx([env('false'), gatewayToml({ disable_tls: true })]))).passed).toBe(true);
   });
 
-  it('OSH-002 flags a TLS gateway with no client CA, OIDC issuer or gateway JWT', async () => {
+  it('OSH-002 flags a TLS gateway with no client CA, OIDC issuer or gateway JWT once gateway.env blanks the local TLS dir', async () => {
     const tls = { cert_path: `${STATE}/tls/server/tls.crt`, key_path: `${STATE}/tls/server/tls.key` };
-    const none = await check('OSH-002').run(ctx([gatewayToml({ tls, auth: { allow_unauthenticated_users: false } })]));
+    const blank: ParsedConfig = { raw: '', format: 'env', filePath: `${CFG}/gateway.env`, data: { OPENSHELL_LOCAL_TLS_DIR: '' } };
+    const none = await check('OSH-002').run(ctx([gatewayToml({ tls, auth: { allow_unauthenticated_users: false } }), blank]));
     expect(none).toMatchObject({ passed: false, severity: 'warning' });
     expect(none.fixable).toBeFalsy();
-    expect((await check('OSH-002').run(ctx([gatewayToml({ tls })], makeFs(), { gateway: PUBLIC }))).severity).toBe('critical');
+    expect((await check('OSH-002').run(ctx([gatewayToml({ tls }), blank], makeFs(), { gateway: PUBLIC }))).severity).toBe('critical');
     for (const ok of [
       { tls: { ...tls, client_ca_path: `${STATE}/tls/ca.crt` } },
       { tls, oidc: { issuer: 'https://idp.example.com/realms/x' } },
       { tls, gateway_jwt: { signing_key_path: `${STATE}/tls/jwt/signing.pem` } },
       {}, // generated TLS directory: its client CA is there
     ]) {
-      expect((await check('OSH-002').run(ctx([gatewayToml(ok)]))).passed, JSON.stringify(ok)).toBe(true);
+      expect((await check('OSH-002').run(ctx([gatewayToml(ok), blank]))).passed, JSON.stringify(ok)).toBe(true);
     }
     const mtlsOff = { tls: { ...tls, client_ca_path: `${STATE}/tls/ca.crt` }, mtls_auth: { enabled: false } };
-    expect((await check('OSH-002').run(ctx([gatewayToml(mtlsOff)]))).passed).toBe(false);
+    expect((await check('OSH-002').run(ctx([gatewayToml(mtlsOff), blank]))).passed).toBe(false);
+  });
+
+  // dt25 g2-OSH-1: the deb unit / Homebrew wrapper set OPENSHELL_LOCAL_TLS_DIR,
+  // and 0.0.116 then enables the gateway-minted sandbox JWT ("gateway-minted
+  // sandbox JWT enabled") - verified with a scratch gateway on the test box
+  it('OSH-002 counts the sandbox JWT that OPENSHELL_LOCAL_TLS_DIR enables', async () => {
+    const tls = { cert_path: '/x/tls.crt', key_path: '/x/tls.key' };
+    const envWith = (data: Record<string, string>): ParsedConfig => ({ raw: '', format: 'env', filePath: `${CFG}/gateway.env`, data });
+    for (const configs of [
+      [gatewayToml({ tls })], // no gateway.env: the packaged launcher's default
+      [gatewayToml({ tls }), envWith({ OPENSHELL_LOG: 'info' })],
+      [gatewayToml({ tls }), envWith({ OPENSHELL_LOCAL_TLS_DIR: '/srv/osh/tls' })],
+    ]) {
+      expect((await check('OSH-002').run(ctx(configs, makeFs(), { gateway: PUBLIC }))).passed).toBe(true);
+    }
+    const mtlsOff = { tls: { ...tls, client_ca_path: '/x/ca.crt' }, mtls_auth: { enabled: false } };
+    expect((await check('OSH-002').run(ctx([gatewayToml(mtlsOff)]))).passed).toBe(true);
   });
 
   it('OSH-002 flags unauthenticated users and offers a fix', async () => {

@@ -21,7 +21,32 @@ import { openclawAgentEntries } from './openclaw-agents.js';
 
 const RUNTIME = ['exec', 'process', 'code_execution', 'secrets'];
 const FS = ['ls', 'read', 'write', 'edit', 'apply_patch'];
-const GROUPS: Record<string, string[]> = { 'group:runtime': RUNTIME, 'group:fs': FS };
+/** The other section groups of the 2026.11.2 tool catalog (`buildCoreToolGroupMap`). */
+const SECTION_GROUPS: Record<string, string[]> = {
+  'group:agents': ['decision_evaluate', 'agents_list', 'get_goal', 'create_goal', 'update_goal', 'progress_card', 'ask_user',
+    'skill_workshop', 'skills_search', 'skills_read'],
+  'group:web': ['web_search', 'web_fetch', 'x_search'],
+  'group:memory': ['memory_search', 'memory_get', 'personal_instructions'],
+  'group:sessions': ['presence', 'sessions', 'sessions_list', 'sessions_history', 'sessions_search', 'conversations_list',
+    'conversations_send', 'conversations_turn', 'sessions_send', 'sessions_spawn', 'github_identity_status', 'github_publish',
+    'agents_wait', 'sessions_yield', 'subagents', 'session_status', 'suggest_task', 'dismiss_task'],
+  'group:ui': ['browser', 'screen', 'theme', 'dashboard', 'terminal', 'portal', 'canvas', 'show_widget'],
+  'group:messaging': ['message'],
+  'group:automation': ['heartbeat_respond', 'automations', 'gateway', 'plugins', 'openclaw'],
+  'group:nodes': ['nodes', 'computer', 'mobile_ui'],
+  // `transcripts` is left out of its section group
+  'group:media': ['view_image', 'image_generate', 'music_generate', 'video_generate', 'tts', 'pdf'],
+};
+/**
+ * `group:openclaw`: every core tool marked includeInOpenClawGroup — the
+ * runtime section's `code_execution` and `secrets` but not `exec`/`process`,
+ * no fs tool, and not `canvas`/`transcripts`.
+ */
+const OPENCLAW_GROUP = [
+  'code_execution', 'secrets',
+  ...Object.values(SECTION_GROUPS).flat().filter(t => t !== 'canvas'),
+];
+const GROUPS: Record<string, string[]> = { 'group:runtime': RUNTIME, 'group:fs': FS, ...SECTION_GROUPS, 'group:openclaw': OPENCLAW_GROUP };
 /** Core tools of the minimal / messaging profiles that matter here: none of RUNTIME/FS but `secrets` (messaging). */
 const PROFILE_ALLOW: Record<string, string[] | undefined> = {
   minimal: ['presence'],
@@ -40,7 +65,7 @@ const CORE_TOOLS = new Set([
   'progress_card', 'screen', 'session_status', 'sessions', 'sessions_history', 'sessions_list',
   'sessions_search', 'sessions_send', 'sessions_spawn', 'sessions_yield', 'show_widget', 'skill_workshop',
   'skills_read', 'skills_search', 'subagents', 'suggest_task', 'terminal', 'theme', 'transcripts', 'tts',
-  'update_goal', 'video_generate', 'view_image', 'web_fetch', 'web_search', 'x_search',
+  'update_goal', 'video_generate', 'view_image', 'web_fetch', 'web_search', 'x_search', 'openclaw',
 ]);
 
 function asRecord(v: unknown): Record<string, unknown> | undefined {

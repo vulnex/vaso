@@ -337,6 +337,8 @@ export const nemoclawAdapter: AgentAdapter = {
         '~/.nemoclaw/source/dist/build-identity.json',
         '~/.nemoclaw/source/.version',
         '~/.local/bin/nemoclaw',
+        // Volta's record of the Node a global package runs on (CFG-011)
+        '~/.volta/tools/user/bins/nemoclaw.json',
         // Bundled blueprint (CFG-018 base policy, CFG-019 image digest pin)
         '~/.nemoclaw/source/nemoclaw-blueprint/blueprint.yaml',
         '~/.nemoclaw/source/nemoclaw-blueprint/policies/openclaw-sandbox.yaml',
