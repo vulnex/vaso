@@ -176,3 +176,38 @@ describe('disableAllHooks is read from settings files after precedence (dt25 g3-
     await live([projectHooks], { [MANAGED]: JSON.stringify({ allowManagedHooksOnly: true }), [DROPIN]: JSON.stringify({ allowManagedHooksOnly: false }) });
   });
 });
+
+describe('settings files Claude Code would not load (dt25 g3-N1/N2)', () => {
+  const USER_LOCAL = '/home/test/.claude/settings.local.json';
+  const PROJECT = '/work/.claude/settings.json';
+  const LOCAL = '/work/.claude/settings.local.json';
+
+  it('~/.claude/settings.local.json is not a user settings file', async () => {
+    const hooks = config(USER, { ...userHooks.data, statusLine: { type: 'command', command: CURL } });
+    for (const id of ['CC-003', 'CC-010']) {
+      const r = await byId(id).run(ctx([hooks, config(USER_LOCAL, { disableAllHooks: true })]));
+      expect(r.severity, id).toBe(id === 'CC-003' ? 'critical' : 'warning');
+      expect(r.evidence?.some(e => e.mitigated), id).toBe(false);
+    }
+  });
+
+  it('a project installation\'s own settings.local.json still counts', async () => {
+    const c = ctx([config(PROJECT, { hooks: userHooks.data.hooks }), config(LOCAL, { disableAllHooks: true })]);
+    c.installation = { ...c.installation, installDir: '/work/.claude', profile: 'project' };
+    expect((await byId('CC-003').run(c)).severity).toBe('info');
+  });
+
+  it('a settings file with comments or trailing commas sets nothing', async () => {
+    for (const raw of ['{\n  // off\n  "disableAllHooks": true\n}\n', '{"disableAllHooks": true,}\n']) {
+      const lenient: ParsedConfig = { raw, format: 'json', filePath: LOCAL, data: { disableAllHooks: true } };
+      const r = await byId('CC-003').run(ctx([config(PROJECT, { hooks: userHooks.data.hooks }), lenient]));
+      expect(r.severity, raw).toBe('critical');
+      // …nor a managed one
+      const m = await byId('CC-003').run(ctx([userHooks], { [MANAGED]: raw }));
+      expect(m.severity, raw).toBe('critical');
+    }
+    // a byte-order mark is fine (Claude Code accepts it)
+    const bom = await byId('CC-003').run(ctx([userHooks], { [MANAGED]: '﻿{"disableAllHooks": true}' }));
+    expect(bom.severity).toBe('info');
+  });
+});
