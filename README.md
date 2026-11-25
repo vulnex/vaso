@@ -21,13 +21,13 @@ VASO is distributed from GitHub. The npm name `vaso` is held by an unrelated pac
 curl -fsSL https://raw.githubusercontent.com/vulnex/vaso/main/install.sh | bash
 
 # Alternative: download the release tarball, check it, and install it with npm
-curl -fLO https://github.com/vulnex/vaso/releases/download/v1.4.3/vaso-1.4.3.tgz
-curl -fLO https://github.com/vulnex/vaso/releases/download/v1.4.3/vaso-1.4.3.tgz.sha256
-shasum -a 256 -c vaso-1.4.3.tgz.sha256
-npm install -g ./vaso-1.4.3.tgz
+curl -fLO https://github.com/vulnex/vaso/releases/download/v1.4.4/vaso-1.4.4.tgz
+curl -fLO https://github.com/vulnex/vaso/releases/download/v1.4.4/vaso-1.4.4.tgz.sha256
+shasum -a 256 -c vaso-1.4.4.tgz.sha256
+npm install -g ./vaso-1.4.4.tgz
 ```
 
-Requires Node.js 20+. Download the tarball before installing it: npm 12 refuses tarball URLs by default (`allow-remote=none`). The installer checks the tarball against the release's `vaso-<version>.tgz.sha256` asset (published from v1.4.3 on) and refuses it when that checksum is missing or wrong. Set `VASO_VERSION=v1.4.3` (or `1.4.3`) in front of `bash` to make the installer pick a specific release; `VASO_VERSION=main` installs from the git ref (npm 10 or older only, no checksum).
+Requires Node.js 20+. Download the tarball before installing it: npm 12 refuses tarball URLs by default (`allow-remote=none`). The installer checks the tarball against the release's `vaso-<version>.tgz.sha256` asset (published from v1.4.4 on) and refuses it when that checksum is missing or wrong. Set `VASO_VERSION=v1.4.4` (or `1.4.4`) in front of `bash` to make the installer pick a specific release; `VASO_VERSION=main` installs from the git ref (npm 10 or older only, no checksum).
 
 > **Note:** install the release **tarball**, not `npm install -g github:vulnex/vaso#<tag>`. On npm 11+, the global git-dependency install path mishandles the package and leaves an unusable install; the prebuilt tarball has no build step and installs cleanly.
 
@@ -217,7 +217,7 @@ When multiple agents are detected, the **headline score is worst-case** — the 
 The simplest path — drop one step into any workflow:
 
 ```yaml
-- uses: vulnex/vaso@v1.4.3
+- uses: vulnex/vaso@v1.4.4
   id: vaso
   with:
     fail-on: critical          # or warning, info, none
@@ -228,7 +228,7 @@ Inputs:
 
 | Input | Default | Description |
 |-------|---------|-------------|
-| `version` | `v1.4.3` | VASO version to install. A release tag installs the prebuilt release tarball; a branch or commit SHA installs from the git ref |
+| `version` | `v1.4.4` | VASO version to install. A release tag installs the prebuilt release tarball; a branch or commit SHA installs from the git ref |
 | `agent` | (all detected) | Scan a single agent only (any `--agent` value) |
 | `format` | `sarif` | `terminal`, `json`, `sarif`, `markdown`, `html`, `csv` or `junit` |
 | `output` | `vaso-results.<ext>` | Path for the report (none for `terminal`) |
@@ -244,7 +244,7 @@ Output: `report-path`, the absolute path of the report (`${{ steps.vaso.outputs.
 
 ```yaml
 - name: Install VASO
-  run: curl -fsSLo /tmp/vaso.tgz https://github.com/vulnex/vaso/releases/download/v1.4.3/vaso-1.4.3.tgz && npm install -g /tmp/vaso.tgz
+  run: curl -fsSLo /tmp/vaso.tgz https://github.com/vulnex/vaso/releases/download/v1.4.4/vaso-1.4.4.tgz && npm install -g /tmp/vaso.tgz
 
 - name: Run VASO scan
   run: vaso scan --format sarif -o results.sarif --fail-on critical

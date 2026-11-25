@@ -6,6 +6,8 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.4.4] - 2026-11-25
+
 ### Fixed
 
 - **Reading `/etc/os-release` is no longer credential harvesting.** Python skill and MCP code that opened any file under `/etc` was reported by SKL-006 (critical) and SKL-010, because all of `/etc` counts as a sensitive *write* target. Reads now count only the secret and account files there (`passwd`, `shadow`, `gshadow`, `sudoers`, SSH host keys, `ssl/private`, `krb5.keytab`, `hosts`, VPN and NetworkManager secrets), as the JavaScript analysis already did.
