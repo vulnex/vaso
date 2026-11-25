@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+# Fixture copy of the Muse Code launcher header (the real one is ~1100 lines)
+set -euo pipefail
+channel="${MUSE_CHANNEL:-muse-stable}"
+channel_url="https://api.meta.ai/muse-code/channels/$channel"
+launcher_version="4"
+user_agent="muse-code/launcher-$launcher_version"
+exec "$(dirname "$0")/muse-bin-$(cat "$(dirname "$0")/.muse-version")" "$@"
