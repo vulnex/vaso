@@ -62,6 +62,23 @@ export function classifySensitivePath(path: string): string[] {
   return SENSITIVE_SINKS.filter((s) => s.re.test(path)).map((s) => s.label);
 }
 
+const ETC_LABEL = 'system configuration (/etc)';
+
+/**
+ * Files under /etc that hold secrets or account data. All of /etc is a
+ * sensitive *write* target (SENSITIVE_SINKS), but reading most of it is how
+ * programs learn the OS (`/etc/os-release`, `/etc/timezone`, `/etc/hostname`).
+ */
+const ETC_SECRET_READS = /^\/etc\/(?:passwd|shadow|gshadow|master\.passwd|sudoers(?:\.d)?|security\/opasswd|ssh\/ssh_host_[\w-]*key|ssl\/private|pki\/tls\/private|krb5\.keytab|hosts|wireguard|openvpn|NetworkManager\/system-connections)(?:\/|$)/iu;
+
+/**
+ * The sensitive sinks a *read* of `path` reaches: classifySensitivePath, except
+ * that /etc counts only for the secret and account files in it.
+ */
+export function classifySensitiveRead(path: string): string[] {
+  return classifySensitivePath(path).filter(label => label !== ETC_LABEL || ETC_SECRET_READS.test(path));
+}
+
 /**
  * The folders of SENSITIVE_SINKS (by index) that are other tools' credential
  * stores — ~/.ssh, ~/.aws, ~/.gnupg, ~/.kube, ~/.docker, ~/.config/gh,

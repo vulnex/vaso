@@ -16,7 +16,7 @@
  */
 
 import { cutLine } from './finding-snippet.js';
-import { classifySensitivePath } from './sensitive-paths.js';
+import { classifySensitiveRead } from './sensitive-paths.js';
 import type { DataFlowResult } from './ast-analyzer.js';
 import { markWrittenHelpers } from './own-helpers.js';
 import { credentialEnvName, onVendorHost, ownedCredential, signingSecret, staticOrigin, vendorApiDomains, vendorUrlSlot } from './vendor-domains.js';
@@ -1684,7 +1684,7 @@ export function analyzePythonSinks(code: string): PythonSinkFinding[] {
 
     if (/\bopen\s*\(|\bPath\s*\(|expanduser\s*\(/.test(text)) {
       for (const m of text.matchAll(STRING_LITERAL)) {
-        const labels = classifySensitivePath(m[1]);
+        const labels = classifySensitiveRead(m[1]);
         if (labels.length > 0) {
           findings.push({ kind: 'fs-access', line, ...snippet, description: `reads ${labels[0]}` });
           break;
@@ -2270,7 +2270,8 @@ function literalProgram(first: string | undefined): string | undefined {
 }
 
 /** Process calls that run a program directly, without a shell (unless `shell=True`). */
-const DIRECT_EXEC = /^(?:subprocess\.(?:run|call|check_call|check_output|Popen)|asyncio\.create_subprocess_exec)$/;
+// os.exec*/os.spawn*/os.posix_spawn* start the program itself: no shell, like subprocess with a list
+const DIRECT_EXEC = /^(?:subprocess\.(?:run|call|check_call|check_output|Popen)|asyncio\.create_subprocess_exec|os\.(?:exec[lv]p?e?|spawn[lv]p?e?|posix_spawnp?))$/;
 
 /**
  * Python skill code in the shape the skill checks read from `analyzeCode`
@@ -2451,7 +2452,7 @@ export function analyzePythonDataFlow(code: string): DataFlowResult[] {
 
     if (/\bopen\s*\(|\bPath\s*\(|expanduser\s*\(/.test(text)) {
       for (const m of text.matchAll(STRING_LITERAL)) {
-        if (classifySensitivePath(m[1]).length > 0) {
+        if (classifySensitiveRead(m[1]).length > 0) {
           out.push({ type: 'fs-access', source: m[1], line: stmt.line, ...snippet, description: `Reading sensitive path: ${m[1]}` });
           break;
         }

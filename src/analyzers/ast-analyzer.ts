@@ -1357,13 +1357,85 @@ function runsDirectly(name: string, call: NodePath, constStrings: ReadonlyMap<st
   if (!program) return false;
   const values = programValues(program, constStrings);
   if (!values || values.length === 0 || values.some((v) => !v.trim() || SHELL_OR_INTERPRETER.test(v.trim()))) return false;
-  return !args.some(a => {
-    const n = a.node;
-    return n.type === 'ObjectExpression' && n.properties.some(p =>
-      p.type === 'ObjectProperty'
-      && ((p.key.type === 'Identifier' && p.key.name === 'shell') || (p.key.type === 'StringLiteral' && p.key.value === 'shell'))
-      && !(p.value.type === 'BooleanLiteral' && !p.value.value));
-  });
+  return !args.some(a => mayEnableShell(a, 0));
+}
+
+/**
+ * Whether an options argument can turn `shell` on: an object literal with a
+ * `shell` that isn't `false`, followed through spreads (`{ ...opts }`) and
+ * through a local helper's parameter to what each of its callers passes.
+ * Anything else (an argument list, an exported function's parameter) is
+ * not judged, as before.
+ */
+function mayEnableShell(path: NodePath, depth: number): boolean {
+  if (depth > MAX_RESOLVE_DEPTH) return true;
+  const n = path.node;
+  if (n.type === 'ObjectExpression') {
+    return (path.get('properties') as NodePath[]).some(p => {
+      if (p.isSpreadElement()) return mayEnableShell(p.get('argument') as NodePath, depth + 1);
+      const node = p.node;
+      return node.type === 'ObjectProperty'
+        && ((node.key.type === 'Identifier' && node.key.name === 'shell') || (node.key.type === 'StringLiteral' && node.key.value === 'shell'))
+        && !(node.value.type === 'BooleanLiteral' && !node.value.value);
+    });
+  }
+  if (n.type === 'Identifier') {
+    const binding = path.scope.getBinding(n.name);
+    if (binding?.kind === 'param') {
+      // Judged only through a local helper's callers (when the program came
+      // through one too); an argument list or an exported function's
+      // parameter is not judged, as before
+      const passed = callSiteArgs(binding, true);
+      return passed !== undefined && passed.some(a => a !== null && mayEnableShell(a, depth + 1));
+    }
+    if (binding?.constant && binding.path.isVariableDeclarator() && binding.path.node.init) {
+      return mayEnableShell(binding.path.get('init') as NodePath, depth + 1);
+    }
+  }
+  return false;
+}
+
+/**
+ * What every caller of a local helper passes for one of its parameters: the
+ * argument at the parameter's position in each call (null where a caller
+ * omits it, when `allowMissing`). Undefined when the helper isn't a local,
+ * non-exported function that is only ever called directly by name, or the
+ * parameter isn't a plain positional one.
+ */
+function callSiteArgs(binding: Binding, allowMissing = false): Array<NodePath | null> | undefined {
+  const fn = binding.path.parentPath;
+  if (!fn?.isFunction()) return undefined;
+  const index = (fn.node.params as Node[]).indexOf(binding.path.node as Node);
+  if (index < 0 || binding.path.node.type !== 'Identifier') return undefined;
+  let name: string | undefined;
+  let scope: Scope | undefined;
+  if (fn.isFunctionDeclaration() && fn.node.id) {
+    if (fn.parentPath?.isExportNamedDeclaration() || fn.parentPath?.isExportDefaultDeclaration()) return undefined;
+    name = fn.node.id.name;
+    scope = fn.parentPath?.scope;
+  } else if ((fn.isArrowFunctionExpression() || fn.isFunctionExpression()) && fn.parentPath?.isVariableDeclarator()) {
+    const id = fn.parentPath.node.id;
+    if (id.type !== 'Identifier' || fn.parentPath.parentPath?.parentPath?.isExportNamedDeclaration()) return undefined;
+    name = id.name;
+    scope = fn.parentPath.scope;
+  }
+  const fnBinding = name ? scope?.getBinding(name) : undefined;
+  if (!fnBinding || !fnBinding.constant || fnBinding.referencePaths.length === 0) return undefined;
+  const out: Array<NodePath | null> = [];
+  for (const ref of fnBinding.referencePaths) {
+    const call = ref.parentPath;
+    if (!call?.isCallExpression() || call.node.callee !== ref.node) return undefined;
+    const args = call.get('arguments') as NodePath[];
+    if (args.slice(0, index + 1).some(a => a.isSpreadElement())) return undefined;
+    const arg = args[index];
+    if (!arg) {
+      if (!allowMissing) return undefined;
+      out.push(null);
+    } else {
+      out.push(arg);
+    }
+  }
+  return out;
 }
 
 /** How far `programValues` follows bindings, returns and properties. */
@@ -1400,6 +1472,15 @@ function programValues(path: NodePath, constStrings: ReadonlyMap<string, string>
     case 'Identifier': {
       const binding = path.scope.getBinding(n.name);
       if (!binding) return constStrings.has(n.name) ? [constStrings.get(n.name)!] : undefined;
+      // A local helper's parameter (`function run(cmd, args) { spawnSync(cmd, args) }`):
+      // the program is whatever every caller passes, when each is fixed
+      if (binding.kind === 'param' && binding.constant) {
+        const passed = callSiteArgs(binding);
+        if (!passed || passed.length === 0) return undefined;
+        let out: string[] | undefined = [];
+        for (const a of passed) out = union(out, a ? next(a) : undefined);
+        return out;
+      }
       if (!binding.constant || !binding.path.isVariableDeclarator()) return undefined;
       const decl = binding.path;
       // `for (const x of LIST)`: x is one of LIST's elements
