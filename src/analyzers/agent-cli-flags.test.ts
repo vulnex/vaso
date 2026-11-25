@@ -19,6 +19,7 @@ describe('agentBypass: vendor-documented approval/sandbox bypass flags', () => {
       'devin --permission-mode dangerous -p x',
       'abacusai --dangerously-skip-permissions x',
       'aider --yes-always --message x',
+      'muse exec --yolo x', 'muse --approval-mode never x', 'muse exec --disable-approval x', 'muse --permission-profile :unrestricted x',
       'npx -y @anthropic-ai/claude-code --dangerously-skip-permissions -p x',
       "sh -c 'claude --dangerously-skip-permissions -p x'",
       '/usr/local/bin/gemini --yolo',
@@ -30,6 +31,7 @@ describe('agentBypass: vendor-documented approval/sandbox bypass flags', () => {
       'claude --permission-mode acceptEdits -p x', 'gemini --approval-mode auto_edit', 'qwen --approval-mode auto-edit',
       'codex exec --sandbox danger-full-access x', 'codex exec -a never x', 'cursor-agent --sandbox disabled -p x',
       'copilot --allow-all-paths -p x', 'devin --permission-mode autonomous', 'q chat --trust-tools=fs_read x',
+      'muse exec --disable-sandbox x', 'muse --sandbox-network enabled x',
     ]) expect(lvl(cmd), cmd).toBe('warning');
   });
 
@@ -37,6 +39,7 @@ describe('agentBypass: vendor-documented approval/sandbox bypass flags', () => {
     for (const cmd of [
       'claude --version', 'claude -p x', 'gemini -p x', 'codex exec x', 'q --version', 'q translate -a x',
       'git -f push', 'npx -y prettier --write .', 'yolo --force', 'copilot --help', 'cursor-agent -p x',
+      'muse exec x', 'muse --approval-mode on-request x', 'muse --permission-profile :read-only x',
     ]) expect(agentBypass(cmd), cmd).toBeUndefined();
     expect(agentBypass(undefined)).toBeUndefined();
   });

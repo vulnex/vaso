@@ -19,6 +19,9 @@
  *  - Devin CLI: `--permission-mode dangerous|yolo|bypass` (`autonomous`) — docs.devin.ai
  *  - Abacus.AI CLI: `--dangerously-skip-permissions`, `--permission-mode yolo` (`accept-edits`) — abacus.ai help
  *  - Aider: `--yes-always` — aider.chat/docs/config/options.html
+ *  - Meta Muse Code: `--yolo`, `--approval-mode never`, `--disable-approval`, `--permission-profile :unrestricted`
+ *    (`--disable-sandbox`, `--sandbox-network enabled`) — `muse --help` 1.4.25, effects checked in the session's
+ *    committed permission profile
  */
 
 export interface AgentBypass {
@@ -48,6 +51,7 @@ const RULES: FlagRule[] = [
   { agents: /^devin$/, full: /^--permission-mode[= ](?:dangerous|yolo|bypass)$/, partial: /^--permission-mode[= ]autonomous$/ },
   { agents: /^abacus(?:ai)?$/, full: /^(?:--dangerously-skip-permissions|--permission-mode[= ]yolo)$/, partial: /^(?:--auto-accept-edits|--permission-mode[= ]accept-edits)$/ },
   { agents: /^aider$/, full: /^--yes-always$/ },
+  { agents: /^muse$/, full: /^(?:--yolo|--disable-approval|--approval-mode[= ]never|--permission-profile[= ]:unrestricted)$/, partial: /^(?:--disable-sandbox|--sandbox-network[= ]enabled)$/ },
 ];
 
 /** Leading words that run the next one: `npx -y`, `sudo`, `env A=b`, `sh -c '…'`. */

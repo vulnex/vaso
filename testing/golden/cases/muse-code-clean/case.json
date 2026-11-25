@@ -1,0 +1,15 @@
+{
+  "agent": "muse-code",
+  "source": "Meta Muse Code 1.4.25 (R9361.1): a hardened settings.json — read-only based default profile, pinned MCP package with an env reference, https remote MCP, benign hook; files owner-only. Schema verified live with the CLI's echo provider (2026-11-25)",
+  "clean": true,
+  "modes": {
+    ".config/muse": "700",
+    ".config/muse/settings.json": "600",
+    ".config/muse/trust.json": "600",
+    ".config/muse/auth.json": "600",
+    ".local/share/muse": "700",
+    ".local/share/muse/session-index.db": "600",
+    ".local/share/muse/sessions/2026/11/25/01a2125d-0000-7000-8000-000000000001/session.jsonl": "600",
+    ".local/bin/muse": "755"
+  }
+}

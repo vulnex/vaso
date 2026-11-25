@@ -42,8 +42,8 @@ describe('MCP off lists', () => {
     expect(got).toMatchObject({
       'claude-code:denied': true, 'claude-code:ok': false, 'claude-code:cmd': true,
       'claude-code:localoff': true, 'claude-code:localon': false,
-      // Copilot CLI reads the project .mcp.json too and has no such list: still launched there
-      'claude-code+copilot-cli:rejected': false,
+      // Copilot CLI and Muse Code read the project .mcp.json too and have no such list: still launched there
+      'claude-code+copilot-cli+muse-code:rejected': false,
     });
   });
 

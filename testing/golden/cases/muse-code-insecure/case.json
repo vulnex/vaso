@@ -1,0 +1,29 @@
+{
+  "agent": "muse-code",
+  "source": "Meta Muse Code 1.4.25 (R9361.1): default profile :unrestricted (approval allow_all, no sandbox), plaintext MCP token, unpinned npx package, http MCP, download-and-run hook, non-Meta base_url, readable auth.json and transcripts (Muse's default 0664). Semantics verified live (2026-11-25)",
+  "reachable": true,
+  "fail": {
+    "MSC-001": "critical",
+    "MSC-002": "warning",
+    "MSC-003": "critical",
+    "MSC-004": "critical",
+    "MSC-005": "warning",
+    "MSC-006": "critical",
+    "MSC-007": "critical",
+    "MSC-008": "warning",
+    "MSC-011": "warning"
+  },
+  "fix": {
+    "resolves": ["MSC-001", "MSC-003", "MSC-008"]
+  },
+  "modes": {
+    ".config/muse": "775",
+    ".config/muse/settings.json": "664",
+    ".config/muse/trust.json": "664",
+    ".config/muse/auth.json": "644",
+    ".local/share/muse": "775",
+    ".local/share/muse/session-index.db": "644",
+    ".local/share/muse/sessions/2026/11/25/01a2125d-0000-7000-8000-000000000001/session.jsonl": "664",
+    ".local/bin/muse": "755"
+  }
+}

@@ -23,6 +23,7 @@ import { pathPresent } from '../adapters/load-if-present.js';
 import { applyOffLists } from './off-lists.js';
 import { hermesServerMap } from './disabled.js';
 import type { AgentType, Platform } from '../core/types.js';
+import { museConfigDir } from '../adapters/muse-code.js';
 
 interface ConfigLocation {
   source: string;
@@ -118,6 +119,9 @@ function getGlobalConfigLocations(platform: Platform, home: string, fs: FSProvid
     { source: 'AbacusAI Desktop (cowork)', agents: ['abacus'], path: join(home, '.abacusai', 'desktop', 'mcp-cowork.json'), shape: 'abacus' },
   );
 
+  // Meta Muse Code: `mcpServers` in settings.json ($XDG_CONFIG_HOME/muse, else ~/.config/muse)
+  locations.push({ source: 'Muse Code', agents: ['muse-code'], path: join(museConfigDir(home, fs), 'settings.json') });
+
   // Devin CLI (XDG config dir on POSIX, %APPDATA%\devin on Windows)
   const devinConfigDir = platform === 'win32'
     ? join(fs.getEnv('APPDATA') ?? join(home, 'AppData', 'Roaming'), 'devin')
@@ -190,8 +194,8 @@ function getProjectConfigLocations(projectDir: string, devin: { root: string; di
   const at = (loc: Omit<ConfigLocation, 'scope' | 'projectRoot'>): ConfigLocation => ({ ...loc, scope: 'project', projectRoot: projectDir });
   const devinAt = (loc: Omit<ConfigLocation, 'scope' | 'projectRoot'>): ConfigLocation => ({ ...loc, scope: 'project', projectRoot: devin.root });
   return [
-    // Copilot CLI reads a repo's .mcp.json too
-    at({ source: 'Claude Code (project)', agents: ['claude-code', 'copilot-cli'], path: join(projectDir, '.mcp.json') }),
+    // Copilot CLI and Muse Code (once the folder is trusted) read a repo's .mcp.json too
+    at({ source: 'Claude Code (project)', agents: ['claude-code', 'copilot-cli', 'muse-code'], path: join(projectDir, '.mcp.json') }),
     at({ source: 'Cursor (project)', agents: ['cursor-cli'], path: join(projectDir, '.cursor', 'mcp.json') }),
     at({ source: 'Windsurf (project)', agents: ['windsurf'], path: join(projectDir, '.windsurf', 'mcp.json') }),
     ...devin.dirs.flatMap(dir => [

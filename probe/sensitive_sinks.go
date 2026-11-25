@@ -33,7 +33,7 @@ var sensitiveSinkPatterns = []string{
 	`(^|\/)(\.local\/share\/opencode|\.config\/nanoclaw|\.hermes|\.(openclaw(-[^/]+)?|clawdbot)(\/agents\/[^/]+\/agent)?)\/(auth|auth-profiles|auth-state|credentials|account|registry-auth|device-key)\.json$`,
 	`(^|\/)\.(openclaw(-[^/]+)?|clawdbot)\/credentials(\/|$)|(^|\/)\.hermes\/mcp-tokens(\/|$)|(^|\/)\.nanobot\/(auth|whatsapp-auth)(\/|$)`,
 	`(^|\/)\.(gemini|qwen)\/(oauth_creds|google_accounts|mcp-oauth-tokens|a2a-oauth-tokens)\.json$`,
-	`(^|\/)\.local\/share\/devin\/credentials\.toml$|(^|\/)\.abacusai\/keystore\.enc[^/]*$`,
+	`(^|\/)\.local\/share\/devin\/credentials\.toml$|(^|\/)\.abacusai\/keystore\.enc[^/]*$|(^|\/)\.config\/muse\/auth\.json$`,
 	`(^|\/)(\.grokbot|\.cursor\/sand|sand-data)\/(local-exec-daemon-credential|host-token)\.json$|(^|\/)Grok Bot\/(sand|user)-secrets\.json$`,
 	`(^|\/)\.ironclaw\/reborn\/(webui-token|([^/]+\/)?\.reborn-local-dev-secrets-master-key)$|(^|\/)\.?zeroclaw\/\.secret_key$`,
 	`(^|\/)openshell\/(gateway\/credentials|docker-sandbox-tokens|gateways\/[^/]+\/mtls)(\/|$)|(^|\/)openshell\/gateways\/[^/]+\/(?:oidc_token\.json|edge_token)$`,

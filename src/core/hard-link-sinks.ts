@@ -44,6 +44,7 @@ export const SINK_SEARCH_ROOTS: ReadonlyArray<{ path: string; depth: number }> =
   { path: '.clawdbot', depth: 5 },
   { path: '.nanobot', depth: 4 },
   { path: '.abacusai', depth: 1 },
+  { path: '.config/muse', depth: 1 },
   { path: '.grokbot', depth: 1 },
   { path: '.cursor/sand', depth: 1 },
   { path: '.ironclaw/reborn', depth: 3 },

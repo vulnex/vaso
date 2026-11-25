@@ -49,6 +49,7 @@ var sinkSearchRoots = []sinkSearchRoot{
 	{".clawdbot", true, 5},
 	{".nanobot", true, 4},
 	{".abacusai", true, 1},
+	{".config/muse", true, 1},
 	{".grokbot", true, 1},
 	{".cursor/sand", true, 1},
 	{".ironclaw/reborn", true, 3},

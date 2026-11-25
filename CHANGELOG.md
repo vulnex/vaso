@@ -8,6 +8,22 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [1.4.3] - 2026-11-24
 
+### Added
+
+- **Meta Muse Code support (`-a muse-code`, MSC-001–012).** VASO now detects Meta's terminal coding agent `muse` (verified on 1.4.25): its launcher in `~/.local/bin` (versioned from `.muse-version`; the launcher itself is never run, because it updates itself and may start a login), `~/.config/muse` (`settings.json`, `trust.json`, `auth.json`, user skills) and `~/.local/share/muse`, honouring `XDG_CONFIG_HOME`, `XDG_DATA_HOME` and `MUSE_AUTH_PATH`. A workspace's `.mcp.json`, `.muse/hooks.json`, `.agents/skills/` and `AGENTS.md` are scanned as a project installation, and findings there are lowered until that exact folder is trusted, as Muse itself does. New checks:
+  - MSC-001: the default permission profile skips approval (`:unrestricted`, or a custom profile with `approval: "allow_all"`). This is critical and fixable: `vaso fix` restores Muse's default `:auto-review`.
+  - MSC-002: the default profile turns off the filesystem sandbox or gives shell commands direct network access.
+  - MSC-003: `auth.json` is readable by others (fixable).
+  - MSC-004, MSC-005, MSC-006: MCP servers with plaintext secrets, unpinned packages or `http://` URLs.
+  - MSC-007: hooks that download and run code or send data out.
+  - MSC-008: session transcripts, the session index and prompt history readable by every local user (Muse creates them 0664/0644; fixable).
+  - MSC-009: a world-writable config directory, settings file or launcher.
+  - MSC-010: `MUSE_PERMISSION_PROFILE_FAIL_OPEN` or `MUSE_CUA_DEV_POLICY` set in the environment.
+  - MSC-011: model traffic sent to a non-Meta `base_url`, a plaintext proxy, or plaintext telemetry.
+  - MSC-012: secrets in the project's `AGENTS.md` (or `CLAUDE.md`).
+
+  A profile Muse would refuse (for example `allow_all` with a reviewer) is not reported, because Muse will not start with it. `vaso mcp` lists Muse's MCP servers, `muse --yolo` / `--approval-mode never` / `--permission-profile :unrestricted` are recognised as approval bypasses in skills and services, and remote scans collect the Muse files (credentials, sessions and history as permissions only). 380 checks, 27 agents.
+
 ### Security
 
 - **Remote scans no longer use fixed `/tmp` names.** The probe and its manifest are uploaded into a private `mktemp -d` directory on the target, and the ssh control socket and local manifest live in a private local directory; the scan stops if the target can't create one. With fixed names another local user could choose the commands the probe ran, as root with `--sudo`. The probe also refuses a manifest that is a symlink, owned by someone else, or writable by others.

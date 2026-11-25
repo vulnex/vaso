@@ -1,6 +1,6 @@
 # VASO User Guide
 
-VASO (VULNEX Agent Security Observer) is a security scanner for AI agent deployments. It detects misconfigurations, malicious skills, known threats, and runtime vulnerabilities across ten autonomous agent frameworks (OpenClaw, NanoClaw, PicoClaw, IronClaw, Nanobot, ZeroClaw, NemoClaw, Hermes, Lyrie, Atomic Agent), the NVIDIA OpenShell agent sandbox runtime, ten interactive coding agents (Claude Code, Codex, OpenCode, Gemini CLI, Qwen Code, GitHub Copilot CLI, Cursor CLI/IDE, Windsurf/Devin Desktop, Devin CLI, Abacus.AI CLI/Desktop), five agentic desktop apps (Claude Desktop, ChatGPT Desktop, Meta Muse, Perplexity Comet, Grok Bot), and MCP (Model Context Protocol) server configurations.
+VASO (VULNEX Agent Security Observer) is a security scanner for AI agent deployments. It detects misconfigurations, malicious skills, known threats, and runtime vulnerabilities across ten autonomous agent frameworks (OpenClaw, NanoClaw, PicoClaw, IronClaw, Nanobot, ZeroClaw, NemoClaw, Hermes, Lyrie, Atomic Agent), the NVIDIA OpenShell agent sandbox runtime, eleven interactive coding agents (Claude Code, Codex, OpenCode, Gemini CLI, Qwen Code, GitHub Copilot CLI, Cursor CLI/IDE, Windsurf/Devin Desktop, Devin CLI, Abacus.AI CLI/Desktop, Meta Muse Code), five agentic desktop apps (Claude Desktop, ChatGPT Desktop, Meta Muse, Perplexity Comet, Grok Bot), and MCP (Model Context Protocol) server configurations.
 
 ## Installation
 
@@ -40,7 +40,7 @@ vaso scan [options]
 
 | Option | Description |
 |--------|-------------|
-| `-a, --agent <type>` | Scan a specific agent: `openclaw`, `nanoclaw`, `picoclaw`, `ironclaw`, `nanobot`, `zeroclaw`, `nemoclaw`, `openshell`, `hermes`, `lyrie`, `atomic-agent`, `claude-code`, `claude-desktop`, `chatgpt-desktop`, `codex`, `opencode`, `gemini-cli`, `qwen-code`, `copilot-cli`, `cursor-cli`, `windsurf`, `devin`, `abacus`, `meta-muse`, `comet`, or `grok-bot` |
+| `-a, --agent <type>` | Scan a specific agent: `openclaw`, `nanoclaw`, `picoclaw`, `ironclaw`, `nanobot`, `zeroclaw`, `nemoclaw`, `openshell`, `hermes`, `lyrie`, `atomic-agent`, `claude-code`, `claude-desktop`, `chatgpt-desktop`, `codex`, `opencode`, `gemini-cli`, `qwen-code`, `copilot-cli`, `cursor-cli`, `windsurf`, `devin`, `abacus`, `meta-muse`, `comet`, or `grok-bot`, `muse-code` |
 | `-f, --format <format>` | Output format: `terminal` (default), `json`, `sarif`, `markdown`, `html`, `csv`, `junit` |
 | `-o, --output <file>` | Write report to a single file instead of stdout |
 | `--output-dir <dir>` | Write one file per host as `<dir>/<hostname>.<ext>`; local scans use the local hostname (mutually exclusive with `-o`). A second target reporting the same hostname (two users on one machine, cloned VMs) is written as `<hostname>--<user@host>.<ext>`; `--save-snapshot` files are named the same way |
@@ -123,7 +123,7 @@ Any other key is an error (exit 2) — a misspelt `identity` would otherwise be 
 - **An OpenShell gateway TOML redirected** by `OPENSHELL_GATEWAY_CONFIG` in `gateway.env` to a location other than the defaults and NemoClaw's layout (`CONFIG-LOAD`).
 - **Environment variables**: the probe ships only the variables adapters read (for example `HERMES_*`, `TIRITH_ENABLED`), with credential values redacted. A Hermes `config.yaml` `${VAR}` reference resolves from `~/.hermes/.env` on both, but one only the shell environment defines resolves only on a local scan.
 - **Secrets in collected config files** never leave the host (probe ≥ 1.4.0). In `.env` files, settings JSON/YAML/TOML, instruction files and MCP configs, the probe replaces every API key, token or password it finds (known key formats, values under credential-named keys and `--token`-style arguments, URL passwords and `?api_key=` parameters, private-key bodies) with a stand-in of the same length and shape: the first 8 and last 4 characters stay, the rest is random. Checks reach the same verdict on it, and reports show the same masked value as a local scan. Placeholders (`sk-...`, `your-api-key`), references (`${OPENAI_API_KEY}`, `op://…`) and weak defaults (`changeme`) are kept as they are — they are what the checks report. Skill code, markdown and lockfiles are collected unchanged (IOC checks hash them); a skill's own settings and env files (`.env`, `config.json`, `secrets.yaml`, `.npmrc`, …) are disguised like agent configs.
-- Conversation and history stores (Codex sessions, ChatGPT conversations, Gemini chats, Copilot history, editor `state.vscdb`) and token stores are collected for their permissions only, never their content; a Grok Bot `.deb` that has never run is versioned from its package metadata on local scans only.
+- Conversation and history stores (Codex sessions, ChatGPT conversations, Gemini chats, Copilot history, Muse Code sessions and prompt history, editor `state.vscdb`) and token stores are collected for their permissions only, never their content; a Grok Bot `.deb` that has never run is versioned from its package metadata on local scans only.
 
 **Skill directories outside the defaults.** A skills directory an agent's config sets (an OpenClaw `extraDirs` entry, a Nanobot, PicoClaw or ZeroClaw workspace), or an agent's own skills directory that a symlink takes elsewhere, is walked wherever it leads — locally and remotely, by the same rule — except in these places, judged on the path as written and as resolved:
 
@@ -147,7 +147,7 @@ vaso detect [options]
 
 | Option | Description |
 |--------|-------------|
-| `-a, --agent <type>` | Detect a specific agent only: `openclaw`, `nanoclaw`, `picoclaw`, `ironclaw`, `nanobot`, `zeroclaw`, `nemoclaw`, `openshell`, `hermes`, `lyrie`, `atomic-agent`, `claude-code`, `claude-desktop`, `chatgpt-desktop`, `codex`, `opencode`, `gemini-cli`, `qwen-code`, `copilot-cli`, `cursor-cli`, `windsurf`, `devin`, `abacus`, `meta-muse`, `comet`, or `grok-bot` |
+| `-a, --agent <type>` | Detect a specific agent only: `openclaw`, `nanoclaw`, `picoclaw`, `ironclaw`, `nanobot`, `zeroclaw`, `nemoclaw`, `openshell`, `hermes`, `lyrie`, `atomic-agent`, `claude-code`, `claude-desktop`, `chatgpt-desktop`, `codex`, `opencode`, `gemini-cli`, `qwen-code`, `copilot-cli`, `cursor-cli`, `windsurf`, `devin`, `abacus`, `meta-muse`, `comet`, or `grok-bot`, `muse-code` |
 | `-f, --format <format>` | Output format: `terminal` (default) or `json` |
 | `-o, --output <file>` | Write report to a file instead of stdout |
 | `--output-dir <dir>` | Multi-host: write one file per host as `<dir>/<hostname>.<ext>` (mutually exclusive with `-o`) |
@@ -722,7 +722,7 @@ When several agents are scanned, the headline score and grade (`totalScore` / `t
 
 ## Security Checks
 
-VASO runs **368 checks across 19 categories**.
+VASO runs **380 checks across 19 categories**.
 
 | Category | IDs | Count | Scope |
 |----------|-----|-------|-------|
@@ -744,13 +744,13 @@ VASO runs **368 checks across 19 categories**.
 | Hermes | HM-001–011 | 11 | Plaintext API keys, env/credentials perms, API-server bind without auth, permissive CORS, plaintext inference endpoints, approvals-off, Tirith pre-exec scanner state, MCP stdio shell-c / unpinned packages, administrator-managed scope writable by others; settings judged after the managed `/etc/hermes` layer is applied |
 | OpenShell | OSH-001–014 | 14 | Gateway TLS disabled, unauthenticated users, OIDC over plaintext HTTP, non-expiring SSH/sandbox credentials, `retain_last_valid` policy validation, fail-open or plaintext interceptors/middleware, resource admission off (critical with caller driver config), readable CA/JWT/TLS keys, key-encryption key, credential database and sandbox tokens, writable gateway config or CLI gateway metadata, CLI without TLS verification; live sandbox policies: network rules open to any program (`/**`), `tls: skip` / uninspected credentials / allow-all MCP / no protocol / `access: full` / audit-only rules, `allowed_ips` of /8 or wider and `host.openshell.internal`, writable system paths |
 | Atomic Agent | AT-001–011 | 11 | Raised approval ladder (level 4/5), unrestricted read scope, unapproved HTTP egress, plaintext secrets in config.json, `.env`/mail-session perms, `pure_read` MCP trust, MCP stdio/transport hygiene, secretless webhooks, subscription-CLI lockdown overrides, plaintext inference endpoints, world/group-readable memory, sessions and traces |
-| Coding Agent | CC, CD, CG, CDX, OPC, GEM, QC, CUR, GHC, WS, DEV, ABA, MM, PC, GB | 151 | Claude Code (12), Claude Desktop (10), ChatGPT Desktop (6), Codex (10), OpenCode (12), Gemini CLI (12), Qwen Code (10), Cursor (15), GitHub Copilot CLI (9), Windsurf/Devin Desktop (9), Devin CLI (10), Abacus.AI CLI/Desktop (15), Meta Muse (3), Perplexity Comet (2), Grok Bot (16): sandbox/approval policy, plaintext credentials, MCP pinning, broad allow rules, memory-file secrets, transport security |
+| Coding Agent | CC, CD, CG, CDX, OPC, GEM, QC, CUR, GHC, WS, DEV, ABA, MSC, MM, PC, GB | 163 | Claude Code (12), Claude Desktop (10), ChatGPT Desktop (6), Codex (10), OpenCode (12), Gemini CLI (12), Qwen Code (10), Cursor (15), GitHub Copilot CLI (9), Windsurf/Devin Desktop (9), Devin CLI (10), Abacus.AI CLI/Desktop (15), Meta Muse Code (12), Meta Muse (3), Perplexity Comet (2), Grok Bot (16): sandbox/approval policy, plaintext credentials, MCP pinning, broad allow rules, memory-file secrets, transport security |
 
 Server-only checks (gateway/network/runtime concepts, mostly in CFG, NET, RUN, and POL) are automatically excluded for coding agents and desktop apps to avoid false positives — interactive coding CLIs have a different threat model than autonomous server agents.
 
 ## Supported Agents
 
-VASO ships twenty-six adapters. Each implements `detect()`, `getConfigPaths()`, `getSkillsDir()`, and `getGatewayInfo()` against its framework's on-disk layout.
+VASO ships twenty-seven adapters. Each implements `detect()`, `getConfigPaths()`, `getSkillsDir()`, and `getGatewayInfo()` against its framework's on-disk layout.
 
 ### Autonomous frameworks
 
@@ -787,6 +787,7 @@ VASO ships twenty-six adapters. Each implements `detect()`, `getConfigPaths()`, 
 | Windsurf / Devin Desktop | `~/.codeium/windsurf/` (`mcp_config.json`, `hooks.json`, memories, workflows, `user_settings.pb`), `~/.config/devin/mcp_config.json`; Cascade hooks also from `/etc/devin/hooks.json` / `/Library/Application Support/Devin/hooks.json` (legacy Windsurf paths as fallback) and the workspace `.devin/hooks.json` (else `.windsurf/hooks.json`); editor user-data `{Windsurf,Devin}` dirs (`~/Library/Application Support/`, `~/.config/`, `%APPDATA%`); version from the app's `product.json` | JSON |
 | Devin CLI | `$XDG_CONFIG_HOME/devin/` (default `~/.config/devin/`: `config.json`, `mcp_config.json`, `AGENTS.md`), `$XDG_DATA_HOME/devin/credentials.toml`; project `.devin/` (found by walking up to the repo root) incl. `hooks.v1.json`; `%APPDATA%\devin\` on Windows | JSONC, TOML |
 | Abacus.AI CLI / AbacusAI Desktop | `~/.abacusai/` (`config.json`, `mcp.json`, `trusted-workspaces.json`, `keystore.enc`, `desktop/mcp-<mode>.json`, `desktop/agent-config-<mode>.json`), project `<workspace>/.abacusai/` (ignored until the workspace is trusted); AbacusAI Desktop user data (`~/.config/AbacusAI Desktop`, `~/Library/Application Support/AbacusAI Desktop`); CLI copies: `~/.abacusai/bin`, npm `@abacus-ai/cli`, `~/.abacusai/versions/`, the desktop app's bundled CLI | JSON |
+| Meta Muse Code | `$XDG_CONFIG_HOME/muse` or `~/.config/muse/` (`settings.json` — permission profiles, `mcpServers`, `hooks`, `endpoint_transport`; `trust.json`; `auth.json`, `$MUSE_AUTH_PATH`), `$XDG_DATA_HOME/muse` or `~/.local/share/muse/` (sessions, index, prompt history — permissions only), project `.mcp.json`, `.muse/hooks.json`, `.agents/skills/`, `AGENTS.md`; version from the launcher's `.muse-version` (the launcher is never run) | JSON |
 
 ### Agentic desktop apps
 
@@ -1087,6 +1088,7 @@ Agents can be moved off their default locations; VASO follows these variables wh
 | Atomic Agent | `ATOMIC_AGENT_STATE_DIR` (instead of `~/.atomic-agent`) |
 | NVIDIA OpenShell | `XDG_CONFIG_HOME`, `XDG_STATE_HOME`, `OPENSHELL_SANDBOX_POLICY` |
 | Grok Bot | `SAND_DATA_ROOT`, `SAND_USER_DATA_DIR` |
+| Meta Muse Code | `XDG_CONFIG_HOME`, `XDG_DATA_HOME`, `MUSE_AUTH_PATH` |
 
 `vaso mcp scan` follows `CLAUDE_CONFIG_DIR`, `CODEX_HOME`, `COPILOT_HOME` and `GEMINI_CLI_HOME` too. On remote scans the probe reports the variables as set on the host for the SSH session, with credential values redacted.
 

@@ -52,6 +52,7 @@ src/
     windsurf.ts             Windsurf / Devin Desktop adapter
     devin.ts                Devin CLI adapter
     abacus.ts               Abacus.AI CLI / AbacusAI Desktop adapter
+    muse-code.ts            Meta Muse Code adapter
     meta-muse.ts            Meta Muse adapter
     comet.ts                Perplexity Comet adapter
     grok-bot.ts             Grok Bot desktop agent adapter
@@ -87,6 +88,7 @@ src/
     windsurf-app/           8 Windsurf / Devin Desktop-specific (WS-*)
     devin/                  10 Devin CLI-specific (DEV-*)
     abacus/                 15 Abacus.AI CLI/Desktop-specific (ABA-*)
+    muse-code/              12 Meta Muse Code-specific (MSC-*)
     meta-muse/              3 Meta Muse-specific (MM-*)
     comet/                  2 Perplexity Comet-specific (PC-*)
     grok-bot/               13 Grok Bot-specific (GB-*)
@@ -378,6 +380,7 @@ Current prefix landscape (one prefix per directory under `src/checks/`):
 | `windsurf-app/` | WS | Windsurf / Devin Desktop-specific |
 | `devin/` | DEV | Devin CLI-specific |
 | `abacus/` | ABA | Abacus.AI CLI / AbacusAI Desktop-specific |
+| `muse-code/` | MSC | Meta Muse Code-specific |
 | `meta-muse/` | MM | Meta Muse-specific |
 | `comet/` | PC | Perplexity Comet-specific |
 | `grok-bot/` | GB | Grok Bot-specific |
