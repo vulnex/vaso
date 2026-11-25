@@ -56,11 +56,16 @@ describe('reads under /etc: only secret and account files are sensitive', () => 
 });
 
 describe('Python os.exec* / os.spawn* never use a shell', () => {
-  it('re-executing the script under another interpreter is info; os.system stays critical', async () => {
+  it('os.exec* is direct: a fixed program is info, a runtime-found interpreter a warning; os.system stays critical', async () => {
+    const fixed = await run(skl003, {
+      'scripts/check.py': 'import os, sys\ndef again(argv):\n    os.execv(sys.executable, [sys.executable, os.path.abspath(__file__)] + argv)\n',
+    });
+    expect(live(fixed)).toEqual([]);
     const reexec = await run(skl003, {
       'scripts/check.py': 'import os, sys\ndef again(py, argv):\n    os.execv(py, [py, os.path.abspath(__file__)] + argv)\n',
     });
-    expect(live(reexec)).toEqual([]);
+    expect(live(reexec).length).toBe(1);
+    expect(reexec.severity).toBe('warning');
     const system = await run(skl003, { 'scripts/x.py': 'import os\ndef go(cmd):\n    os.system(cmd)\n' });
     expect(system.severity).toBe('critical');
     expect(live(system).length).toBe(1);
@@ -85,28 +90,81 @@ describe('JS: a local helper\'s program parameter is what its callers pass', () 
     expect(live(r)).toEqual([]);
   });
 
-  it('one caller passing a runtime value: still critical', async () => {
+  it('one caller passing a runtime value: a program chosen at runtime, no shell — warning', async () => {
     const r = await run(skl003, { 'scripts/r.mjs': helper("export function go(bin) { runSync('a', 'ffmpeg', []); runSync('b', bin, []); }") });
+    expect(live(r).length).toBe(1);
+    expect(r.severity).toBe('warning');
+  });
+
+  it('a caller turning the shell on through the options it passes: critical', async () => {
+    const r = await run(skl003, { 'scripts/r.mjs': helper("export function go(bin) { runSync('a', bin, [], { shell: true }); }") });
     expect(live(r).length).toBe(1);
     expect(r.severity).toBe('critical');
   });
 
-  it('a caller turning the shell on through the options it passes: critical', async () => {
-    const r = await run(skl003, { 'scripts/r.mjs': helper("export function go() { runSync('a', 'ffmpeg', [], { shell: true }); }") });
-    expect(live(r).length).toBe(1);
-  });
-
-  it('an exported helper (callers unknown): critical', async () => {
+  it('an exported helper (callers unknown): program chosen at runtime — warning', async () => {
     const r = await run(skl003, {
       'scripts/r.mjs': "import { spawnSync } from 'node:child_process';\nexport function runSync(cmd, args) { return spawnSync(cmd, args); }\nrunSync('git', ['status']);\n",
     });
     expect(live(r).length).toBe(1);
+    expect(r.severity).toBe('warning');
   });
 
-  it('a helper passed around as a value (not only called): critical', async () => {
+  it('a helper passed around as a value (not only called): program chosen at runtime — warning', async () => {
     const r = await run(skl003, {
       'scripts/r.mjs': "import { spawnSync } from 'node:child_process';\nconst run = (cmd) => spawnSync(cmd, []);\nrun('git');\nexport const hooks = [run];\n",
     });
     expect(live(r).length).toBe(1);
+    expect(r.severity).toBe('warning');
   });
 });
+
+describe('middle tier: a program chosen at runtime, started without a shell, is a warning', () => {
+  it('JS: spawnSync(process.argv[2]) is a warning; the same through a shell stays critical', async () => {
+    const w = await run(skl003, { 'scripts/a.mjs': "import { spawnSync } from 'node:child_process';\nspawnSync(process.argv[2], ['--version']);\n" });
+    expect(live(w).length).toBe(1);
+    expect(w.severity).toBe('warning');
+    const c = await run(skl003, { 'scripts/a.mjs': "import { spawnSync } from 'node:child_process';\nspawnSync(process.argv[2], ['--version'], { shell: true });\n" });
+    expect(c.severity).toBe('critical');
+    const e = await run(skl003, { 'scripts/a.mjs': "import { execSync } from 'node:child_process';\nexecSync(process.argv[2]);\n" });
+    expect(e.severity).toBe('critical');
+  });
+
+  it('Python: a runtime program path is a warning; a module constant and sys.executable stay info', async () => {
+    const w = await run(skl003, { 'scripts/a.py': 'import subprocess, sys\ndef go(path):\n    subprocess.run([path, "--version"])\n' });
+    expect(live(w).length).toBe(1);
+    expect(w.severity).toBe('warning');
+    const k = await run(skl003, { 'scripts/a.py': 'import subprocess, sys\nFFMPEG = "ffmpeg"\ndef go(src):\n    subprocess.run([FFMPEG, "-i", src])\n    subprocess.run([sys.executable, "-m", "pip", "--version"])\n' });
+    expect(live(k)).toEqual([]);
+    const sh = await run(skl003, { 'scripts/a.py': 'import subprocess\ndef go(cmd):\n    subprocess.run(cmd, shell=True)\n' });
+    expect(sh.severity).toBe('critical');
+  });
+
+  it('a downloaded or decoded program stays critical whatever runs it', async () => {
+    const r = await run(skl003, { 'scripts/a.mjs': "import { spawnSync } from 'node:child_process';\nspawnSync(Buffer.from('L2Jpbi9zaA==', 'base64').toString(), []);\n" });
+    expect(r.severity).toBe('critical');
+  });
+});
+
+describe('Python: a helper\'s argv parameter is judged by what its callers pass', () => {
+  const helper = 'import subprocess, sys\nFF = ["ffmpeg", "-hide_banner"]\ndef run(cmd, binary=False):\n    return subprocess.run(cmd, capture_output=True)\n';
+
+  it('callers passing literal lists, FF + [...] or sys.executable: info', async () => {
+    const r = await run(skl003, { 'scripts/m.py': helper + 'def probe(p):\n    run(["ffprobe", "-v", "error", p])\n    run(FF + ["-i", p])\n    run([sys.executable, "-m", "pip"])\n' });
+    expect(r.evidence?.length).toBe(1);
+    expect(live(r)).toEqual([]);
+  });
+
+  it('one caller passing a program found at runtime: warning', async () => {
+    const r = await run(skl003, { 'scripts/m.py': helper + 'def probe(ff, p):\n    run(["ffprobe", p])\n    run([ff, "-version"])\n' });
+    expect(live(r).length).toBe(1);
+    expect(r.severity).toBe('warning');
+  });
+
+  it('a helper nothing in the file calls, or one passed around as a value: warning', async () => {
+    expect((await run(skl003, { 'scripts/m.py': helper })).severity).toBe('warning');
+    const r = await run(skl003, { 'scripts/m.py': helper + 'HANDLERS = [run]\nrun(["git", "status"])\n' });
+    expect(r.severity).toBe('warning');
+  });
+});
+

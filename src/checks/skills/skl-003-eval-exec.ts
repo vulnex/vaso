@@ -87,10 +87,14 @@ export const skl003 = defineCheck({
           const constant = flow.command !== undefined && !flow.dynamic && !flow.decoded && !helper;
           // A program started directly (no shell, no interpreter given code)
           // runs with runtime arguments; it isn't code built at runtime
-          const direct = !constant && !helper && flow.noShell === true && !flow.decoded;
+          // …and one whose program is chosen at runtime (a CLI argument, a
+          // discovered path) is worth a look, not critical: no shell syntax
+          // can be injected, but whoever picks the program decides what runs
+          const runtime = !constant && !helper && !flow.decoded && flow.runtimeProgram === true;
+          const direct = !constant && !helper && !runtime && flow.noShell === true && !flow.decoded;
           // An interpreter given literal code (`python -c "import sys; …"`)
           // runs fixed code, whichever interpreter path it is
-          const fixedCode = !constant && !direct && !helper && flow.fixedCode === true && !flow.decoded;
+          const fixedCode = !constant && !direct && !runtime && !helper && flow.fixedCode === true && !flow.decoded;
           evidence.push({
             file,
             line: flow.line,
@@ -98,11 +102,12 @@ export const skl003 = defineCheck({
             detail: constant
               ? `${flow.description} — constant command "${flow.command}"`
               : direct ? `${flow.description} — runs a program directly (no shell)`
+                : runtime ? `${flow.description} — runs a program chosen at runtime, without a shell: review where the program path comes from`
                 : fixedCode ? `${flow.description} — runs fixed code through -c`
                   : helper ? `${flow.description} — ${helper}` : flow.description,
             ...(constant || direct || fixedCode ? { mitigated: true } : {}),
           });
-          levels.push('critical');
+          levels.push(runtime ? 'warning' : 'critical');
         }
       } catch {}
     }

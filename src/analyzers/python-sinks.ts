@@ -2339,6 +2339,92 @@ function opensForWrite(text: string): boolean {
 /** `"<skill>/x.sh"` as ownPathArgs writes it. */
 const OWN_LITERAL = /"<skill>\/([\w./-]{1,200})"/g;
 
+/**
+ * Whether the program an argv expression starts is fixed: a literal or string
+ * constant, `sys.executable`, the head of a list literal, of `A + [...]`, or
+ * of a module-level list bound once (`FF = ["ffmpeg", "-y"]`). When the argv
+ * is a parameter of the function the call is in (`def run(cmd):
+ * subprocess.run(cmd)`), every call of that function in the file must pass
+ * a fixed one — a function nothing here calls is not resolved.
+ */
+function fixedProgramResolver(
+  stmts: ReadonlyArray<{ text: string }>,
+  fns: readonly PyFunction[],
+  constants: Set<string>,
+): (argv: string, fn: PyFunction | undefined) => boolean {
+  // Module-level names and every expression bound to them — built on first
+  // use (most files never ask), appended in place (one name bound 40 000
+  // times stays linear)
+  let bindings: Map<string, string[]> | undefined;
+  const moduleBindings = (): Map<string, string[]> => {
+    if (bindings) return bindings;
+    bindings = new Map();
+    const inFn = new Uint8Array(stmts.length);
+    for (const f of fns) inFn.fill(1, f.start, Math.min(f.end, stmts.length));
+    stmts.forEach((st, i) => {
+      if (inFn[i]) return;
+      const m = /^([A-Za-z_]\w*)\s*=\s*(.+)$/s.exec(st.text.trim());
+      if (!m) return;
+      const list = bindings!.get(m[1]);
+      if (list) list.push(m[2]);
+      else bindings!.set(m[1], [m[2]]);
+    });
+    return bindings;
+  };
+  const headFixed = (expr: string, depth: number): boolean => {
+    if (depth > 6) return false;
+    const e = expr.trim().replace(/^\((.*)\)$/s, '$1').trim();
+    if (!e) return false;
+    if (e === 'sys.executable' || isFixedCode(e, constants)) return true;
+    if (e.startsWith('[')) {
+      const first = topLevelParts(e.slice(1, e.lastIndexOf(']')))[0];
+      return first !== undefined && headFixed(first, depth + 1);
+    }
+    // `A + [...]`: what A starts with
+    const plus = topLevelParts(e.replace(/\+/g, ',')).length > 1 ? e.slice(0, e.search(/\+/)) : undefined;
+    if (plus !== undefined && /^[\w.\s\[\]"',()-]+$/.test(plus)) return headFixed(plus, depth + 1);
+    if (/^[A-Za-z_]\w*$/.test(e)) {
+      const values = moduleBindings().get(e);
+      return values?.length === 1 && headFixed(values[0], depth + 1);
+    }
+    return false;
+  };
+  const callsMemo = new Map<string, string[][] | undefined>();
+  const callsOf = (name: string): string[][] | undefined => {
+    if (callsMemo.has(name)) return callsMemo.get(name);
+    const calls: string[][] = [];
+    const re = new RegExp(`(?<![\\w.])(?:self\\.|cls\\.)?${name}\\s*\\(`, 'g');
+    let ok = true;
+    for (const st of stmts) {
+      if (/^\s*(?:async\s+)?def\s/.test(st.text)) continue;
+      const code = blankStrings(st.text);
+      for (const m of code.matchAll(re)) {
+        const open = (m.index ?? 0) + m[0].length - 1;
+        calls.push([callArgs(st.text, open)]);
+      }
+      // Passed around as a value (`handlers = [run]`): callers unknown
+      if (new RegExp(`(?<![\\w.])${name}(?!\\s*\\(|\\w)`).test(code)) ok = false;
+    }
+    const result = ok && calls.length > 0 ? calls : undefined;
+    callsMemo.set(name, result);
+    return result;
+  };
+  return (argv, fn) => {
+    const e = argv.trim();
+    if (headFixed(e, 0)) return true;
+    if (!fn || !/^[A-Za-z_]\w*$/.test(e)) return false;
+    const index = fn.positional.indexOf(e);
+    if (index < 0) return false;
+    const calls = callsOf(fn.name);
+    if (!calls) return false;
+    return calls.every(([args]) => {
+      const { positional, keywords } = splitArgs(args);
+      const passed = keywords.get(e) ?? positional[index];
+      return passed !== undefined && headFixed(passed, 0);
+    });
+  };
+}
+
 export function analyzePythonDataFlow(code: string): DataFlowResult[] {
   const out: DataFlowResult[] = [];
   const rewrite = aliasRewriter(code);
@@ -2346,6 +2432,7 @@ export function analyzePythonDataFlow(code: string): DataFlowResult[] {
   const stmts = statements(lines);
   const fns = functionsOf(stmts);
   const constants = stringConstantNames(stmts, fns);
+  const programFixed = fixedProgramResolver(stmts, fns, constants);
   const urlConstants = scopedConstants(stmts, fns);
   const own = ownPathArgs(stmts);
   const ownPaths = own.rewrite;
@@ -2430,12 +2517,20 @@ export function analyzePythonDataFlow(code: string): DataFlowResult[] {
       const list = positional[0]?.trim() ?? '';
       const argv = list.startsWith('[') ? topLevelParts(list.slice(1, list.lastIndexOf(']')))
         : sink === 'asyncio.create_subprocess_exec' ? positional : [];
+      // Run directly but with a program chosen at runtime (a parameter, a
+      // CLI argument, a discovered path): not a module constant, a literal or
+      // this same interpreter (`sys.executable`)
+      const head = (positional[0] ?? '').trim().startsWith('[')
+        ? (topLevelParts(positional[0].trim().slice(1, positional[0].trim().lastIndexOf(']')))[0] ?? '').trim()
+        : (positional[0] ?? '').trim();
+      const runtimeProgram = noShell && program === undefined && head !== ''
+        && !programFixed(positional[0] ?? '', enclosing.at(-1));
       const dashCode = DIRECT_EXEC.test(sink) && !shell ? codeAfterDashC(argv) : undefined;
       const fixedCode = dashCode !== undefined && isFixedCode(dashCode, constants);
       out.push({
         type: 'eval-exec', line: stmt.line, ...snippet, description: `${sink}() call detected`,
         ...(command ? { command } : {}), ...(dynamic ? { dynamic } : {}), ...(DECODES.test(args) ? { decoded: true } : {}),
-        ...(noShell ? { noShell } : {}), ...(fixedCode ? { fixedCode } : {}),
+        ...(noShell ? { noShell } : {}), ...(runtimeProgram ? { runtimeProgram } : {}), ...(fixedCode ? { fixedCode } : {}),
         ...(ownHelpers.length > 0 ? { ownHelpers } : {}),
       });
       if (sink !== 'eval' && sink !== 'exec') {

@@ -72,6 +72,8 @@ export interface DataFlowResult {
    * runtime.
    */
   noShell?: boolean;
+  /** Started without a shell, but the program is chosen at runtime (not a fixed value). */
+  runtimeProgram?: boolean;
   /**
    * eval-exec: an interpreter or shell started directly with literal code
    * (`python -c "import sys; …"`, or a constant holding the script) — the
@@ -787,6 +789,7 @@ function analyzeUncached(code: string): DataFlowResult[] {
               : `${name}() call detected`,
             ...commandText(node.arguments, path.scope),
             ...(runsDirectly(sink?.fn ?? name, path, constStrings) ? { noShell: true } : {}),
+            ...(runsWithoutShell(sink?.fn ?? name, path, constStrings) ? { runtimeProgram: true } : {}),
           });
           if (sink?.kind === 'process' || !sink) {
             // What the process gets: file contents or the whole environment in
@@ -967,6 +970,7 @@ function analyzeUncached(code: string): DataFlowResult[] {
                 description: `${obj.name}.${propName}() — command execution`,
                 ...commandText(node.arguments, path.scope),
                 ...(runsDirectly(propName, path, constStrings) ? { noShell: true } : {}),
+                ...(runsWithoutShell(propName, path, constStrings) ? { runtimeProgram: true } : {}),
               });
             }
           }
@@ -1357,6 +1361,18 @@ function runsDirectly(name: string, call: NodePath, constStrings: ReadonlyMap<st
   if (!program) return false;
   const values = programValues(program, constStrings);
   if (!values || values.length === 0 || values.some((v) => !v.trim() || SHELL_OR_INTERPRETER.test(v.trim()))) return false;
+  return !args.some(a => mayEnableShell(a, 0));
+}
+
+/**
+ * A direct-exec call (no shell) whose program is chosen at runtime: not a
+ * fixed value runsDirectly could resolve, and no option turns `shell` on.
+ */
+function runsWithoutShell(name: string, call: NodePath, constStrings: ReadonlyMap<string, string>): boolean {
+  if (!DIRECT_EXEC_FUNCTIONS.has(name.slice(name.lastIndexOf('.') + 1))) return false;
+  const args = call.get('arguments') as NodePath[];
+  const program = args[0];
+  if (!program || program.isSpreadElement() || programValues(program, constStrings) !== undefined) return false;
   return !args.some(a => mayEnableShell(a, 0));
 }
 
