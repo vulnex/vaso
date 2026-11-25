@@ -100,6 +100,7 @@ describe('JS: a local helper\'s program parameter is what its callers pass', () 
     const r = await run(skl003, { 'scripts/r.mjs': helper("export function go(bin) { runSync('a', bin, [], { shell: true }); }") });
     expect(live(r).length).toBe(1);
     expect(r.severity).toBe('critical');
+    expect(live(r)[0].detail).toMatch(/options can turn the shell on/);
   });
 
   it('an exported helper (callers unknown): program chosen at runtime — warning', async () => {

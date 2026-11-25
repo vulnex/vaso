@@ -10,7 +10,7 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 
 - **Reading `/etc/os-release` is no longer credential harvesting.** Python skill and MCP code that opened any file under `/etc` was reported by SKL-006 (critical) and SKL-010, because all of `/etc` counts as a sensitive *write* target. Reads now count only the secret and account files there (`passwd`, `shadow`, `gshadow`, `sudoers`, SSH host keys, `ssl/private`, `krb5.keytab`, `hosts`, VPN and NetworkManager secrets), as the JavaScript analysis already did.
 - **`os.exec*`, `os.spawn*` and `os.posix_spawn*` run a program without a shell.** SKL-003 now treats them like `subprocess.run([...])`. `os.system`, a shell given `-c` or a runtime-built command stays critical.
-- **A command passed through a local helper is judged by its callers.** In JavaScript (`function runSync(cmd, args, opts) { spawnSync(cmd, args, { ...opts }) }`) and Python (`def run(cmd): subprocess.run(cmd)`), a helper whose every caller passes a fixed program (`'ffmpeg'`, `["ffprobe", …]`, `FF + [...]` with a constant `FF`, `sys.executable`) is a fixed command (info). A caller that turns `shell` on in the options it passes keeps it critical.
+- **A command passed through a local helper is judged by its callers.** In JavaScript (`function runSync(cmd, args, opts) { spawnSync(cmd, args, { ...opts }) }`) and Python (`def run(cmd): subprocess.run(cmd)`), a helper whose every caller passes a fixed program (`'ffmpeg'`, `["ffprobe", …]`, `FF + [...]` with a constant `FF`, `sys.executable`) is a fixed command (info). A caller that turns `shell` on in the options it passes keeps it critical, and the finding now says so ("its options can turn the shell on … passed in by a caller").
 
 ### Changed
 

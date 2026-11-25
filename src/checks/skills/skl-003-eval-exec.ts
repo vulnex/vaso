@@ -104,7 +104,9 @@ export const skl003 = defineCheck({
               : direct ? `${flow.description} — runs a program directly (no shell)`
                 : runtime ? `${flow.description} — runs a program chosen at runtime, without a shell: review where the program path comes from`
                 : fixedCode ? `${flow.description} — runs fixed code through -c`
-                  : helper ? `${flow.description} — ${helper}` : flow.description,
+                  : helper ? `${flow.description} — ${helper}`
+                    : flow.shellOption ? `${flow.description} — its options can turn the shell on (set here or passed in by a caller), so the command line may be parsed by a shell`
+                      : flow.description,
             ...(constant || direct || fixedCode ? { mitigated: true } : {}),
           });
           levels.push(runtime ? 'warning' : 'critical');

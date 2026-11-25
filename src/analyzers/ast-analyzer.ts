@@ -74,6 +74,8 @@ export interface DataFlowResult {
   noShell?: boolean;
   /** Started without a shell, but the program is chosen at runtime (not a fixed value). */
   runtimeProgram?: boolean;
+  /** A direct-exec call whose options can turn the shell on (here, or passed in by a helper's caller). */
+  shellOption?: boolean;
   /**
    * eval-exec: an interpreter or shell started directly with literal code
    * (`python -c "import sys; …"`, or a constant holding the script) — the
@@ -790,6 +792,7 @@ function analyzeUncached(code: string): DataFlowResult[] {
             ...commandText(node.arguments, path.scope),
             ...(runsDirectly(sink?.fn ?? name, path, constStrings) ? { noShell: true } : {}),
             ...(runsWithoutShell(sink?.fn ?? name, path, constStrings) ? { runtimeProgram: true } : {}),
+            ...(shellOptionOn(sink?.fn ?? name, path) ? { shellOption: true } : {}),
           });
           if (sink?.kind === 'process' || !sink) {
             // What the process gets: file contents or the whole environment in
@@ -971,6 +974,7 @@ function analyzeUncached(code: string): DataFlowResult[] {
                 ...commandText(node.arguments, path.scope),
                 ...(runsDirectly(propName, path, constStrings) ? { noShell: true } : {}),
                 ...(runsWithoutShell(propName, path, constStrings) ? { runtimeProgram: true } : {}),
+                ...(shellOptionOn(propName, path) ? { shellOption: true } : {}),
               });
             }
           }
@@ -1374,6 +1378,12 @@ function runsWithoutShell(name: string, call: NodePath, constStrings: ReadonlyMa
   const program = args[0];
   if (!program || program.isSpreadElement() || programValues(program, constStrings) !== undefined) return false;
   return !args.some(a => mayEnableShell(a, 0));
+}
+
+/** A direct-exec call (spawn, execFile, …) whose options can turn the shell on. */
+function shellOptionOn(name: string, call: NodePath): boolean {
+  if (!DIRECT_EXEC_FUNCTIONS.has(name.slice(name.lastIndexOf('.') + 1))) return false;
+  return (call.get('arguments') as NodePath[]).slice(1).some(a => mayEnableShell(a, 0));
 }
 
 /**
