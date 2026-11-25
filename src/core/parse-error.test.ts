@@ -108,7 +108,8 @@ describe('surfaced load errors carry no config content', () => {
     for (const e of loadErrors) {
       expect(e.message).not.toContain(KEY);
       expect(e.message).not.toContain(WEAK);
-      expect(e.message).toMatch(/line \d+/);
+      // Node 20's JSON.parse gives `at position N`; Node 22+ adds `(line L column C)`
+      expect(e.message).toMatch(/line \d+|position \d+/);
     }
   });
 

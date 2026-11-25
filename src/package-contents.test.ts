@@ -44,7 +44,8 @@ describe('npm package contents', () => {
     const files = packedFiles();
     expect(files.filter(f => !ALLOWED.some(rx => rx.test(f)))).toEqual([]);
     expect(files).toEqual(expect.arrayContaining(['bin/vaso', 'dist/cli.js', 'probe/checksums.json', 'scripts/prepare.mjs']));
-  }, 60_000);
+    // npm pack builds first: ~70 s on a GitHub-hosted runner
+  }, 240_000);
 
   it('lists no bare directories in package.json files except dist', () => {
     const pkg = JSON.parse(readFileSync(join(root, 'package.json'), 'utf-8')) as { files: string[] };

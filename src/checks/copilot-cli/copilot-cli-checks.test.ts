@@ -137,7 +137,14 @@ describe.skipIf(process.platform === 'win32')('GHC-001 fix', () => {
       expect((await check.run(ctx)).passed).toBe(false);
       const res = await check.fix!(ctx);
       expect(res.applied).toBe(true);
-      for (const rel of Object.keys(files)) expect((await stat(join(dir, rel))).mode & 0o077).toBe(0);
+      // Judged as VASO judges access: on Linux, group bits for the owner's
+      // private group grant nobody else anything and are left alone
+      const { accessibleByOthers, queryPermissions } = await import('../../core/permissions.js');
+      for (const rel of Object.keys(files)) {
+        const q = await queryPermissions(ctx.fs, join(dir, rel));
+        expect(q !== 'unsupported' && accessibleByOthers(q), rel).toBe(false);
+        expect((await stat(join(dir, rel))).mode & 0o007, rel).toBe(0);
+      }
       // past the scan's per-store cap too
       expect((await stat(join(dir, 'session-state', 's204.json'))).mode & 0o077).toBe(0);
       expect((await stat(join(dir, 'mcp-secrets'))).mode & 0o777).toBe(0o700);

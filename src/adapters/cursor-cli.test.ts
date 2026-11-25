@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { join } from 'node:path';
 import { cursorCliAdapter } from './cursor-cli.js';
 
@@ -39,6 +39,11 @@ function mockConfig(filePath: string, data: Record<string, unknown> = {}) {
   return { raw: '', format: 'json' as const, filePath, data };
 }
 
+
+afterEach(() => {
+  vi.unstubAllEnvs();
+});
+
 describe('Cursor CLI adapter', () => {
   const home = process.env.HOME || '/home/testuser';
   const cursorDir = join(home, '.cursor');
@@ -55,6 +60,8 @@ describe('Cursor CLI adapter', () => {
   });
 
   it.skipIf(process.platform !== 'linux' && process.platform !== 'darwin')('detects an IDE-only install that has no ~/.cursor', async () => {
+    // The adapter honours $XDG_CONFIG_HOME on Linux; CI runners set it
+    vi.stubEnv('XDG_CONFIG_HOME', '');
     const userData = process.platform === 'darwin'
       ? join(home, 'Library', 'Application Support', 'Cursor', 'User', 'settings.json')
       : join(home, '.config', 'Cursor', 'User', 'settings.json');

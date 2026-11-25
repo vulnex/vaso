@@ -2127,18 +2127,32 @@ describe('MCP-022: Server Command in World-Writable Path', () => {
   });
 
   it('passes when the command is in a normal install path', async () => {
+    // A command the user owns in a private directory — not the host's real
+    // /usr/local/bin, which some CI runners leave writable by others
+    const { mkdtemp, mkdir, writeFile, chmod, rm } = await import('node:fs/promises');
+    const { tmpdir } = await import('node:os');
+    const root = await mkdtemp(join(tmpdir(), 'vaso-mcp022-'));
+    const bin = join(root, 'bin');
+    await mkdir(bin);
+    await chmod(bin, 0o755);
+    await writeFile(join(bin, 'my-mcp-server'), '#!/bin/sh\n');
+    await chmod(join(bin, 'my-mcp-server'), 0o755);
     const cfg: MCPConfig = {
       source: 'project',
       filePath: '/tmp/mcp.json',
       servers: [{
         name: 'safe',
-        command: '/usr/local/bin/my-mcp-server',
+        command: join(bin, 'my-mcp-server'),
         args: [],
         transport: 'stdio',
       }],
     };
-    const result = await mcp022.run(makeContext({ mcpConfigs: [cfg] }));
-    expect(result.passed).toBe(true);
+    try {
+      const result = await mcp022.run(makeContext({ mcpConfigs: [cfg] }));
+      expect(result.passed, JSON.stringify(result.evidence)).toBe(true);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
   });
 
   it('passes when interpreter args are flags only, no script path', async () => {
